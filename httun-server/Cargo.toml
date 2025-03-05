@@ -1,0 +1,22 @@
+[package]
+name = "httun-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+readme.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+httun-protocol = { workspace = true }
+httun-tun = { workspace = true }
+httun-unix-protocol = { workspace = true }
+libc = { workspace = true }
+sd-notify = { workspace = true }
+tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time" ] }
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"

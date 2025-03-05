@@ -1,0 +1,13 @@
+[Unit]
+Description=httun-server daemon socket
+PartOf=httun-server.service
+
+[Socket]
+ListenStream=/run/httun-server/httun-server.sock
+Accept=no
+SocketUser=root
+SocketGroup=www-data
+SocketMode=0660
+
+[Install]
+WantedBy=sockets.target

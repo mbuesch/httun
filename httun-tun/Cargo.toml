@@ -1,0 +1,15 @@
+[package]
+name = "httun-tun"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+readme.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+httun-protocol = { workspace = true }
+tokio = { workspace = true, features = [ "sync", "net", "time" ] }
+tokio-tun = { workspace = true }

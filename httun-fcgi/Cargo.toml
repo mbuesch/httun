@@ -1,0 +1,19 @@
+[package]
+name = "httun-fcgi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+readme.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+httun-unix-protocol = { workspace = true }
+libc = { workspace = true }
+tokio = { workspace = true, features = [ "rt", "signal", "sync", "net", "time" ] }
+tokio-fastcgi = { workspace = true }
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
