@@ -6,14 +6,6 @@ use httun_protocol::Key;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{Mutex, Notify};
 
-struct ChannelState {}
-
-impl ChannelState {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
 struct PingState {
     notify: Notify,
     buf: Mutex<Vec<u8>>,
@@ -31,7 +23,6 @@ impl PingState {
 pub struct Channel {
     name: String,
     key: Key,
-    state: Mutex<ChannelState>,
     ping: PingState,
 }
 
@@ -40,7 +31,6 @@ impl Channel {
         Self {
             name: name.to_string(),
             key: [0; 32], //TODO
-            state: Mutex::new(ChannelState::new()),
             ping: PingState::new(),
         }
     }

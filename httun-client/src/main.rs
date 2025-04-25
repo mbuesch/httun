@@ -155,6 +155,8 @@ async fn run_mode_socket(
         .await
         .context("Connect to localhost port")?;
 
+    let _ = target; //TODO
+
     // Spawn task: Local socket handler.
     task::spawn({
         async move {
