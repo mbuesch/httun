@@ -23,11 +23,25 @@ install_dirs()
 
     do_install \
         -o root -g root -m 0755 \
+        -d /opt/httun/etc/httun
+
+    do_install \
+        -o root -g root -m 0755 \
         -d /opt/httun/lib/fcgi-bin
 }
 
 install_httun_server()
 {
+    if [ -e /opt/httun/etc/httun/server.conf ]; then
+        do_chown root:root /opt/httun/etc/httun/server.conf
+        do_chmod 0640 /opt/httun/etc/httun/server.conf
+    else
+        do_install \
+            -o root -g root -m 0640 \
+            "$basedir/httun-server/server.conf" \
+            /opt/httun/etc/httun/server.conf
+    fi
+
     do_install \
         -o root -g root -m 0755 \
         "$target/httun-server" \
@@ -49,6 +63,16 @@ install_httun_server()
 
 install_httun_client()
 {
+    if [ -e /opt/httun/etc/httun/client.conf ]; then
+        do_chown root:root /opt/httun/etc/httun/client.conf
+        do_chmod 0644 /opt/httun/etc/httun/client.conf
+    else
+        do_install \
+            -o root -g root -m 0644 \
+            "$basedir/httun-client/client.conf" \
+            /opt/httun/etc/httun/client.conf
+    fi
+
     do_install \
         -o root -g root -m 0755 \
         "$target/httun-client" \

@@ -15,8 +15,9 @@ use crate::{
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::Parser;
+use httun_conf::Config;
 use httun_tun::TunHandler;
-use std::{sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 use tokio::{
     runtime,
     signal::unix::{SignalKind, signal},
@@ -33,6 +34,10 @@ struct Opts {
     #[arg(long)]
     enable_test: bool,
 
+    /// Path to the configuration file.
+    #[arg(long, short = 'c', default_value = "/opt/httun/etc/httun/server.conf")]
+    config: String,
+
     /// Show version information and exit.
     #[arg(long, short = 'v')]
     version: bool,
@@ -48,7 +53,10 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let mut sigint = signal(SignalKind::interrupt()).unwrap();
     let mut sighup = signal(SignalKind::hangup()).unwrap();
 
-    let channels = Channels::new(opts.enable_test).await;
+    let conf =
+        Arc::new(Config::new_parse_file(Path::new(&opts.config)).context("Parse configuration")?);
+
+    let channels = Channels::new(Arc::clone(&conf), opts.enable_test).await;
 
     // Create tun network interface.
     let tun = Arc::new(

@@ -1,5 +1,5 @@
 [package]
-name = "httun-protocol"
+name = "httun-conf"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,6 +13,7 @@ keywords.workspace = true
 publish = false
 
 [dependencies]
-aes-gcm = { workspace = true }
 anyhow = { workspace = true }
-getrandom = { workspace = true }
+httun-protocol = { workspace = true }
+serde = { workspace = true, features = [ "derive" ] }
+toml = { workspace = true }

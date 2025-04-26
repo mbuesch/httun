@@ -5,12 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
 readme.workspace = true
+categories.workspace = true
+keywords.workspace = true
 publish = false
 
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+httun-conf = { workspace = true }
 httun-protocol = { workspace = true }
 httun-tun = { workspace = true }
 rand = { workspace = true }

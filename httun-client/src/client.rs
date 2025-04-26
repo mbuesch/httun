@@ -3,7 +3,8 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::Message;
+use httun_conf::Config;
+use httun_protocol::{Key, Message};
 use rand::prelude::*;
 use reqwest::{Client, StatusCode};
 use std::{
@@ -51,6 +52,7 @@ async fn direction_r(
     chan: Arc<DirectionR>,
     loc: Arc<Sender<FromHttun>>,
     user_agent: &str,
+    key: &Key,
 ) -> ah::Result<()> {
     chan.serial.store(rand::rng().random(), Relaxed);
 
@@ -84,9 +86,7 @@ async fn direction_r(
                 println!("Received from HTTP-r: {data:?}");
             }
 
-            let key = [0; 32]; //TODO
-
-            let msg = Message::deserialize(data, &key).context("Message deserialize")?;
+            let msg = Message::deserialize(data, key).context("Message deserialize")?;
 
             loc.send(msg).await?;
         }
@@ -111,6 +111,7 @@ async fn direction_w(
     chan: Arc<DirectionW>,
     loc: Arc<Mutex<Receiver<ToHttun>>>,
     user_agent: &str,
+    key: &Key,
 ) -> ah::Result<()> {
     chan.serial.store(rand::rng().random(), Relaxed);
 
@@ -127,9 +128,7 @@ async fn direction_w(
             return Err(err!("ToHttun IPC closed"));
         };
 
-        let key = [0; 32]; //TODO
-
-        let data = msg.serialize(&key);
+        let data = msg.serialize(key);
 
         let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
 
@@ -160,21 +159,30 @@ pub struct HttunClient {
     r: Arc<DirectionR>,
     w: Arc<DirectionW>,
     user_agent: String,
+    key: Arc<Key>,
 }
 
 impl HttunClient {
     pub async fn connect(
         url: &str,
-        channel: &str,
+        mut channel: &str,
         test_mode: bool,
         user_agent: &str,
+        conf: &Config,
     ) -> ah::Result<Self> {
-        let channel = if test_mode { "__test__" } else { channel };
+        let key;
+        if test_mode {
+            key = [0; 32];
+            channel = "__test__";
+        } else {
+            key = conf.key(channel).context("Get key from configuration")?;
+        }
         let url = format!("{}/{}", url, channel);
         Ok(Self {
             r: Arc::new(DirectionR::new(&url)),
             w: Arc::new(DirectionW::new(&url)),
             user_agent: user_agent.to_string(),
+            key: Arc::new(key),
         })
     }
 
@@ -186,13 +194,15 @@ impl HttunClient {
         let r_task = task::spawn({
             let r = Arc::clone(&self.r);
             let user_agent = self.user_agent.clone();
-            async move { direction_r(r, from_httun, &user_agent).await }
+            let key = Arc::clone(&self.key);
+            async move { direction_r(r, from_httun, &user_agent, &key).await }
         });
 
         let w_task = task::spawn({
             let w = Arc::clone(&self.w);
             let user_agent = self.user_agent.clone();
-            async move { direction_w(w, to_httun, &user_agent).await }
+            let key = Arc::clone(&self.key);
+            async move { direction_w(w, to_httun, &user_agent, &key).await }
         });
 
         tokio::select! {

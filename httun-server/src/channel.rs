@@ -2,6 +2,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+use httun_conf::Config;
 use httun_protocol::Key;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{Mutex, Notify};
@@ -27,10 +28,10 @@ pub struct Channel {
 }
 
 impl Channel {
-    fn new(name: &str) -> Self {
+    fn new(name: &str, key: Key) -> Self {
         Self {
             name: name.to_string(),
-            key: [0; 32], //TODO
+            key,
             ping: PingState::new(),
         }
     }
@@ -67,19 +68,32 @@ impl Channel {
 
 pub struct Channels {
     channels: Mutex<HashMap<String, Arc<Channel>>>,
+    _conf: Arc<Config>,
 }
 
 impl Channels {
-    pub async fn new(enable_test: bool) -> Self {
-        //TODO: Load channels from config file.
-        let mut channels: HashMap<String, Arc<Channel>> =
-            [("a".to_string(), Arc::new(Channel::new("a")))].into();
+    pub async fn new(conf: Arc<Config>, enable_test: bool) -> Self {
+        let mut channels = HashMap::new();
+
+        for (chan, key) in conf.keys_iter() {
+            println!("Active channel: {chan}");
+            channels.insert(chan.to_string(), Arc::new(Channel::new(&chan, key)));
+        }
+        if channels.is_empty() {
+            eprintln!("WARNING: There are no [keys] configured in the configuration file!");
+        }
+
         if enable_test {
             println!("The __test__ channel is enabled.");
-            channels.insert("__test__".to_string(), Arc::new(Channel::new("__test__")));
+            channels.insert(
+                "__test__".to_string(),
+                Arc::new(Channel::new("__test__", [0; 32])),
+            );
         }
+
         Self {
             channels: Mutex::new(channels),
+            _conf: conf,
         }
     }
 

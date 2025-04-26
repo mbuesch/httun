@@ -10,9 +10,10 @@ mod local_listener;
 use crate::{client::HttunClient, local_listener::LocalListener};
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::{Parser, Subcommand};
-use httun_protocol::Message;
+use httun_conf::Config;
+use httun_protocol::{Key, Message, secure_random};
 use httun_tun::TunHandler;
-use std::{num::Wrapping, sync::Arc, time::Duration};
+use std::{num::Wrapping, path::Path, sync::Arc, time::Duration};
 use tokio::{
     runtime,
     signal::unix::{SignalKind, signal},
@@ -40,6 +41,10 @@ struct Opts {
     /// The User-Agent header to use for the HTTP connection.
     #[arg(long, default_value = "")]
     user_agent: String,
+
+    /// Path to the configuration file.
+    #[arg(long, short = 'c', default_value = "/opt/httun/etc/httun/client.conf")]
+    config: String,
 
     /// Show version information and exit.
     #[arg(long, short = 'v')]
@@ -78,10 +83,22 @@ enum Mode {
     ///
     /// The transferred test data is not encrypted.
     Test {},
+
+    /// Generate a new truly random key.
+    Genkey {},
 }
 
 async fn error_delay() {
     time::sleep(Duration::from_millis(500)).await;
+}
+
+/// Generate a new truly random and secure key.
+pub async fn run_genkey(channel: &str) -> ah::Result<()> {
+    let key: Key = secure_random();
+    let key: Vec<String> = key.iter().map(|b| format!("{b:02X}")).collect();
+    let key: String = key.join("");
+    println!("{channel} = \"{key}\"");
+    Ok(())
 }
 
 async fn run_mode_tun(
@@ -239,6 +256,10 @@ async fn run_mode_test(
 }
 
 async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
+    if matches!(opts.mode, Some(Mode::Genkey {})) {
+        return run_genkey(&opts.channel).await;
+    }
+
     if opts.mode.is_none() {
         return Err(err!(
             "'httun-client' requires a subcommand but one was not provided. \
@@ -251,6 +272,9 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             Please run 'httun --help' for more information."
         ));
     }
+
+    let conf =
+        Arc::new(Config::new_parse_file(Path::new(&opts.config)).context("Parse configuration")?);
 
     // Create async IPC channels.
     let (exit_tx, mut exit_rx) = mpsc::channel(1);
@@ -273,6 +297,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         &opts.channel,
         matches!(opts.mode, Some(Mode::Test {})),
         &opts.user_agent,
+        &conf,
     )
     .await
     .context("Connect to httun server (FCGI)")?;
@@ -310,9 +335,9 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             .await?;
         }
         Some(Mode::Test {}) => {
-            run_mode_test(Arc::clone(&to_httun_tx), Arc::clone(&from_httun_rx)).await?
+            run_mode_test(Arc::clone(&to_httun_tx), Arc::clone(&from_httun_rx)).await?;
         }
-        None => unreachable!(),
+        None | Some(Mode::Genkey {}) => unreachable!(),
     }
 
     // Task: Main loop.
