@@ -52,7 +52,7 @@ impl ProtocolHandler {
                     self.tun.recv().await.context("TUN receive")?
                 };
 
-                let msg = Message::new(payload);
+                let msg = Message::new(payload).context("Make httun packet")?;
                 if DEBUG {
                     println!("TX msg: {msg}");
                 }

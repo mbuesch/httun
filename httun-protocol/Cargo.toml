@@ -11,4 +11,3 @@ publish = false
 [dependencies]
 aes-gcm = { workspace = true }
 anyhow = { workspace = true }
-bincode = { workspace = true, features = [ "serde" ] }

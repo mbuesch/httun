@@ -105,7 +105,14 @@ async fn run_mode_tun(
 
                 match tun.recv().await {
                     Ok(pkg) => {
-                        let msg = Message::new(pkg);
+                        let msg = match Message::new(pkg) {
+                            Ok(msg) => msg,
+                            Err(e) => {
+                                eprintln!("Make httun packet failed: {e}");
+                                error_delay().await;
+                                continue;
+                            }
+                        };
                         if let Err(e) = to_httun_tx.send(msg).await {
                             eprintln!("Send to httun failed: {e}");
                             error_delay().await;
@@ -207,7 +214,14 @@ async fn run_mode_test(
                 let testdata = format!("TEST {count:08X}");
                 println!("Sending test mode ping: '{testdata}'");
 
-                let msg = Message::new(testdata.into_bytes());
+                let msg = match Message::new(testdata.into_bytes()) {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        eprintln!("Make httun packet failed: {e}");
+                        error_delay().await;
+                        continue;
+                    }
+                };
                 to_httun_tx.send(msg).await.unwrap();
 
                 if let Some(msg) = from_httun_rx.lock().await.recv().await {

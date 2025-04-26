@@ -4,23 +4,25 @@
 
 #![forbid(unsafe_code)]
 
-use anyhow as ah;
-use bincode::serde::{decode_from_slice as decode, encode_into_std_write as encode};
+use aes_gcm::{
+    Aes256Gcm,
+    aead::{AeadCore as _, AeadInPlace as _, AeadMut as _, KeyInit as _, OsRng},
+};
+use anyhow::{self as ah, format_err as err};
 use std::fmt::{Display, Formatter};
 
 pub type Key = [u8; 32];
-//TODO
-//type Nonce = [u8; 12];
+type Nonce = [u8; 12];
+const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
 
-const MAX_LEN: usize = 1024 * (64 + 1);
+const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
 
-#[inline]
-fn cfg() -> impl bincode::config::Config {
-    bincode::config::standard()
-        .with_limit::<MAX_LEN>()
-        .with_little_endian()
-        .with_variable_int_encoding()
-}
+const OFFS_FLAGS: usize = 0;
+const OFFS_LEN: usize = 2;
+const OFFS_PAYLOAD: usize = 4;
+
+const AUTHTAG_LEN: usize = 16;
+pub const OVERHEAD_LEN: usize = 2 + 2 + NONCE_LEN + AUTHTAG_LEN;
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -28,8 +30,11 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn new(payload: Vec<u8>) -> Self {
-        Self { payload }
+    pub fn new(payload: Vec<u8>) -> ah::Result<Self> {
+        if payload.len() > MAX_PAYLOAD_LEN {
+            return Err(err!("Payload size is too big"));
+        }
+        Ok(Self { payload })
     }
 
     pub fn payload(&self) -> &[u8] {
@@ -40,22 +45,56 @@ impl Message {
         self.payload
     }
 
-    pub fn serialize(&self, _key: &Key) -> Vec<u8> {
-        let mut buf: Vec<u8> = Vec::with_capacity(MAX_LEN);
+    pub fn serialize(&self, key: &Key) -> Vec<u8> {
+        let flags: u16 = 0;
+        let len: u16 = self.payload.len().try_into().expect("Payload too big");
 
-        encode(&self.payload, &mut buf, cfg()).expect("payload serialize failed");
+        let mut buf = Vec::with_capacity(MAX_PAYLOAD_LEN + OVERHEAD_LEN);
+        buf.extend(&flags.to_be_bytes());
+        buf.extend(&len.to_be_bytes());
+        buf.extend(&self.payload);
 
-        //TODO AEAD
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let cipher = Aes256Gcm::new(key.into());
+        cipher
+            .encrypt_in_place(&nonce, &[], &mut buf)
+            .expect("AEAD encryption failed");
 
+        buf.extend(&nonce);
+
+        assert_eq!(buf.len(), self.payload.len() + OVERHEAD_LEN);
         buf
     }
 
-    pub fn deserialize(buf: &[u8], _key: &Key) -> ah::Result<Self> {
-        //TODO AEAD
+    pub fn deserialize(buf: &[u8], key: &Key) -> ah::Result<Self> {
+        if buf.len() <= OVERHEAD_LEN {
+            return Err(err!("Message size is too small."));
+        }
+        if buf.len() > OVERHEAD_LEN + MAX_PAYLOAD_LEN {
+            return Err(err!("Message size is too big."));
+        }
 
-        let (payload, _) = decode(buf, cfg())?;
+        let ciphertext = &buf[0..buf.len() - NONCE_LEN];
+        let nonce = &buf[buf.len() - NONCE_LEN..buf.len()];
 
-        Ok(Self { payload })
+        let mut cipher = Aes256Gcm::new(key.into());
+        let Ok(plain) = cipher.decrypt(nonce.into(), ciphertext) else {
+            return Err(err!("AEAD decrypt failed."));
+        };
+        if plain.len() + AUTHTAG_LEN + NONCE_LEN != buf.len() {
+            return Err(err!("AEAD decrypt failed (invalid plaintext length)."));
+        }
+
+        let _flags = u16::from_be_bytes(plain[OFFS_FLAGS..OFFS_FLAGS + 2].try_into()?);
+        let len = u16::from_be_bytes(plain[OFFS_LEN..OFFS_LEN + 2].try_into()?);
+
+        let len: usize = len.into();
+        if len != buf.len() - OVERHEAD_LEN {
+            return Err(err!("Invalid payload length."));
+        }
+        let payload = plain[OFFS_PAYLOAD..OFFS_PAYLOAD + len].to_vec();
+
+        Ok(Message { payload })
     }
 }
 

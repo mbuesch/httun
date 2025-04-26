@@ -33,7 +33,7 @@ async fn local_rx(stream: Arc<TcpStream>, tun: Arc<Sender<ToHttun>>) -> ah::Resu
 
                 //TODO: We have to add TCP/IP headers.
 
-                let msg = Message::new(buf);
+                let msg = Message::new(buf).context("Make httun packet")?;
 
                 tun.send(msg).await?;
             }

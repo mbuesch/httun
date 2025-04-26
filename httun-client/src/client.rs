@@ -72,7 +72,6 @@ async fn direction_r(
 
         match resp_status {
             StatusCode::OK => (),
-            //TODO we should probably handle more.
             status => {
                 sleep(Duration::from_millis(100)).await;
                 return Err(err!("httun HTTP-r response: {status}"));
@@ -149,7 +148,6 @@ async fn direction_w(
 
         match resp_status {
             StatusCode::OK => (),
-            //TODO we should probably handle more.
             status => {
                 sleep(Duration::from_millis(100)).await;
                 return Err(err!("httun HTTP-w response: {status}"));
