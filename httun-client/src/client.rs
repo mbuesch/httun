@@ -66,17 +66,33 @@ async fn direction_r(
 
     loop {
         let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
+        let mut resp;
 
-        let req = client.get(&url).header("Cache-Control", "no-store");
-        let resp = req.send().await.context("httun HTTP-r send")?;
+        'http: loop {
+            let req = client.get(&url).header("Cache-Control", "no-store");
+            resp = req.send().await.context("httun HTTP-r send")?;
 
-        let resp_status = resp.status();
-
-        match resp_status {
-            StatusCode::OK => (),
-            status => {
-                sleep(Duration::from_millis(100)).await;
-                return Err(err!("httun HTTP-r response: {status}"));
+            match resp.status() {
+                StatusCode::OK => {
+                    break 'http;
+                }
+                StatusCode::REQUEST_TIMEOUT => {
+                    // Fast retry.
+                    continue 'http;
+                }
+                StatusCode::BAD_GATEWAY
+                | StatusCode::GATEWAY_TIMEOUT
+                | StatusCode::SERVICE_UNAVAILABLE
+                | StatusCode::TOO_MANY_REQUESTS => {
+                    // Slow retry.
+                    sleep(Duration::from_millis(100)).await;
+                    continue 'http;
+                }
+                status => {
+                    // Hard error.
+                    sleep(Duration::from_millis(100)).await;
+                    return Err(err!("httun HTTP-r response: {status}"));
+                }
             }
         }
 
@@ -136,20 +152,35 @@ async fn direction_w(
             println!("Send to HTTP-w: {data:?}");
         }
 
-        let req = client
-            .post(&url)
-            .header("Cache-Control", "no-store")
-            .header("Content-Type", "application/octet-stream")
-            .body(data);
-        let resp = req.send().await.context("httun HTTP-w send")?;
+        'http: loop {
+            let req = client
+                .post(&url)
+                .header("Cache-Control", "no-store")
+                .header("Content-Type", "application/octet-stream")
+                .body(data.clone());
+            let resp = req.send().await.context("httun HTTP-w send")?;
 
-        let resp_status = resp.status();
-
-        match resp_status {
-            StatusCode::OK => (),
-            status => {
-                sleep(Duration::from_millis(100)).await;
-                return Err(err!("httun HTTP-w response: {status}"));
+            match resp.status() {
+                StatusCode::OK => {
+                    break 'http;
+                }
+                StatusCode::REQUEST_TIMEOUT => {
+                    // Fast retry.
+                    continue 'http;
+                }
+                StatusCode::BAD_GATEWAY
+                | StatusCode::GATEWAY_TIMEOUT
+                | StatusCode::SERVICE_UNAVAILABLE
+                | StatusCode::TOO_MANY_REQUESTS => {
+                    // Slow retry.
+                    sleep(Duration::from_millis(100)).await;
+                    continue 'http;
+                }
+                status => {
+                    // Hard error.
+                    sleep(Duration::from_millis(100)).await;
+                    return Err(err!("httun HTTP-w response: {status}"));
+                }
             }
         }
     }
