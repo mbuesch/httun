@@ -157,6 +157,18 @@ impl UnixSock {
     /// Accept a connection on the Unix socket.
     pub async fn accept(&self) -> ah::Result<UnixConn> {
         let (stream, _addr) = self.listener.accept().await?;
+
+        // Get the credentials of the connected process.
+        let _cred = stream
+            .peer_cred()
+            .context("Get Unix socket peer credentials")?;
+
+        //TODO check PID
+
+        //TODO check UID
+
+        //TODO check GID
+
         UnixConn::new(stream).await
     }
 }

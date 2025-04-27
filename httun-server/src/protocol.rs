@@ -19,7 +19,6 @@ pub struct ProtocolHandler {
 
 impl ProtocolHandler {
     pub async fn new(uconn: UnixConn, chan: Arc<Channel>, tun: Arc<TunHandler>) -> Self {
-        chan.handle_new_connection().await;
         Self { uconn, chan, tun }
     }
 

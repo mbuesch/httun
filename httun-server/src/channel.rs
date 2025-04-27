@@ -54,15 +54,16 @@ impl Channel {
     }
 
     pub async fn get_pong(&self) -> Vec<u8> {
-        self.ping.notify.notified().await;
-        let mut payload: Vec<u8> = "Reply to: ".to_string().into();
-        payload.append(&mut *self.ping.buf.lock().await);
-        payload
-    }
+        loop {
+            self.ping.notify.notified().await;
 
-    pub async fn handle_new_connection(&self) {
-        self.ping.buf.lock().await.clear();
-        self.ping.notify.notify_waiters();
+            let mut ping_buf = self.ping.buf.lock().await;
+            if !ping_buf.is_empty() {
+                let mut payload: Vec<u8> = "Reply to: ".to_string().into();
+                payload.append(&mut *ping_buf);
+                return payload;
+            }
+        }
     }
 }
 
