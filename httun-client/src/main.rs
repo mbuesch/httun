@@ -216,6 +216,7 @@ async fn run_mode_socket(
 }
 
 async fn run_mode_test(
+    exit_tx: Arc<Sender<ah::Result<()>>>,
     to_httun_tx: Arc<Sender<Message>>,
     from_httun_rx: Arc<Mutex<Receiver<Message>>>,
 ) -> ah::Result<()> {
@@ -229,6 +230,7 @@ async fn run_mode_test(
                 interval.tick().await;
 
                 let testdata = format!("TEST {count:08X}");
+                let expected_reply = format!("Reply to: {testdata}");
                 println!("Sending test mode ping: '{testdata}'");
 
                 let msg = match Message::new(testdata.into_bytes()) {
@@ -244,8 +246,13 @@ async fn run_mode_test(
                 if let Some(msg) = from_httun_rx.lock().await.recv().await {
                     let replydata = String::from_utf8_lossy(msg.payload());
                     println!("Received test mode pong: '{replydata}'");
+                    if replydata != expected_reply {
+                        let _ = exit_tx.send(Err(err!("Test RX: Invalid reply."))).await;
+                        break;
+                    }
                 } else {
-                    println!("Test RX: None");
+                    let _ = exit_tx.send(Err(err!("Test RX: No message."))).await;
+                    break;
                 }
 
                 count += 1;
@@ -335,7 +342,12 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             .await?;
         }
         Some(Mode::Test {}) => {
-            run_mode_test(Arc::clone(&to_httun_tx), Arc::clone(&from_httun_rx)).await?;
+            run_mode_test(
+                Arc::clone(&exit_tx),
+                Arc::clone(&to_httun_tx),
+                Arc::clone(&from_httun_rx),
+            )
+            .await?;
         }
         None | Some(Mode::Genkey {}) => unreachable!(),
     }
