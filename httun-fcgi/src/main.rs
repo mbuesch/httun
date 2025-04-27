@@ -30,7 +30,7 @@ use tokio::{
 const MAX_NUM_CONNECTIONS: usize = 16;
 const SERVER_SOCK: &str = "/run/httun-server/httun-server.sock";
 
-const CHAN_R_TIMEOUT: Duration = Duration::from_secs(10);
+const CHAN_R_TIMEOUT: Duration = Duration::from_secs(1);
 
 type ConnectionsKey = (String, bool);
 static CONNECTIONS: OnceLock<Mutex<HashMap<ConnectionsKey, Arc<ServerUnixConn>>>> = OnceLock::new();
@@ -67,7 +67,8 @@ fn path_element_is_valid(name: &str) -> bool {
 }
 
 async fn recv_from_httun_server(name: &str) -> ah::Result<Vec<u8>> {
-    match get_connection(name, false).await?.recv().await {
+    let conn = get_connection(name, false).await?;
+    match conn.recv().await {
         Ok(buf) => Ok(buf),
         Err(e) => {
             remove_connection(name).await;
@@ -79,7 +80,8 @@ async fn recv_from_httun_server(name: &str) -> ah::Result<Vec<u8>> {
 async fn send_to_httun_server(req: &FcgiRequest<'_>, name: &str) -> ah::Result<()> {
     let mut buf = vec![];
     let count = req.get_stdin().read_to_end(&mut buf)?;
-    if let Err(e) = get_connection(name, true).await?.send(&buf[..count]).await {
+    let conn = get_connection(name, true).await?;
+    if let Err(e) = conn.send(&buf[..count]).await {
         remove_connection(name).await;
         Err(e)
     } else {
@@ -227,7 +229,9 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
 
     match direction {
         "r" => match timeout(CHAN_R_TIMEOUT, recv_from_httun_server(name)).await {
-            Err(_) => fcgi_response(&req, "200 Ok", None).await,
+            Err(_) => {
+                fcgi_response(&req, "408 Request Timeout", None).await
+            }
             Ok(Err(e)) => {
                 eprintln!("FCGI: HTTP-r: recv from server failed: {e}");
                 fcgi_response_error(
