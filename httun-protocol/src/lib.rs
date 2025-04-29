@@ -2,13 +2,33 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
+//! # httun on-wire protocol
+//!
+//! ## Physical message layout (unencrypted)
+//!
+//! | Byte offset | Name               | Byte size |
+//! | ----------- | ------------------ | --------- |
+//! | 0           | Operation          | 1         |
+//! | 1           | Flags              | 1         |
+//! | 2           | Session            | 2         |
+//! | 4           | Payload length     | 2 (be)    |
+//! | 6           | Payload            | var       |
+//!
+//! ## Physical message layout (encrypted)
+//!
+//! | Byte offset | Name               | Byte size |
+//! | ----------- | ------------------ | --------- |
+//! | 0           | Encrypted message  | var       |
+//! | var         | nonce              | 12        |
+
 #![forbid(unsafe_code)]
 
 use aes_gcm::{
     Aes256Gcm,
     aead::{AeadCore as _, AeadInPlace as _, AeadMut as _, KeyInit as _, OsRng},
 };
-use anyhow::{self as ah, format_err as err};
+use anyhow::{self as ah, Context as _, format_err as err};
+use base64::prelude::*;
 use std::fmt::{Display, Formatter};
 
 pub type Key = [u8; 32];
@@ -17,12 +37,14 @@ const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
 
 const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
 
-const OFFS_FLAGS: usize = 0;
-const OFFS_LEN: usize = 2;
-const OFFS_PAYLOAD: usize = 4;
+const OFFS_OPER: usize = 0;
+const OFFS_FLAGS: usize = 1;
+const OFFS_SESSION: usize = 2;
+const OFFS_LEN: usize = 4;
+const OFFS_PAYLOAD: usize = 6;
 
 const AUTHTAG_LEN: usize = 16;
-pub const OVERHEAD_LEN: usize = 2 + 2 + NONCE_LEN + AUTHTAG_LEN;
+pub const OVERHEAD_LEN: usize = 1 + 1 + 2 + 2 + NONCE_LEN + AUTHTAG_LEN;
 
 /// Generate a cryptographically secure random token.
 pub fn secure_random<const SZ: usize>() -> [u8; SZ] {
@@ -45,17 +67,54 @@ pub fn secure_random<const SZ: usize>() -> [u8; SZ] {
     buf
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operation {
+    Init,
+    ToSrv,
+    FromSrv,
+}
+
+impl TryFrom<u8> for Operation {
+    type Error = ah::Error;
+
+    fn try_from(op: u8) -> ah::Result<Self> {
+        const INIT: u8 = Operation::Init as _;
+        const TOSRV: u8 = Operation::ToSrv as _;
+        const FROMSRV: u8 = Operation::FromSrv as _;
+        match op {
+            INIT => Ok(Operation::Init),
+            TOSRV => Ok(Operation::ToSrv),
+            FROMSRV => Ok(Operation::FromSrv),
+            _ => Err(err!("Invalid Message Operation: {op}")),
+        }
+    }
+}
+
+impl From<Operation> for u8 {
+    fn from(op: Operation) -> Self {
+        op as Self
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Message {
+    oper: Operation,
+    flags: u8,
+    session: u16,
     payload: Vec<u8>,
 }
 
 impl Message {
-    pub fn new(payload: Vec<u8>) -> ah::Result<Self> {
+    pub fn new(oper: Operation, flags: u8, session: u16, payload: Vec<u8>) -> ah::Result<Self> {
         if payload.len() > MAX_PAYLOAD_LEN {
             return Err(err!("Payload size is too big"));
         }
-        Ok(Self { payload })
+        Ok(Self {
+            oper,
+            flags,
+            session,
+            payload,
+        })
     }
 
     pub fn payload(&self) -> &[u8] {
@@ -67,11 +126,15 @@ impl Message {
     }
 
     pub fn serialize(&self, key: &Key) -> Vec<u8> {
-        let flags: u16 = 0;
+        let oper: u8 = self.oper.into();
+        let flags: u8 = self.flags;
+        let session: u16 = self.session;
         let len: u16 = self.payload.len().try_into().expect("Payload too big");
 
         let mut buf = Vec::with_capacity(MAX_PAYLOAD_LEN + OVERHEAD_LEN);
+        buf.extend(&oper.to_be_bytes());
         buf.extend(&flags.to_be_bytes());
+        buf.extend(&session.to_be_bytes());
         buf.extend(&len.to_be_bytes());
         buf.extend(&self.payload);
 
@@ -85,6 +148,10 @@ impl Message {
 
         assert_eq!(buf.len(), self.payload.len() + OVERHEAD_LEN);
         buf
+    }
+
+    pub fn serialize_b64u(&self, key: &Key) -> String {
+        BASE64_URL_SAFE_NO_PAD.encode(self.serialize(key))
     }
 
     pub fn deserialize(buf: &[u8], key: &Key) -> ah::Result<Self> {
@@ -106,8 +173,12 @@ impl Message {
             return Err(err!("AEAD decrypt failed (invalid plaintext length)."));
         }
 
-        let _flags = u16::from_be_bytes(plain[OFFS_FLAGS..OFFS_FLAGS + 2].try_into()?);
+        let oper = u8::from_be_bytes(plain[OFFS_OPER..OFFS_OPER + 1].try_into()?);
+        let flags = u8::from_be_bytes(plain[OFFS_FLAGS..OFFS_FLAGS + 1].try_into()?);
+        let session = u16::from_be_bytes(plain[OFFS_SESSION..OFFS_SESSION + 2].try_into()?);
         let len = u16::from_be_bytes(plain[OFFS_LEN..OFFS_LEN + 2].try_into()?);
+
+        let oper = oper.try_into()?;
 
         let len: usize = len.into();
         if len != buf.len() - OVERHEAD_LEN {
@@ -115,7 +186,21 @@ impl Message {
         }
         let payload = plain[OFFS_PAYLOAD..OFFS_PAYLOAD + len].to_vec();
 
-        Ok(Message { payload })
+        Ok(Message {
+            oper,
+            flags,
+            session,
+            payload,
+        })
+    }
+
+    pub fn deserialize_b64u(buf: &str, key: &Key) -> ah::Result<Self> {
+        Self::deserialize(
+            &BASE64_URL_SAFE_NO_PAD
+                .decode(buf.as_bytes())
+                .context("Base64url decode")?,
+            key,
+        )
     }
 }
 

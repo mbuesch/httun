@@ -27,6 +27,7 @@ keywords = [ "http", "tun", "network", "tunnel" ]
 [workspace.dependencies]
 aes-gcm = "0.10"
 anyhow = "1"
+base64 = "0.22"
 bincode = "2"
 clap = { version = "4", default-features = false, features = [ "std", "help", "usage", "error-context", "derive" ] }
 getrandom = "0.3"

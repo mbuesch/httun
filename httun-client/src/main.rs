@@ -11,7 +11,7 @@ use crate::{client::HttunClient, local_listener::LocalListener};
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::{Parser, Subcommand};
 use httun_conf::Config;
-use httun_protocol::{Key, Message, secure_random};
+use httun_protocol::{Key, Message, Operation, secure_random};
 use httun_tun::TunHandler;
 use std::{num::Wrapping, path::Path, sync::Arc, time::Duration};
 use tokio::{
@@ -122,7 +122,7 @@ async fn run_mode_tun(
 
                 match tun.recv().await {
                     Ok(pkg) => {
-                        let msg = match Message::new(pkg) {
+                        let msg = match Message::new(Operation::ToSrv, 0, 0, pkg) {
                             Ok(msg) => msg,
                             Err(e) => {
                                 eprintln!("Make httun packet failed: {e}");
@@ -233,7 +233,7 @@ async fn run_mode_test(
                 let expected_reply = format!("Reply to: {testdata}");
                 println!("Sending test mode ping: '{testdata}'");
 
-                let msg = match Message::new(testdata.into_bytes()) {
+                let msg = match Message::new(Operation::ToSrv, 0, 0, testdata.into_bytes()) {
                     Ok(msg) => msg,
                     Err(e) => {
                         eprintln!("Make httun packet failed: {e}");

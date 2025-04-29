@@ -4,7 +4,7 @@
 
 use crate::{channel::Channel, unix_sock::UnixConn};
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::Message;
+use httun_protocol::{Message, Operation};
 use httun_tun::TunHandler;
 use httun_unix_protocol::{UnMessage, UnOperation};
 use std::sync::Arc;
@@ -51,7 +51,8 @@ impl ProtocolHandler {
                     self.tun.recv().await.context("TUN receive")?
                 };
 
-                let msg = Message::new(payload).context("Make httun packet")?;
+                let msg =
+                    Message::new(Operation::FromSrv, 0, 0, payload).context("Make httun packet")?;
                 if DEBUG {
                     println!("TX msg: {msg}");
                 }

@@ -229,9 +229,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
 
     match direction {
         "r" => match timeout(CHAN_R_TIMEOUT, recv_from_httun_server(name)).await {
-            Err(_) => {
-                fcgi_response(&req, "408 Request Timeout", None).await
-            }
+            Err(_) => fcgi_response(&req, "408 Request Timeout", None).await,
             Ok(Err(e)) => {
                 eprintln!("FCGI: HTTP-r: recv from server failed: {e}");
                 fcgi_response_error(
