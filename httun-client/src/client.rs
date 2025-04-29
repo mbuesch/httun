@@ -65,10 +65,10 @@ async fn direction_r(
         .context("httun HTTP-r build HTTP client")?;
 
     loop {
-        let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
         let mut resp;
 
         'http: loop {
+            let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
             let req = client.get(&url).header("Cache-Control", "no-store");
             resp = req.send().await.context("httun HTTP-r send")?;
 
@@ -146,13 +146,12 @@ async fn direction_w(
 
         let data = msg.serialize(key);
 
-        let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
-
         if DEBUG {
             println!("Send to HTTP-w: {data:?}");
         }
 
         'http: loop {
+            let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
             let req = client
                 .post(&url)
                 .header("Cache-Control", "no-store")
