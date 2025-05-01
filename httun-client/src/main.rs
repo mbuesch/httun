@@ -122,7 +122,7 @@ async fn run_mode_tun(
 
                 match tun.recv().await {
                     Ok(pkg) => {
-                        let msg = match Message::new(Operation::ToSrv, 0, 0, pkg) {
+                        let msg = match Message::new(Operation::ToSrv, pkg) {
                             Ok(msg) => msg,
                             Err(e) => {
                                 eprintln!("Make httun packet failed: {e}");
@@ -233,7 +233,7 @@ async fn run_mode_test(
                 let expected_reply = format!("Reply to: {testdata}");
                 println!("Sending test mode ping: '{testdata}'");
 
-                let msg = match Message::new(Operation::ToSrv, 0, 0, testdata.into_bytes()) {
+                let msg = match Message::new(Operation::ToSrv, testdata.into_bytes()) {
                     Ok(msg) => msg,
                     Err(e) => {
                         eprintln!("Make httun packet failed: {e}");

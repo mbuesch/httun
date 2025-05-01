@@ -10,9 +10,10 @@
 //! | ----------- | ------------------ | --------- |
 //! | 0           | Operation          | 1         |
 //! | 1           | Flags              | 1         |
-//! | 2           | Session            | 2         |
-//! | 4           | Payload length     | 2 (be)    |
-//! | 6           | Payload            | var       |
+//! | 2           | Session            | 2 (be)    |
+//! | 4           | Sequence counter   | 8 (be)    |
+//! | 12          | Payload length     | 2 (be)    |
+//! | 14          | Payload            | var       |
 //!
 //! ## Physical message layout (encrypted)
 //!
@@ -40,11 +41,12 @@ const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
 const OFFS_OPER: usize = 0;
 const OFFS_FLAGS: usize = 1;
 const OFFS_SESSION: usize = 2;
-const OFFS_LEN: usize = 4;
-const OFFS_PAYLOAD: usize = 6;
+const OFFS_SEQ: usize = 4;
+const OFFS_LEN: usize = 12;
+const OFFS_PAYLOAD: usize = 14;
 
 const AUTHTAG_LEN: usize = 16;
-pub const OVERHEAD_LEN: usize = 1 + 1 + 2 + 2 + NONCE_LEN + AUTHTAG_LEN;
+pub const OVERHEAD_LEN: usize = 1 + 1 + 2 + 8 + 2 + NONCE_LEN + AUTHTAG_LEN;
 
 /// Generate a cryptographically secure random token.
 pub fn secure_random<const SZ: usize>() -> [u8; SZ] {
@@ -101,18 +103,20 @@ pub struct Message {
     oper: Operation,
     flags: u8,
     session: u16,
+    sequence: u64,
     payload: Vec<u8>,
 }
 
 impl Message {
-    pub fn new(oper: Operation, flags: u8, session: u16, payload: Vec<u8>) -> ah::Result<Self> {
+    pub fn new(oper: Operation, payload: Vec<u8>) -> ah::Result<Self> {
         if payload.len() > MAX_PAYLOAD_LEN {
             return Err(err!("Payload size is too big"));
         }
         Ok(Self {
             oper,
-            flags,
-            session,
+            flags: 0,
+            session: 0,
+            sequence: 0,
             payload,
         })
     }
@@ -133,6 +137,14 @@ impl Message {
         self.session = session;
     }
 
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub fn set_sequence(&mut self, sequence: u64) {
+        self.sequence = sequence;
+    }
+
     pub fn payload(&self) -> &[u8] {
         &self.payload
     }
@@ -145,12 +157,14 @@ impl Message {
         let oper: u8 = self.oper.into();
         let flags: u8 = self.flags;
         let session: u16 = self.session;
+        let sequence: u64 = self.sequence;
         let len: u16 = self.payload.len().try_into().expect("Payload too big");
 
         let mut buf = Vec::with_capacity(MAX_PAYLOAD_LEN + OVERHEAD_LEN);
         buf.extend(&oper.to_be_bytes());
         buf.extend(&flags.to_be_bytes());
         buf.extend(&session.to_be_bytes());
+        buf.extend(&sequence.to_be_bytes());
         buf.extend(&len.to_be_bytes());
         buf.extend(&self.payload);
 
@@ -192,6 +206,7 @@ impl Message {
         let oper = u8::from_be_bytes(plain[OFFS_OPER..OFFS_OPER + 1].try_into()?);
         let flags = u8::from_be_bytes(plain[OFFS_FLAGS..OFFS_FLAGS + 1].try_into()?);
         let session = u16::from_be_bytes(plain[OFFS_SESSION..OFFS_SESSION + 2].try_into()?);
+        let sequence = u64::from_be_bytes(plain[OFFS_SEQ..OFFS_SEQ + 8].try_into()?);
         let len = u16::from_be_bytes(plain[OFFS_LEN..OFFS_LEN + 2].try_into()?);
 
         let oper = oper.try_into()?;
@@ -206,6 +221,7 @@ impl Message {
             oper,
             flags,
             session,
+            sequence,
             payload,
         })
     }

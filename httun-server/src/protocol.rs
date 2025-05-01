@@ -74,6 +74,8 @@ impl ProtocolHandler {
         let umsg_op = umsg.op();
         let msg = Message::deserialize(&umsg.into_payload(), self.chan.key())?;
 
+        //TODO check sequence counter
+
         match umsg_op {
             UnOperation::ToSrv => {
                 if msg.session() != self.session_id() {
@@ -98,13 +100,13 @@ impl ProtocolHandler {
             }
             UnOperation::ReqFromSrv => {
                 let reply_msg = match msg.oper() {
-                    Operation::Init => Message::new(
-                        Operation::FromSrv,
-                        0,
-                        self.make_new_session_id().await,
-                        vec![],
-                    )
-                    .context("Make httun packet")?,
+                    Operation::Init => {
+                        //TODO add a nonce that must be mixed into all subsequent messages encryption stream.
+                        let mut msg = Message::new(Operation::FromSrv, vec![])
+                            .context("Make httun packet")?;
+                        msg.set_session(self.make_new_session_id().await);
+                        msg
+                    }
                     Operation::FromSrv => {
                         if msg.session() != self.session_id() {
                             let umsg = UnMessage::new_close(self.chan_name().to_string());
@@ -118,8 +120,10 @@ impl ProtocolHandler {
                             self.tun.recv().await.context("TUN receive")?
                         };
 
-                        Message::new(Operation::FromSrv, 0, self.session_id(), payload)
-                            .context("Make httun packet")?
+                        let mut msg = Message::new(Operation::FromSrv, payload)
+                            .context("Make httun packet")?;
+                        msg.set_session(self.session_id());
+                        msg
                     }
                     Operation::ToSrv => {
                         return Err(err!(

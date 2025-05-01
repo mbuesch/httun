@@ -71,9 +71,12 @@ async fn direction_r(
         let mut resp;
 
         'http: loop {
+            let mut msg = Message::new(Operation::FromSrv, vec![])?;
+            msg.set_session(chan.session);
+            //TODO msg.set_sequence();
+            let msg = msg.serialize_b64u(key);
+
             let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
-            let msg =
-                Message::new(Operation::FromSrv, 0, chan.session, vec![])?.serialize_b64u(key);
             let req = client
                 .get(&url)
                 .query(&[("m", &msg)])
@@ -114,6 +117,7 @@ async fn direction_r(
             if msg.session() == chan.session {
                 loc.send(msg).await?;
             }
+            //TODO check sequence counter.
         }
     }
 }
@@ -156,11 +160,12 @@ async fn direction_w(
         };
 
         msg.set_session(chan.session);
+        //TODO msg.set_sequence();
 
-        let data = msg.serialize(key);
+        let msg = msg.serialize(key);
 
         if DEBUG {
-            println!("Send to HTTP-w: {data:?}");
+            println!("Send to HTTP-w: {msg:?}");
         }
 
         'http: loop {
@@ -169,7 +174,7 @@ async fn direction_w(
                 .post(&url)
                 .header("Cache-Control", "no-store")
                 .header("Content-Type", "application/octet-stream")
-                .body(data.clone());
+                .body(msg.clone());
             let resp = req.send().await.context("httun HTTP-w send")?;
 
             match resp.status() {
@@ -208,7 +213,10 @@ async fn get_session(base_url: &str, user_agent: &str, key: &Key) -> ah::Result<
         .context("httun session build HTTP client")?;
 
     for _ in 0..SESSION_INIT_RETRIES {
-        let msg = Message::new(Operation::Init, 0, 0, vec![])?.serialize_b64u(key);
+        let mut msg = Message::new(Operation::Init, vec![])?;
+        msg.set_session(rand::rng().random());
+        msg.set_sequence(rand::rng().random());
+        let msg = msg.serialize_b64u(key);
 
         let url = make_url(&format!("{base_url}/r"), rand::rng().random());
         let req = client
@@ -227,6 +235,7 @@ async fn get_session(base_url: &str, user_agent: &str, key: &Key) -> ah::Result<
 
         let data: &[u8] = &resp.bytes().await.context("httun session get body")?;
         let msg = Message::deserialize(data, key).context("Message deserialize")?;
+        //TODO check sequence counter.
 
         return Ok(msg.session());
     }
