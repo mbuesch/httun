@@ -65,6 +65,9 @@ pub enum UnOperation {
 
     /// From httun-server.
     FromSrv,
+
+    /// Close the connection.
+    Close,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -91,12 +94,16 @@ impl UnMessage {
         Self::new(UnOperation::ToSrv, chan_name, payload)
     }
 
-    pub fn new_req_from_srv(chan_name: String) -> Self {
-        Self::new(UnOperation::ReqFromSrv, chan_name, vec![])
+    pub fn new_req_from_srv(chan_name: String, payload: Vec<u8>) -> Self {
+        Self::new(UnOperation::ReqFromSrv, chan_name, payload)
     }
 
     pub fn new_from_srv(chan_name: String, payload: Vec<u8>) -> Self {
         Self::new(UnOperation::FromSrv, chan_name, payload)
+    }
+
+    pub fn new_close(chan_name: String) -> Self {
+        Self::new(UnOperation::Close, chan_name, vec![])
     }
 
     pub fn op(&self) -> UnOperation {
