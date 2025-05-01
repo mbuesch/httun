@@ -117,6 +117,22 @@ impl Message {
         })
     }
 
+    pub fn oper(&self) -> Operation {
+        self.oper
+    }
+
+    pub fn flags(&self) -> u8 {
+        self.flags
+    }
+
+    pub fn session(&self) -> u16 {
+        self.session
+    }
+
+    pub fn set_session(&mut self, session: u16) {
+        self.session = session;
+    }
+
     pub fn payload(&self) -> &[u8] {
         &self.payload
     }
@@ -155,7 +171,7 @@ impl Message {
     }
 
     pub fn deserialize(buf: &[u8], key: &Key) -> ah::Result<Self> {
-        if buf.len() <= OVERHEAD_LEN {
+        if buf.len() < OVERHEAD_LEN {
             return Err(err!("Message size is too small."));
         }
         if buf.len() > OVERHEAD_LEN + MAX_PAYLOAD_LEN {
