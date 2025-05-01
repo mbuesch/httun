@@ -4,7 +4,13 @@
 
 use httun_conf::Config;
 use httun_protocol::Key;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{self, AtomicU16},
+    },
+};
 use tokio::sync::{Mutex, Notify};
 
 struct PingState {
@@ -25,6 +31,7 @@ pub struct Channel {
     name: String,
     key: Key,
     ping: PingState,
+    session: AtomicU16,
 }
 
 impl Channel {
@@ -33,6 +40,7 @@ impl Channel {
             name: name.to_string(),
             key,
             ping: PingState::new(),
+            session: AtomicU16::new(0),
         }
     }
 
@@ -46,6 +54,16 @@ impl Channel {
 
     pub fn key(&self) -> &Key {
         &self.key
+    }
+
+    pub fn session_id(&self) -> u16 {
+        self.session.load(atomic::Ordering::SeqCst)
+    }
+
+    pub fn make_new_session_id(&self) -> u16 {
+        self.session
+            .fetch_add(1, atomic::Ordering::SeqCst)
+            .wrapping_add(1)
     }
 
     pub async fn put_ping(&self, payload: Vec<u8>) {

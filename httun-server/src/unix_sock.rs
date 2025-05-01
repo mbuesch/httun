@@ -55,7 +55,7 @@ impl UnixConn {
         &self.name
     }
 
-    async fn do_recv(&mut self, size: usize) -> ah::Result<Option<Vec<u8>>> {
+    async fn do_recv(&self, size: usize) -> ah::Result<Option<Vec<u8>>> {
         let mut count = 0;
         let mut data = vec![0_u8; size];
         loop {
@@ -82,7 +82,7 @@ impl UnixConn {
         }
     }
 
-    pub async fn recv(&mut self) -> ah::Result<Option<UnMessage>> {
+    pub async fn recv(&self) -> ah::Result<Option<UnMessage>> {
         let Some(hdr) = self.do_recv(UnMessageHeader::header_size()).await? else {
             return Ok(None);
         };
@@ -97,7 +97,7 @@ impl UnixConn {
         Ok(Some(msg))
     }
 
-    async fn do_send(&mut self, data: &[u8]) -> ah::Result<()> {
+    async fn do_send(&self, data: &[u8]) -> ah::Result<()> {
         let mut count = 0;
         loop {
             self.stream.writable().await?;
@@ -118,7 +118,7 @@ impl UnixConn {
         }
     }
 
-    pub async fn send(&mut self, msg: &UnMessage) -> ah::Result<()> {
+    pub async fn send(&self, msg: &UnMessage) -> ah::Result<()> {
         if DEBUG {
             println!("TX Unix msg: {msg:?}");
         }

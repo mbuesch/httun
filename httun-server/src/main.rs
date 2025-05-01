@@ -9,7 +9,7 @@ mod unix_sock;
 
 use crate::{
     channel::Channels,
-    protocol::ProtocolHandler,
+    protocol::ProtocolManager,
     systemd::{systemd_notify_reload_done, systemd_notify_reload_start},
     unix_sock::UnixSock,
 };
@@ -68,29 +68,25 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     // Create unix socket.
     let sock = UnixSock::new().await.context("Unix socket init")?;
 
+    let protman = ProtocolManager::new();
+
     // Spawn task: Socket handler.
     task::spawn({
         let exit_tx = Arc::clone(&exit_tx);
         let tun = Arc::clone(&tun);
+        let protman = Arc::clone(&protman);
 
         async move {
             loop {
                 let exit_tx = Arc::clone(&exit_tx);
                 let tun = Arc::clone(&tun);
+                let protman = Arc::clone(&protman);
 
                 match sock.accept().await {
                     Ok(conn) => {
                         // Socket connection handler.
                         if let Some(chan) = channels.get(conn.chan_name()).await {
-                            let mut prot = ProtocolHandler::new(conn, chan, tun).await;
-                            task::spawn(async move {
-                                loop {
-                                    if let Err(e) = prot.run().await {
-                                        eprintln!("Client error: {e}");
-                                        break;
-                                    }
-                                }
-                            });
+                            protman.spawn(conn, chan, tun).await;
                         } else {
                             println!(
                                 "Client connection: Channel '{}' does not exist",
