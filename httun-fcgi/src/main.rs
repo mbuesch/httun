@@ -3,13 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 mod fcgi;
+mod query;
 mod server_conn;
 
 use crate::{
     fcgi::{Fcgi, FcgiRequest, FcgiRequestResult, FcgiRole},
+    query::Query,
     server_conn::ServerUnixConn,
 };
 use anyhow::{self as ah, Context as _, format_err as err};
+use base64::prelude::*;
 use std::{
     collections::HashMap,
     fmt::Write as _,
@@ -30,7 +33,7 @@ use tokio::{
 const MAX_NUM_CONNECTIONS: usize = 16;
 const SERVER_SOCK: &str = "/run/httun-server/httun-server.sock";
 
-const CHAN_R_TIMEOUT: Duration = Duration::from_secs(1);
+const CHAN_R_TIMEOUT: Duration = Duration::from_secs(5);
 
 type ConnectionsKey = (String, bool);
 static CONNECTIONS: OnceLock<Mutex<HashMap<ConnectionsKey, Arc<ServerUnixConn>>>> = OnceLock::new();
@@ -43,6 +46,7 @@ async fn get_connections<'a>() -> MutexGuard<'a, HashMap<ConnectionsKey, Arc<Ser
         .await
 }
 
+//TODO We need to add a timeout for each conn
 async fn get_connection(name: &str, send: bool) -> ah::Result<Arc<ServerUnixConn>> {
     let key = (name.to_string(), send);
     let mut connections = get_connections().await;
@@ -66,9 +70,11 @@ fn path_element_is_valid(name: &str) -> bool {
         .all(|c| c.is_ascii_alphanumeric() || ['-', '_'].contains(&c))
 }
 
-async fn recv_from_httun_server(name: &str) -> ah::Result<Vec<u8>> {
+//TODO try again is server disconnected (Broken Pipe, os error 32)
+
+async fn recv_from_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<Vec<u8>> {
     let conn = get_connection(name, false).await?;
-    match conn.recv().await {
+    match conn.recv(req_payload).await {
         Ok(buf) => Ok(buf),
         Err(e) => {
             remove_connection(name).await;
@@ -77,11 +83,9 @@ async fn recv_from_httun_server(name: &str) -> ah::Result<Vec<u8>> {
     }
 }
 
-async fn send_to_httun_server(req: &FcgiRequest<'_>, name: &str) -> ah::Result<()> {
-    let mut buf = vec![];
-    let count = req.get_stdin().read_to_end(&mut buf)?;
+async fn send_to_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<()> {
     let conn = get_connection(name, true).await?;
-    if let Err(e) = conn.send(&buf[..count]).await {
+    if let Err(e) = conn.send(req_payload).await {
         remove_connection(name).await;
         Err(e)
     } else {
@@ -148,21 +152,12 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
     let Some(method) = req.get_str_param("request_method") else {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: No request_method.").await;
     };
-    let Some(_query) = req.get_str_param("query_string") else {
+    let Some(query) = req.get_str_param("query_string") else {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: No query_string.").await;
     };
     let Some(path_info) = req.get_str_param("path_info") else {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: No path_info.").await;
     };
-
-    if method != "GET" && method != "POST" {
-        return fcgi_response_error(
-            &req,
-            "400 Bad Request",
-            "FCGI: request_method is not GET or POST.",
-        )
-        .await;
-    }
 
     let mut path = path_info.split('/');
     let Some(first) = path.next() else {
@@ -227,8 +222,51 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
         .await;
     }
 
+    let Ok(query) = query.parse::<Query>() else {
+        return fcgi_response_error(&req, "400 Bad Request", "FCGI: Invalid query string.").await;
+    };
+
+    let req_payload = match method {
+        "GET" => {
+            if let Some(msg) = query.get("m") {
+                let Ok(msg) = &BASE64_URL_SAFE_NO_PAD.decode(msg.as_bytes()) else {
+                    return fcgi_response_error(
+                        &req,
+                        "400 Bad Request",
+                        "FCGI: Invalid query m= value.",
+                    )
+                    .await;
+                };
+                msg.to_vec()
+            } else {
+                vec![]
+            }
+        }
+        "POST" => {
+            let mut buf = vec![];
+            let Ok(count) = req.get_stdin().read_to_end(&mut buf) else {
+                return fcgi_response_error(
+                    &req,
+                    "400 Bad Request",
+                    "FCGI: Failed to read POST body.",
+                )
+                .await;
+            };
+            buf.truncate(count);
+            buf
+        }
+        _ => {
+            return fcgi_response_error(
+                &req,
+                "400 Bad Request",
+                "FCGI: request_method is not GET or POST.",
+            )
+            .await;
+        }
+    };
+
     match direction {
-        "r" => match timeout(CHAN_R_TIMEOUT, recv_from_httun_server(name)).await {
+        "r" => match timeout(CHAN_R_TIMEOUT, recv_from_httun_server(name, req_payload)).await {
             Err(_) => fcgi_response(&req, "408 Request Timeout", None).await,
             Ok(Err(e)) => {
                 eprintln!("FCGI: HTTP-r: recv from server failed: {e}");
@@ -244,7 +282,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
             }
         },
         "w" => {
-            if let Err(e) = send_to_httun_server(&req, name).await {
+            if let Err(e) = send_to_httun_server(name, req_payload).await {
                 eprintln!("FCGI: HTTP-w: send to server failed: {e}");
                 fcgi_response_error(
                     &req,

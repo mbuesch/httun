@@ -94,24 +94,26 @@ impl ServerUnixConn {
         UnMessage::deserialize(&msg)
     }
 
-    pub async fn send(&self, payload: &[u8]) -> ah::Result<()> {
-        self.send_msg(UnMessage::new_to_srv(
-            self.chan_name.to_string(),
-            payload.to_vec(),
-        ))
-        .await
+    pub async fn send(&self, payload: Vec<u8>) -> ah::Result<()> {
+        self.send_msg(UnMessage::new_to_srv(self.chan_name.to_string(), payload))
+            .await
     }
 
-    pub async fn recv(&self) -> ah::Result<Vec<u8>> {
-        self.send_msg(UnMessage::new_req_from_srv(self.chan_name.to_string()))
-            .await?;
+    pub async fn recv(&self, payload: Vec<u8>) -> ah::Result<Vec<u8>> {
+        self.send_msg(UnMessage::new_req_from_srv(
+            self.chan_name.to_string(),
+            payload,
+        ))
+        .await?;
         let msg = self.recv_msg().await?;
-        if msg.op() != UnOperation::FromSrv {
-            return Err(err!(
-                "ServerUnixConn: Reply op was {:?} instead of {:?}",
-                msg.op(),
-                UnOperation::FromSrv
-            ));
+        match msg.op() {
+            UnOperation::Close => {
+                return Err(err!("ServerUnixConn: Closed by server"));
+            }
+            UnOperation::FromSrv => (),
+            op => {
+                return Err(err!("ServerUnixConn: Got unexpected op: {op:?}"));
+            }
         }
         if msg.chan_name() != self.chan_name {
             return Err(err!(

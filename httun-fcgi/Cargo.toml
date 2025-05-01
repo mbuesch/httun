@@ -14,6 +14,7 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+base64 = { workspace = true }
 httun-unix-protocol = { workspace = true }
 libc = { workspace = true }
 tokio = { workspace = true, features = [ "rt", "signal", "sync", "net", "time" ] }
