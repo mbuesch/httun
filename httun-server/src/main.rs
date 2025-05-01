@@ -5,6 +5,7 @@
 mod channel;
 mod protocol;
 mod systemd;
+mod time;
 mod unix_sock;
 
 use crate::{
@@ -69,6 +70,19 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let sock = UnixSock::new().await.context("Unix socket init")?;
 
     let protman = ProtocolManager::new();
+
+    // Spawn task: Periodic task.
+    task::spawn({
+        let protman = Arc::clone(&protman);
+
+        async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(1000));
+            loop {
+                interval.tick().await;
+                protman.check_timeouts().await;
+            }
+        }
+    });
 
     // Spawn task: Socket handler.
     task::spawn({

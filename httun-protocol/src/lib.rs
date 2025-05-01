@@ -35,6 +35,7 @@ use std::fmt::{Display, Formatter};
 pub type Key = [u8; 32];
 type Nonce = [u8; 12];
 const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
+pub type SessionNonce = [u8; 16];
 
 const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
 

@@ -4,7 +4,7 @@
 
 use crate::{channel::Channel, unix_sock::UnixConn};
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::{Message, Operation};
+use httun_protocol::{Message, Operation, SessionNonce, secure_random};
 use httun_tun::TunHandler;
 use httun_unix_protocol::{UnMessage, UnOperation};
 use std::sync::{
@@ -57,12 +57,13 @@ impl ProtocolHandler {
         self.chan.session_id()
     }
 
-    async fn make_new_session_id(&self) -> u16 {
+    async fn create_new_session(&self, session_nonce: SessionNonce) -> u16 {
         let session = self.chan.make_new_session_id();
         self.pin_session(session);
         self.protman
             .kill_old_sessions(self.chan_name(), session)
             .await;
+        let _ = session_nonce; //TODO
         session
     }
 
@@ -97,14 +98,16 @@ impl ProtocolHandler {
                 } else {
                     self.tun.send(msg.payload()).await.context("TUN send")?;
                 }
+
+                self.chan.log_activity();
             }
             UnOperation::ReqFromSrv => {
                 let reply_msg = match msg.oper() {
                     Operation::Init => {
-                        //TODO add a nonce that must be mixed into all subsequent messages encryption stream.
-                        let mut msg = Message::new(Operation::FromSrv, vec![])
+                        let session_nonce: SessionNonce = secure_random();
+                        let mut msg = Message::new(Operation::FromSrv, session_nonce.to_vec())
                             .context("Make httun packet")?;
-                        msg.set_session(self.make_new_session_id().await);
+                        msg.set_session(self.create_new_session(session_nonce).await);
                         msg
                     }
                     Operation::FromSrv => {
@@ -139,6 +142,8 @@ impl ProtocolHandler {
                 let upayload = reply_msg.serialize(self.chan.key());
                 let umsg = UnMessage::new_from_srv(self.chan_name().to_string(), upayload);
                 self.uconn.send(&umsg).await.context("Unix socket send")?;
+
+                self.chan.log_activity();
             }
             UnOperation::Init | UnOperation::FromSrv | UnOperation::Close => {
                 return Err(err!("Received invalid operation: {:?}", umsg_op));
@@ -212,6 +217,13 @@ impl ProtocolManager {
                 true
             }
         });
+    }
+
+    pub async fn check_timeouts(self: &Arc<Self>) {
+        self.insts
+            .lock()
+            .await
+            .retain(|inst| !inst.prot.chan.activity_timed_out());
     }
 }
 

@@ -237,7 +237,10 @@ async fn get_session(base_url: &str, user_agent: &str, key: &Key) -> ah::Result<
         let msg = Message::deserialize(data, key).context("Message deserialize")?;
         //TODO check sequence counter.
 
-        return Ok(msg.session());
+        let session_id = msg.session();
+        let _session_nonce = msg.into_payload(); //TODO
+
+        return Ok(session_id);
     }
 
     Err(err!("Failed to get session ID from server."))

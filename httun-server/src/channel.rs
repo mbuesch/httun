@@ -2,16 +2,19 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+use crate::time::{now, tdiff};
 use httun_conf::Config;
 use httun_protocol::Key;
 use std::{
     collections::HashMap,
     sync::{
         Arc,
-        atomic::{self, AtomicU16},
+        atomic::{self, AtomicU16, AtomicU64},
     },
 };
 use tokio::sync::{Mutex, Notify};
+
+const ACTIVITY_TIMEOUT_S: i64 = 30;
 
 struct PingState {
     notify: Notify,
@@ -32,6 +35,7 @@ pub struct Channel {
     key: Key,
     ping: PingState,
     session: AtomicU16,
+    last_activity: AtomicU64,
 }
 
 impl Channel {
@@ -41,6 +45,7 @@ impl Channel {
             key,
             ping: PingState::new(),
             session: AtomicU16::new(0),
+            last_activity: AtomicU64::new(now()),
         }
     }
 
@@ -64,6 +69,14 @@ impl Channel {
         self.session
             .fetch_add(1, atomic::Ordering::SeqCst)
             .wrapping_add(1)
+    }
+
+    pub fn log_activity(&self) {
+        self.last_activity.store(now(), atomic::Ordering::Relaxed);
+    }
+
+    pub fn activity_timed_out(&self) -> bool {
+        tdiff(now(), self.last_activity.load(atomic::Ordering::Relaxed)) > ACTIVITY_TIMEOUT_S
     }
 
     pub async fn put_ping(&self, payload: Vec<u8>) {
