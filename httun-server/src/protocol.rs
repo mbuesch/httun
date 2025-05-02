@@ -4,7 +4,7 @@
 
 use crate::{channel::Channel, unix_sock::UnixConn};
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::{Message, Operation, SessionNonce, secure_random};
+use httun_protocol::{Message, MsgType, Operation, SessionNonce, secure_random};
 use httun_tun::TunHandler;
 use httun_unix_protocol::{UnMessage, UnOperation};
 use std::sync::{
@@ -78,61 +78,69 @@ impl ProtocolHandler {
         //TODO check sequence counter
 
         match umsg_op {
-            UnOperation::ToSrv => {
-                if msg.session() != self.session_id() {
-                    let umsg = UnMessage::new_close(self.chan_name().to_string());
-                    self.uconn.send(&umsg).await.context("Unix socket send")?;
-
-                    return Err(err!("Session mismatch"));
+            UnOperation::ToSrv => match msg.type_() {
+                MsgType::Init => {
+                    return Err(err!("Received invalid UnOperation::ToSrv + MsgType::Init"));
                 }
-                if DEBUG {
-                    println!("RX msg: {msg}");
-                }
+                MsgType::Data => {
+                    if msg.session() != self.session_id() {
+                        let umsg = UnMessage::new_close(self.chan_name().to_string());
+                        self.uconn.send(&umsg).await.context("Unix socket send")?;
 
-                if self.chan.is_test_channel() {
-                    println!(
-                        "Received test mode ping: '{}'",
-                        String::from_utf8_lossy(msg.payload())
-                    );
-                    self.chan.put_ping(msg.into_payload()).await;
-                } else {
-                    self.tun.send(msg.payload()).await.context("TUN send")?;
-                }
+                        return Err(err!("Session mismatch"));
+                    }
+                    if DEBUG {
+                        println!("RX msg: {msg}");
+                    }
 
-                self.chan.log_activity();
-            }
+                    if self.chan.is_test_channel() {
+                        println!(
+                            "Received test mode ping: '{}'",
+                            String::from_utf8_lossy(msg.payload())
+                        );
+                        self.chan.put_ping(msg.into_payload()).await;
+                    } else {
+                        self.tun.send(msg.payload()).await.context("TUN send")?;
+                    }
+
+                    self.chan.log_activity();
+                }
+            },
             UnOperation::ReqFromSrv => {
-                let reply_msg = match msg.oper() {
-                    Operation::Init => {
+                let reply_msg = match msg.type_() {
+                    MsgType::Init => {
                         let session_nonce: SessionNonce = secure_random();
-                        let mut msg = Message::new(Operation::FromSrv, session_nonce.to_vec())
-                            .context("Make httun packet")?;
+                        let mut msg =
+                            Message::new(MsgType::Init, Operation::FromSrv, session_nonce.to_vec())
+                                .context("Make httun packet")?;
                         msg.set_session(self.create_new_session(session_nonce).await);
                         msg
                     }
-                    Operation::FromSrv => {
-                        if msg.session() != self.session_id() {
-                            let umsg = UnMessage::new_close(self.chan_name().to_string());
-                            self.uconn.send(&umsg).await.context("Unix socket send")?;
+                    MsgType::Data => match msg.oper() {
+                        Operation::FromSrv => {
+                            if msg.session() != self.session_id() {
+                                let umsg = UnMessage::new_close(self.chan_name().to_string());
+                                self.uconn.send(&umsg).await.context("Unix socket send")?;
 
-                            return Err(err!("Session mismatch"));
+                                return Err(err!("Session mismatch"));
+                            }
+                            let payload = if self.chan.is_test_channel() {
+                                self.chan.get_pong().await
+                            } else {
+                                self.tun.recv().await.context("TUN receive")?
+                            };
+
+                            let mut msg = Message::new(MsgType::Data, Operation::FromSrv, payload)
+                                .context("Make httun packet")?;
+                            msg.set_session(self.session_id());
+                            msg
                         }
-                        let payload = if self.chan.is_test_channel() {
-                            self.chan.get_pong().await
-                        } else {
-                            self.tun.recv().await.context("TUN receive")?
-                        };
-
-                        let mut msg = Message::new(Operation::FromSrv, payload)
-                            .context("Make httun packet")?;
-                        msg.set_session(self.session_id());
-                        msg
-                    }
-                    Operation::ToSrv => {
-                        return Err(err!(
-                            "Received Operation::ToSrv in UnOperation::ReqFromSrv context"
-                        ));
-                    }
+                        Operation::ToSrv => {
+                            return Err(err!(
+                                "Received Operation::ToSrv in UnOperation::ReqFromSrv context"
+                            ));
+                        }
+                    },
                 };
 
                 if DEBUG {

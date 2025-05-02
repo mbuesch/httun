@@ -4,7 +4,7 @@
 
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::Config;
-use httun_protocol::{Key, Message, Operation};
+use httun_protocol::{Key, Message, MsgType, Operation};
 use rand::prelude::*;
 use reqwest::{Client, StatusCode};
 use std::{
@@ -71,7 +71,7 @@ async fn direction_r(
         let mut resp;
 
         'http: loop {
-            let mut msg = Message::new(Operation::FromSrv, vec![])?;
+            let mut msg = Message::new(MsgType::Data, Operation::FromSrv, vec![])?;
             msg.set_session(chan.session);
             //TODO msg.set_sequence();
             let msg = msg.serialize_b64u(key);
@@ -213,7 +213,7 @@ async fn get_session(base_url: &str, user_agent: &str, key: &Key) -> ah::Result<
         .context("httun session build HTTP client")?;
 
     for _ in 0..SESSION_INIT_RETRIES {
-        let mut msg = Message::new(Operation::Init, vec![])?;
+        let mut msg = Message::new(MsgType::Init, Operation::FromSrv, vec![])?;
         msg.set_session(rand::rng().random());
         msg.set_sequence(rand::rng().random());
         let msg = msg.serialize_b64u(key);

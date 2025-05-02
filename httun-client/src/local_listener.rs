@@ -4,7 +4,7 @@
 
 use crate::client::{FromHttun, ToHttun};
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::{Message, Operation};
+use httun_protocol::{Message, MsgType, Operation};
 use std::sync::Arc;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -33,7 +33,8 @@ async fn local_rx(stream: Arc<TcpStream>, tun: Arc<Sender<ToHttun>>) -> ah::Resu
 
                 //TODO: We have to add TCP/IP headers.
 
-                let msg = Message::new(Operation::ToSrv, buf).context("Make httun packet")?;
+                let msg = Message::new(MsgType::Data, Operation::ToSrv, buf)
+                    .context("Make httun packet")?;
 
                 tun.send(msg).await?;
             }
