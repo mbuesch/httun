@@ -114,6 +114,10 @@ impl UnMessage {
         &self.chan_name
     }
 
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
     pub fn into_payload(self) -> Vec<u8> {
         self.payload
     }

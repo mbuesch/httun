@@ -4,7 +4,7 @@
 
 use crate::{channel::Channel, unix_sock::UnixConn};
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::{Message, MsgType, Operation, SessionNonce, secure_random};
+use httun_protocol::{Message, MsgType, Operation, SessionSecret, secure_random};
 use httun_tun::TunHandler;
 use httun_unix_protocol::{UnMessage, UnOperation};
 use std::sync::{
@@ -53,17 +53,16 @@ impl ProtocolHandler {
             .store(session.into(), atomic::Ordering::SeqCst);
     }
 
-    fn session_id(&self) -> u16 {
-        self.chan.session_id()
+    fn session(&self) -> (u16, Option<SessionSecret>) {
+        self.chan.session()
     }
 
-    async fn create_new_session(&self, session_nonce: SessionNonce) -> u16 {
-        let session = self.chan.make_new_session_id();
+    async fn create_new_session(&self, session_secret: SessionSecret) -> u16 {
+        let session = self.chan.create_new_session(session_secret);
         self.pin_session(session);
         self.protman
             .kill_old_sessions(self.chan_name(), session)
             .await;
-        let _ = session_nonce; //TODO
         session
     }
 
@@ -72,18 +71,25 @@ impl ProtocolHandler {
             return Err(err!("Disconnected."));
         };
 
-        let umsg_op = umsg.op();
-        let msg = Message::deserialize(&umsg.into_payload(), self.chan.key())?;
+        let msg_type = Message::peek_type(umsg.payload())?;
+
+        let (session_id, mut session_secret) = self.session();
 
         //TODO check sequence counter
 
-        match umsg_op {
-            UnOperation::ToSrv => match msg.type_() {
+        match umsg.op() {
+            UnOperation::ToSrv => match msg_type {
                 MsgType::Init => {
                     return Err(err!("Received invalid UnOperation::ToSrv + MsgType::Init"));
                 }
                 MsgType::Data => {
-                    if msg.session() != self.session_id() {
+                    let msg = Message::deserialize(
+                        &umsg.into_payload(),
+                        self.chan.key(),
+                        session_secret,
+                    )?;
+
+                    if msg.session() != session_id {
                         let umsg = UnMessage::new_close(self.chan_name().to_string());
                         self.uconn.send(&umsg).await.context("Unix socket send")?;
 
@@ -107,54 +113,71 @@ impl ProtocolHandler {
                 }
             },
             UnOperation::ReqFromSrv => {
-                let reply_msg = match msg.type_() {
+                let reply_msg = match msg_type {
                     MsgType::Init => {
-                        let session_nonce: SessionNonce = secure_random();
-                        let mut msg =
-                            Message::new(MsgType::Init, Operation::FromSrv, session_nonce.to_vec())
-                                .context("Make httun packet")?;
-                        msg.set_session(self.create_new_session(session_nonce).await);
+                        let _msg =
+                            Message::deserialize(&umsg.into_payload(), self.chan.key(), None)?;
+
+                        let new_session_secret: SessionSecret = secure_random();
+                        session_secret = None;
+
+                        let mut msg = Message::new(
+                            MsgType::Init,
+                            Operation::FromSrv,
+                            new_session_secret.to_vec(),
+                        )
+                        .context("Make httun packet")?;
+                        msg.set_session(self.create_new_session(new_session_secret).await);
                         msg
                     }
-                    MsgType::Data => match msg.oper() {
-                        Operation::FromSrv => {
-                            if msg.session() != self.session_id() {
-                                let umsg = UnMessage::new_close(self.chan_name().to_string());
-                                self.uconn.send(&umsg).await.context("Unix socket send")?;
+                    MsgType::Data => {
+                        let msg = Message::deserialize(
+                            &umsg.into_payload(),
+                            self.chan.key(),
+                            session_secret,
+                        )?;
 
-                                return Err(err!("Session mismatch"));
+                        match msg.oper() {
+                            Operation::FromSrv => {
+                                if msg.session() != session_id {
+                                    let umsg = UnMessage::new_close(self.chan_name().to_string());
+                                    self.uconn.send(&umsg).await.context("Unix socket send")?;
+
+                                    return Err(err!("Session mismatch"));
+                                }
+                                let payload = if self.chan.is_test_channel() {
+                                    self.chan.get_pong().await
+                                } else {
+                                    self.tun.recv().await.context("TUN receive")?
+                                };
+
+                                let mut msg =
+                                    Message::new(MsgType::Data, Operation::FromSrv, payload)
+                                        .context("Make httun packet")?;
+                                msg.set_session(session_id);
+                                msg
                             }
-                            let payload = if self.chan.is_test_channel() {
-                                self.chan.get_pong().await
-                            } else {
-                                self.tun.recv().await.context("TUN receive")?
-                            };
-
-                            let mut msg = Message::new(MsgType::Data, Operation::FromSrv, payload)
-                                .context("Make httun packet")?;
-                            msg.set_session(self.session_id());
-                            msg
+                            Operation::ToSrv => {
+                                return Err(err!(
+                                    "Received Operation::ToSrv in UnOperation::ReqFromSrv context"
+                                ));
+                            }
                         }
-                        Operation::ToSrv => {
-                            return Err(err!(
-                                "Received Operation::ToSrv in UnOperation::ReqFromSrv context"
-                            ));
-                        }
-                    },
+                    }
                 };
 
                 if DEBUG {
                     println!("TX msg: {reply_msg}");
                 }
 
-                let upayload = reply_msg.serialize(self.chan.key());
+                let upayload = reply_msg.serialize(self.chan.key(), session_secret);
                 let umsg = UnMessage::new_from_srv(self.chan_name().to_string(), upayload);
                 self.uconn.send(&umsg).await.context("Unix socket send")?;
 
                 self.chan.log_activity();
             }
             UnOperation::Init | UnOperation::FromSrv | UnOperation::Close => {
-                return Err(err!("Received invalid operation: {:?}", umsg_op));
+                return Err(err!("Received invalid operation: {:?}", umsg.op()));
             }
         }
 

@@ -4,7 +4,7 @@
 
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::Config;
-use httun_protocol::{Key, Message, MsgType, Operation};
+use httun_protocol::{Key, Message, MsgType, Operation, SessionSecret};
 use rand::prelude::*;
 use reqwest::{Client, StatusCode};
 use std::{
@@ -26,7 +26,7 @@ use tokio::{
 const DEBUG: bool = false;
 const HTTP_R_TIMEOUT: Duration = Duration::from_secs(15);
 const HTTP_W_TIMEOUT: Duration = Duration::from_secs(10);
-const SESSION_INIT_RETRIES: usize = 3;
+const SESSION_INIT_RETRIES: usize = 5;
 
 pub type ToHttun = Message;
 pub type FromHttun = Message;
@@ -37,15 +37,17 @@ fn make_url(base_url: &str, serial: u64) -> String {
 
 struct DirectionR {
     url: String,
-    session: u16,
+    session_id: u16,
+    session_secret: SessionSecret,
     serial: AtomicU64,
 }
 
 impl DirectionR {
-    fn new(base_url: &str, session: u16) -> Self {
+    fn new(base_url: &str, session_id: u16, session_secret: SessionSecret) -> Self {
         Self {
             url: format!("{base_url}/r"),
-            session,
+            session_id,
+            session_secret,
             serial: AtomicU64::new(0),
         }
     }
@@ -72,9 +74,9 @@ async fn direction_r(
 
         'http: loop {
             let mut msg = Message::new(MsgType::Data, Operation::FromSrv, vec![])?;
-            msg.set_session(chan.session);
+            msg.set_session(chan.session_id);
             //TODO msg.set_sequence();
-            let msg = msg.serialize_b64u(key);
+            let msg = msg.serialize_b64u(key, Some(chan.session_secret));
 
             let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
             let req = client
@@ -113,8 +115,9 @@ async fn direction_r(
                 println!("Received from HTTP-r: {data:?}");
             }
 
-            let msg = Message::deserialize(data, key).context("Message deserialize")?;
-            if msg.session() == chan.session {
+            let msg = Message::deserialize(data, key, Some(chan.session_secret))
+                .context("Message deserialize")?;
+            if msg.session() == chan.session_id {
                 loc.send(msg).await?;
             }
             //TODO check sequence counter.
@@ -124,15 +127,17 @@ async fn direction_r(
 
 struct DirectionW {
     url: String,
-    session: u16,
+    session_id: u16,
+    session_secret: SessionSecret,
     serial: AtomicU64,
 }
 
 impl DirectionW {
-    fn new(base_url: &str, session: u16) -> Self {
+    fn new(base_url: &str, session_id: u16, session_secret: SessionSecret) -> Self {
         Self {
             url: format!("{base_url}/w"),
-            session,
+            session_id,
+            session_secret,
             serial: AtomicU64::new(0),
         }
     }
@@ -159,10 +164,10 @@ async fn direction_w(
             return Err(err!("ToHttun IPC closed"));
         };
 
-        msg.set_session(chan.session);
+        msg.set_session(chan.session_id);
         //TODO msg.set_sequence();
 
-        let msg = msg.serialize(key);
+        let msg = msg.serialize(key, Some(chan.session_secret));
 
         if DEBUG {
             println!("Send to HTTP-w: {msg:?}");
@@ -203,11 +208,15 @@ async fn direction_w(
     }
 }
 
-async fn get_session(base_url: &str, user_agent: &str, key: &Key) -> ah::Result<u16> {
+async fn get_session(
+    base_url: &str,
+    user_agent: &str,
+    key: &Key,
+) -> ah::Result<(u16, SessionSecret)> {
     let client = Client::builder()
         .user_agent(user_agent)
         .referer(false)
-        .timeout(HTTP_R_TIMEOUT)
+        .timeout(Duration::from_secs(5))
         .tcp_nodelay(true)
         .build()
         .context("httun session build HTTP client")?;
@@ -216,7 +225,7 @@ async fn get_session(base_url: &str, user_agent: &str, key: &Key) -> ah::Result<
         let mut msg = Message::new(MsgType::Init, Operation::FromSrv, vec![])?;
         msg.set_session(rand::rng().random());
         msg.set_sequence(rand::rng().random());
-        let msg = msg.serialize_b64u(key);
+        let msg = msg.serialize_b64u(key, None);
 
         let url = make_url(&format!("{base_url}/r"), rand::rng().random());
         let req = client
@@ -234,13 +243,15 @@ async fn get_session(base_url: &str, user_agent: &str, key: &Key) -> ah::Result<
         }
 
         let data: &[u8] = &resp.bytes().await.context("httun session get body")?;
-        let msg = Message::deserialize(data, key).context("Message deserialize")?;
+        let msg = Message::deserialize(data, key, None).context("Message deserialize")?;
         //TODO check sequence counter.
 
         let session_id = msg.session();
-        let _session_nonce = msg.into_payload(); //TODO
+        let Ok(session_secret) = msg.into_payload().try_into() else {
+            return Err(err!("Received invalid session secret"));
+        };
 
-        return Ok(session_id);
+        return Ok((session_id, session_secret));
     }
 
     Err(err!("Failed to get session ID from server."))
@@ -271,14 +282,14 @@ impl HttunClient {
 
         let url = format!("{}/{}", url, channel);
 
-        let session = get_session(&url, user_agent, &key).await?;
+        let (session_id, session_secret) = get_session(&url, user_agent, &key).await?;
         if DEBUG {
-            println!("Got session ID: {session}");
+            println!("Got session ID: {session_id}");
         }
 
         Ok(Self {
-            r: Arc::new(DirectionR::new(&url, session)),
-            w: Arc::new(DirectionW::new(&url, session)),
+            r: Arc::new(DirectionR::new(&url, session_id, session_secret)),
+            w: Arc::new(DirectionW::new(&url, session_id, session_secret)),
             user_agent: user_agent.to_string(),
             key: Arc::new(key),
         })

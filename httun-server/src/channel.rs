@@ -4,12 +4,12 @@
 
 use crate::time::{now, tdiff};
 use httun_conf::Config;
-use httun_protocol::Key;
+use httun_protocol::{Key, SessionSecret};
 use std::{
     collections::HashMap,
     sync::{
-        Arc,
-        atomic::{self, AtomicU16, AtomicU64},
+        Arc, Mutex as StdMutex,
+        atomic::{self, AtomicU64},
     },
 };
 use tokio::sync::{Mutex, Notify};
@@ -34,7 +34,7 @@ pub struct Channel {
     name: String,
     key: Key,
     ping: PingState,
-    session: AtomicU16,
+    session: StdMutex<(u16, Option<SessionSecret>)>,
     last_activity: AtomicU64,
 }
 
@@ -44,7 +44,7 @@ impl Channel {
             name: name.to_string(),
             key,
             ping: PingState::new(),
-            session: AtomicU16::new(0),
+            session: StdMutex::new((0, None)),
             last_activity: AtomicU64::new(now()),
         }
     }
@@ -61,14 +61,15 @@ impl Channel {
         &self.key
     }
 
-    pub fn session_id(&self) -> u16 {
-        self.session.load(atomic::Ordering::SeqCst)
+    pub fn session(&self) -> (u16, Option<SessionSecret>) {
+        *self.session.lock().expect("Mutex poisoned")
     }
 
-    pub fn make_new_session_id(&self) -> u16 {
-        self.session
-            .fetch_add(1, atomic::Ordering::SeqCst)
-            .wrapping_add(1)
+    pub fn create_new_session(&self, session_secret: SessionSecret) -> u16 {
+        let mut session = self.session.lock().expect("Mutex poisoned");
+        let session_id = session.0.wrapping_add(1);
+        *session = (session_id, Some(session_secret));
+        session_id
     }
 
     pub fn log_activity(&self) {

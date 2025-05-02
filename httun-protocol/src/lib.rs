@@ -31,7 +31,8 @@ pub type Key = [u8; 32];
 type Nonce = [u8; 12];
 const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
 const AUTHTAG_LEN: usize = 16;
-pub type SessionNonce = [u8; 16];
+pub type SessionSecret = [u8; 16];
+const SESSION_SECRET_LEN: usize = std::mem::size_of::<SessionSecret>();
 
 const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
 
@@ -175,7 +176,7 @@ impl Message {
         self.payload
     }
 
-    pub fn serialize(&self, key: &Key) -> Vec<u8> {
+    pub fn serialize(&self, key: &Key, session_secret: Option<SessionSecret>) -> Vec<u8> {
         let type_: u8 = self.type_.into();
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
         let oper: u8 = self.oper.into();
@@ -192,9 +193,13 @@ impl Message {
         buf.extend(&len.to_be_bytes());
         buf.extend(&self.payload);
 
+        let mut assoc_data = [0_u8; SESSION_SECRET_LEN + 1];
+        assoc_data[0] = type_;
+        assoc_data[1..].copy_from_slice(&session_secret.unwrap_or_default());
+
         let cipher = Aes256Gcm::new(key.into());
         let authtag = cipher
-            .encrypt_in_place_detached(&nonce, &[type_], &mut buf[AREA_ASSOC_LEN + NONCE_LEN..])
+            .encrypt_in_place_detached(&nonce, &assoc_data, &mut buf[AREA_ASSOC_LEN + NONCE_LEN..])
             .expect("AEAD encryption failed");
 
         buf.extend(&authtag);
@@ -203,11 +208,15 @@ impl Message {
         buf
     }
 
-    pub fn serialize_b64u(&self, key: &Key) -> String {
-        BASE64_URL_SAFE_NO_PAD.encode(self.serialize(key))
+    pub fn serialize_b64u(&self, key: &Key, session_secret: Option<SessionSecret>) -> String {
+        BASE64_URL_SAFE_NO_PAD.encode(self.serialize(key, session_secret))
     }
 
-    pub fn deserialize(buf: &[u8], key: &Key) -> ah::Result<Self> {
+    pub fn deserialize(
+        buf: &[u8],
+        key: &Key,
+        session_secret: Option<SessionSecret>,
+    ) -> ah::Result<Self> {
         if buf.len() < OVERHEAD_LEN {
             return Err(err!("Message size is too small."));
         }
@@ -222,11 +231,15 @@ impl Message {
         let nonce: [u8; NONCE_LEN] = buf[OFFS_NONCE..OFFS_NONCE + NONCE_LEN].try_into()?;
         let authtag: [u8; AUTHTAG_LEN] = buf[buf_len - AUTHTAG_LEN..].try_into()?;
 
+        let mut assoc_data = [0_u8; SESSION_SECRET_LEN + 1];
+        assoc_data[0] = type_;
+        assoc_data[1..].copy_from_slice(&session_secret.unwrap_or_default());
+
         let cipher = Aes256Gcm::new(key.into());
         if cipher
             .decrypt_in_place_detached(
                 &nonce.into(),
-                &[type_],
+                &assoc_data,
                 &mut buf[AREA_ASSOC_LEN + NONCE_LEN..buf_len - AUTHTAG_LEN],
                 &authtag.into(),
             )
@@ -258,13 +271,31 @@ impl Message {
         })
     }
 
-    pub fn deserialize_b64u(buf: &str, key: &Key) -> ah::Result<Self> {
+    pub fn deserialize_b64u(
+        buf: &str,
+        key: &Key,
+        session_secret: Option<SessionSecret>,
+    ) -> ah::Result<Self> {
         Self::deserialize(
             &BASE64_URL_SAFE_NO_PAD
                 .decode(buf.as_bytes())
                 .context("Base64url decode")?,
             key,
+            session_secret,
         )
+    }
+
+    pub fn peek_type(buf: &[u8]) -> ah::Result<MsgType> {
+        if buf.len() < OVERHEAD_LEN {
+            return Err(err!("Message size is too small."));
+        }
+        if buf.len() > OVERHEAD_LEN + MAX_PAYLOAD_LEN {
+            return Err(err!("Message size is too big."));
+        }
+
+        let type_ = u8::from_be_bytes(buf[OFFS_TYPE..OFFS_TYPE + 1].try_into()?);
+
+        type_.try_into()
     }
 }
 
