@@ -76,7 +76,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         let protman = Arc::clone(&protman);
 
         async move {
-            let mut interval = tokio::time::interval(Duration::from_millis(1000));
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
                 interval.tick().await;
                 protman.check_timeouts().await;

@@ -20,7 +20,7 @@ use std::{
     os::fd::AsRawFd as _,
     path::Path,
     sync::{Arc, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     runtime,
@@ -34,11 +34,35 @@ const MAX_NUM_CONNECTIONS: usize = 16;
 const SERVER_SOCK: &str = "/run/httun-server/httun-server.sock";
 
 const CHAN_R_TIMEOUT: Duration = Duration::from_secs(5);
+const UNIX_TIMEOUT: Duration = Duration::from_secs(15);
+
+#[derive(Debug, Clone)]
+struct Connection {
+    conn: Arc<ServerUnixConn>,
+    last_activity: Instant,
+}
+
+impl Connection {
+    fn new(conn: Arc<ServerUnixConn>) -> Self {
+        Self {
+            conn,
+            last_activity: Instant::now(),
+        }
+    }
+
+    fn log_activity(&mut self) {
+        self.last_activity = Instant::now();
+    }
+
+    fn is_timed_out(&self, now: Instant) -> bool {
+        self.last_activity.duration_since(now) >= UNIX_TIMEOUT
+    }
+}
 
 type ConnectionsKey = (String, bool);
-static CONNECTIONS: OnceLock<Mutex<HashMap<ConnectionsKey, Arc<ServerUnixConn>>>> = OnceLock::new();
+static CONNECTIONS: OnceLock<Mutex<HashMap<ConnectionsKey, Connection>>> = OnceLock::new();
 
-async fn get_connections<'a>() -> MutexGuard<'a, HashMap<ConnectionsKey, Arc<ServerUnixConn>>> {
+async fn get_connections<'a>() -> MutexGuard<'a, HashMap<ConnectionsKey, Connection>> {
     CONNECTIONS
         .get()
         .expect("CONNECTIONS obj not init")
@@ -46,15 +70,15 @@ async fn get_connections<'a>() -> MutexGuard<'a, HashMap<ConnectionsKey, Arc<Ser
         .await
 }
 
-//TODO We need to add a timeout for each conn
 async fn get_connection(name: &str, send: bool) -> ah::Result<Arc<ServerUnixConn>> {
     let key = (name.to_string(), send);
     let mut connections = get_connections().await;
-    if let Some(conn) = connections.get(&key) {
-        Ok(Arc::clone(conn))
+    if let Some(conn) = connections.get_mut(&key) {
+        conn.log_activity();
+        Ok(Arc::clone(&conn.conn))
     } else {
         let conn = Arc::new(ServerUnixConn::new(Path::new(SERVER_SOCK), name).await?);
-        connections.insert(key, Arc::clone(&conn));
+        connections.insert(key, Connection::new(Arc::clone(&conn)));
         Ok(conn)
     }
 }
@@ -63,6 +87,12 @@ async fn remove_connection(name: &str) {
     let mut connections = get_connections().await;
     connections.remove(&(name.to_string(), false));
     connections.remove(&(name.to_string(), true));
+}
+
+async fn check_connection_timeouts() {
+    let mut connections = get_connections().await;
+    let now = Instant::now();
+    connections.retain(|_, conn| !conn.is_timed_out(now));
 }
 
 fn path_element_is_valid(name: &str) -> bool {
@@ -313,6 +343,17 @@ async fn async_main() -> ah::Result<()> {
     CONNECTIONS.set(Mutex::new(HashMap::new())).unwrap();
 
     let fcgi = Fcgi::new(std::io::stdin().as_raw_fd()).context("Create FCGI")?;
+
+    // Spawn task: Periodic task.
+    task::spawn({
+        async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(3));
+            loop {
+                interval.tick().await;
+                check_connection_timeouts().await;
+            }
+        }
+    });
 
     // Spawn task: Socket handler.
     task::spawn(async move {
