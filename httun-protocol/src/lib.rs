@@ -56,7 +56,7 @@ pub fn secure_random<const SZ: usize>() -> [u8; SZ] {
         panic!("Failed to read secure random bytes from the operating system. (getrandom failed)");
     }
 
-    // For lengths bigger than 12 bytes the likelyhood of the sanity checks below
+    // For lengths bigger than 11 bytes the likelyhood of the sanity checks below
     // triggering on good generator is low enough.
     if SZ >= 12 {
         // Sanity check if getrandom implementation
@@ -218,12 +218,7 @@ impl Message {
         key: &Key,
         session_secret: Option<SessionSecret>,
     ) -> ah::Result<Self> {
-        if buf.len() < OVERHEAD_LEN {
-            return Err(err!("Message size is too small."));
-        }
-        if buf.len() > OVERHEAD_LEN + MAX_PAYLOAD_LEN {
-            return Err(err!("Message size is too big."));
-        }
+        Self::basic_length_check(buf)?;
 
         let mut buf = buf.to_vec();
         let buf_len = buf.len();
@@ -287,16 +282,18 @@ impl Message {
     }
 
     pub fn peek_type(buf: &[u8]) -> ah::Result<MsgType> {
+        Self::basic_length_check(buf)?;
+        u8::from_be_bytes(buf[OFFS_TYPE..OFFS_TYPE + 1].try_into()?).try_into()
+    }
+
+    fn basic_length_check(buf: &[u8]) -> ah::Result<()> {
         if buf.len() < OVERHEAD_LEN {
             return Err(err!("Message size is too small."));
         }
         if buf.len() > OVERHEAD_LEN + MAX_PAYLOAD_LEN {
             return Err(err!("Message size is too big."));
         }
-
-        let type_ = u8::from_be_bytes(buf[OFFS_TYPE..OFFS_TYPE + 1].try_into()?);
-
-        type_.try_into()
+        Ok(())
     }
 }
 
