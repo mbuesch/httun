@@ -69,6 +69,20 @@ impl ProtocolHandler {
         session.id
     }
 
+    async fn send_msg(&self, msg: Message, session: Session) -> ah::Result<()> {
+        if DEBUG {
+            println!("TX msg: {msg}");
+        }
+
+        let upayload = msg.serialize(self.chan.key(), session.secret);
+        let umsg = UnMessage::new_from_srv(self.chan_name().to_string(), upayload);
+        self.uconn.send(&umsg).await.context("Unix socket send")?;
+
+        self.chan.log_activity();
+
+        Ok(())
+    }
+
     pub async fn run(&self) -> ah::Result<()> {
         let Some(umsg) = self.uconn.recv().await.context("Unix socket receive")? else {
             return Err(err!("Disconnected."));
@@ -116,7 +130,7 @@ impl ProtocolHandler {
                 }
             },
             UnOperation::ReqFromSrv => {
-                let reply_msg = match msg_type {
+                match msg_type {
                     MsgType::Init => {
                         let _msg =
                             Message::deserialize(&umsg.into_payload(), self.chan.key(), None)?;
@@ -133,7 +147,8 @@ impl ProtocolHandler {
                         .context("Make httun packet")?;
                         msg.set_session(self.create_new_session(new_session_secret).await);
                         msg.set_sequence(u64::from_ne_bytes(secure_random()));
-                        msg
+
+                        self.send_msg(msg, session).await?;
                     }
                     MsgType::Data => {
                         let msg = Message::deserialize(
@@ -161,7 +176,8 @@ impl ProtocolHandler {
                                         .context("Make httun packet")?;
                                 msg.set_session(session.id);
                                 msg.set_sequence(session.sequence);
-                                msg
+
+                                self.send_msg(msg, session).await?;
                             }
                             Operation::ToSrv => {
                                 return Err(err!(
@@ -170,17 +186,7 @@ impl ProtocolHandler {
                             }
                         }
                     }
-                };
-
-                if DEBUG {
-                    println!("TX msg: {reply_msg}");
                 }
-
-                let upayload = reply_msg.serialize(self.chan.key(), session.secret);
-                let umsg = UnMessage::new_from_srv(self.chan_name().to_string(), upayload);
-                self.uconn.send(&umsg).await.context("Unix socket send")?;
-
-                self.chan.log_activity();
             }
             UnOperation::Init | UnOperation::FromSrv | UnOperation::Close => {
                 return Err(err!("Received invalid operation: {:?}", umsg.op()));
