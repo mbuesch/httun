@@ -18,6 +18,5 @@ clap = { workspace = true }
 httun-conf = { workspace = true }
 httun-protocol = { workspace = true }
 httun-tun = { workspace = true }
-rand = { workspace = true }
-reqwest = { workspace = true, features = [ "http2", "rustls-tls", "gzip", "brotli", "zstd", "deflate" ] }
+reqwest = { workspace = true, features = [ "http2", "rustls-tls", "gzip", "brotli", "zstd", "deflate", "charset", "hickory-dns" ] }
 tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time" ] }

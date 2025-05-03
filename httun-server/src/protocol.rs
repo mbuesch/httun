@@ -2,7 +2,10 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::{channel::Channel, unix_sock::UnixConn};
+use crate::{
+    channel::{Channel, Session},
+    unix_sock::UnixConn,
+};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::{Message, MsgType, Operation, SessionSecret, secure_random};
 use httun_tun::TunHandler;
@@ -53,17 +56,17 @@ impl ProtocolHandler {
             .store(session.into(), atomic::Ordering::SeqCst);
     }
 
-    fn session(&self) -> (u16, Option<SessionSecret>) {
+    fn session(&self) -> Session {
         self.chan.session()
     }
 
     async fn create_new_session(&self, session_secret: SessionSecret) -> u16 {
         let session = self.chan.create_new_session(session_secret);
-        self.pin_session(session);
+        self.pin_session(session.id);
         self.protman
-            .kill_old_sessions(self.chan_name(), session)
+            .kill_old_sessions(self.chan_name(), session.id)
             .await;
-        session
+        session.id
     }
 
     pub async fn run(&self) -> ah::Result<()> {
@@ -73,7 +76,7 @@ impl ProtocolHandler {
 
         let msg_type = Message::peek_type(umsg.payload())?;
 
-        let (session_id, mut session_secret) = self.session();
+        let mut session = self.session();
 
         //TODO check sequence counter
 
@@ -86,10 +89,10 @@ impl ProtocolHandler {
                     let msg = Message::deserialize(
                         &umsg.into_payload(),
                         self.chan.key(),
-                        session_secret,
+                        session.secret,
                     )?;
 
-                    if msg.session() != session_id {
+                    if msg.session() != session.id {
                         let umsg = UnMessage::new_close(self.chan_name().to_string());
                         self.uconn.send(&umsg).await.context("Unix socket send")?;
 
@@ -119,7 +122,8 @@ impl ProtocolHandler {
                             Message::deserialize(&umsg.into_payload(), self.chan.key(), None)?;
 
                         let new_session_secret: SessionSecret = secure_random();
-                        session_secret = None;
+
+                        session.secret = None; // Don't use it for *this* message.
 
                         let mut msg = Message::new(
                             MsgType::Init,
@@ -128,18 +132,19 @@ impl ProtocolHandler {
                         )
                         .context("Make httun packet")?;
                         msg.set_session(self.create_new_session(new_session_secret).await);
+                        msg.set_sequence(u64::from_ne_bytes(secure_random()));
                         msg
                     }
                     MsgType::Data => {
                         let msg = Message::deserialize(
                             &umsg.into_payload(),
                             self.chan.key(),
-                            session_secret,
+                            session.secret,
                         )?;
 
                         match msg.oper() {
                             Operation::FromSrv => {
-                                if msg.session() != session_id {
+                                if msg.session() != session.id {
                                     let umsg = UnMessage::new_close(self.chan_name().to_string());
                                     self.uconn.send(&umsg).await.context("Unix socket send")?;
 
@@ -154,7 +159,8 @@ impl ProtocolHandler {
                                 let mut msg =
                                     Message::new(MsgType::Data, Operation::FromSrv, payload)
                                         .context("Make httun packet")?;
-                                msg.set_session(session_id);
+                                msg.set_session(session.id);
+                                msg.set_sequence(session.sequence);
                                 msg
                             }
                             Operation::ToSrv => {
@@ -170,7 +176,7 @@ impl ProtocolHandler {
                     println!("TX msg: {reply_msg}");
                 }
 
-                let upayload = reply_msg.serialize(self.chan.key(), session_secret);
+                let upayload = reply_msg.serialize(self.chan.key(), session.secret);
                 let umsg = UnMessage::new_from_srv(self.chan_name().to_string(), upayload);
                 self.uconn.send(&umsg).await.context("Unix socket send")?;
 

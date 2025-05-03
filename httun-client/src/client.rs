@@ -4,8 +4,7 @@
 
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::Config;
-use httun_protocol::{Key, Message, MsgType, Operation, SessionSecret};
-use rand::prelude::*;
+use httun_protocol::{Key, Message, MsgType, Operation, SessionSecret, secure_random};
 use reqwest::{Client, StatusCode};
 use std::{
     sync::{
@@ -35,23 +34,32 @@ fn make_url(base_url: &str, serial: u64) -> String {
     format!("{}/{:010X}", base_url, serial & 0x000000FF_FFFFFFFF)
 }
 
-struct DirectionR {
-    url: String,
-    session_id: u16,
-    session_secret: SessionSecret,
-    serial: AtomicU64,
+macro_rules! define_direction {
+    ($struct:ident, $urlpath:literal) => {
+        struct $struct {
+            url: String,
+            session_id: u16,
+            session_secret: SessionSecret,
+            serial: AtomicU64,
+            tx_sequence: AtomicU64,
+        }
+
+        impl $struct {
+            fn new(base_url: &str, session_id: u16, session_secret: SessionSecret) -> Self {
+                Self {
+                    url: format!("{base_url}/{}", $urlpath),
+                    session_id,
+                    session_secret,
+                    serial: AtomicU64::new(0),
+                    tx_sequence: AtomicU64::new(0),
+                }
+            }
+        }
+    };
 }
 
-impl DirectionR {
-    fn new(base_url: &str, session_id: u16, session_secret: SessionSecret) -> Self {
-        Self {
-            url: format!("{base_url}/r"),
-            session_id,
-            session_secret,
-            serial: AtomicU64::new(0),
-        }
-    }
-}
+define_direction!(DirectionR, "r");
+define_direction!(DirectionW, "w");
 
 async fn direction_r(
     chan: Arc<DirectionR>,
@@ -59,7 +67,8 @@ async fn direction_r(
     user_agent: &str,
     key: &Key,
 ) -> ah::Result<()> {
-    chan.serial.store(rand::rng().random(), Relaxed);
+    chan.serial
+        .store(u64::from_ne_bytes(secure_random()), Relaxed);
 
     let client = Client::builder()
         .user_agent(user_agent)
@@ -75,7 +84,7 @@ async fn direction_r(
         'http: loop {
             let mut msg = Message::new(MsgType::Data, Operation::FromSrv, vec![])?;
             msg.set_session(chan.session_id);
-            //TODO msg.set_sequence();
+            msg.set_sequence(chan.tx_sequence.fetch_add(1, Relaxed));
             let msg = msg.serialize_b64u(key, Some(chan.session_secret));
 
             let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
@@ -125,31 +134,14 @@ async fn direction_r(
     }
 }
 
-struct DirectionW {
-    url: String,
-    session_id: u16,
-    session_secret: SessionSecret,
-    serial: AtomicU64,
-}
-
-impl DirectionW {
-    fn new(base_url: &str, session_id: u16, session_secret: SessionSecret) -> Self {
-        Self {
-            url: format!("{base_url}/w"),
-            session_id,
-            session_secret,
-            serial: AtomicU64::new(0),
-        }
-    }
-}
-
 async fn direction_w(
     chan: Arc<DirectionW>,
     loc: Arc<Mutex<Receiver<ToHttun>>>,
     user_agent: &str,
     key: &Key,
 ) -> ah::Result<()> {
-    chan.serial.store(rand::rng().random(), Relaxed);
+    chan.serial
+        .store(u64::from_ne_bytes(secure_random()), Relaxed);
 
     let client = Client::builder()
         .user_agent(user_agent)
@@ -165,7 +157,7 @@ async fn direction_w(
         };
 
         msg.set_session(chan.session_id);
-        //TODO msg.set_sequence();
+        msg.set_sequence(chan.tx_sequence.fetch_add(1, Relaxed));
 
         let msg = msg.serialize(key, Some(chan.session_secret));
 
@@ -223,11 +215,14 @@ async fn get_session(
 
     for _ in 0..SESSION_INIT_RETRIES {
         let mut msg = Message::new(MsgType::Init, Operation::FromSrv, vec![])?;
-        msg.set_session(rand::rng().random());
-        msg.set_sequence(rand::rng().random());
+        msg.set_session(u16::from_ne_bytes(secure_random()));
+        msg.set_sequence(u64::from_ne_bytes(secure_random()));
         let msg = msg.serialize_b64u(key, None);
 
-        let url = make_url(&format!("{base_url}/r"), rand::rng().random());
+        let url = make_url(
+            &format!("{base_url}/r"),
+            u64::from_ne_bytes(secure_random()),
+        );
         let req = client
             .get(&url)
             .query(&[("m", &msg)])

@@ -30,11 +30,18 @@ impl PingState {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct Session {
+    pub id: u16,
+    pub secret: Option<SessionSecret>,
+    pub sequence: u64,
+}
+
 pub struct Channel {
     name: String,
     key: Key,
     ping: PingState,
-    session: StdMutex<(u16, Option<SessionSecret>)>,
+    session: StdMutex<Session>,
     last_activity: AtomicU64,
 }
 
@@ -44,7 +51,7 @@ impl Channel {
             name: name.to_string(),
             key,
             ping: PingState::new(),
-            session: StdMutex::new((0, None)),
+            session: StdMutex::new(Default::default()),
             last_activity: AtomicU64::new(now()),
         }
     }
@@ -61,15 +68,25 @@ impl Channel {
         &self.key
     }
 
-    pub fn session(&self) -> (u16, Option<SessionSecret>) {
-        *self.session.lock().expect("Mutex poisoned")
+    pub fn session(&self) -> Session {
+        let mut session = self.session.lock().expect("Mutex poisoned");
+
+        session.sequence = session
+            .sequence
+            .checked_add(1)
+            .expect("Session::sequence overflow");
+
+        session.clone()
     }
 
-    pub fn create_new_session(&self, session_secret: SessionSecret) -> u16 {
+    pub fn create_new_session(&self, session_secret: SessionSecret) -> Session {
         let mut session = self.session.lock().expect("Mutex poisoned");
-        let session_id = session.0.wrapping_add(1);
-        *session = (session_id, Some(session_secret));
-        session_id
+
+        session.id = session.id.wrapping_add(1);
+        session.sequence = 0;
+        session.secret = Some(session_secret);
+
+        session.clone()
     }
 
     pub fn log_activity(&self) {
