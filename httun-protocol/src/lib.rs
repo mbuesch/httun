@@ -25,7 +25,11 @@ use aes_gcm::{
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
-use std::fmt::{Display, Formatter};
+use std::{
+    collections::HashSet,
+    fmt::{Display, Formatter},
+    num::NonZeroUsize,
+};
 
 pub type Key = [u8; 32];
 type Nonce = [u8; 12];
@@ -301,6 +305,53 @@ impl Display for Message {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         let payload = &self.payload[..self.payload.len().min(16)];
         write!(f, "Message {{ payload: {:?} }}", payload)
+    }
+}
+
+//TODO use a sequence number offset of 1<<63 for one of the channel directions so that they are never equal.
+pub struct SequenceValidator {
+    win_len: NonZeroUsize,
+    rx_seq: HashSet<u64>,
+}
+
+impl SequenceValidator {
+    pub fn new(win_len: NonZeroUsize) -> Self {
+        Self {
+            win_len,
+            rx_seq: HashSet::with_capacity(
+                win_len.checked_add(1).expect("win_len overflow").into(),
+            ),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.rx_seq.clear();
+    }
+
+    pub fn check_recv_seq(&mut self, msg: &Message) -> ah::Result<()> {
+        let sequence = msg.sequence();
+
+        let oldest_seq = self.rx_seq.iter().min().copied();
+
+        if let Some(oldest_seq) = oldest_seq {
+            if sequence <= oldest_seq {
+                return Err(err!("Message is too old: {sequence} <= {oldest_seq}."));
+            }
+        }
+        if self.rx_seq.contains(&sequence) {
+            return Err(err!("Message has already been received."));
+        }
+
+        self.rx_seq.insert(sequence);
+
+        if let Some(oldest_seq) = oldest_seq {
+            if self.rx_seq.len() > self.win_len.into() {
+                self.rx_seq.remove(&oldest_seq);
+            }
+        }
+        assert!(self.rx_seq.len() <= self.win_len.into());
+
+        Ok(())
     }
 }
 

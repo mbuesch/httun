@@ -69,6 +69,15 @@ impl ProtocolHandler {
         session.id
     }
 
+    async fn check_rx_sequence(&self, msg: &Message, direction_to_srv: bool) -> ah::Result<()> {
+        self.chan.check_rx_sequence(msg, direction_to_srv).await
+    }
+
+    async fn send_close(&self) -> ah::Result<()> {
+        let umsg = UnMessage::new_close(self.chan_name().to_string());
+        self.uconn.send(&umsg).await.context("Unix socket send")
+    }
+
     async fn send_msg(&self, msg: Message, session: Session) -> ah::Result<()> {
         if DEBUG {
             println!("TX msg: {msg}");
@@ -87,21 +96,22 @@ impl ProtocolHandler {
         let session = self.session();
 
         let msg = Message::deserialize(&umsg.into_payload(), self.chan.key(), session.secret)?;
-        //TODO check sequence counter
+        let oper = msg.oper();
 
-        if msg.oper() != Operation::ToSrv {
-            return Err(err!(
-                "Received {:?} in UnOperation::ToSrv context",
-                msg.oper()
-            ));
+        if oper != Operation::ToSrv {
+            let _ = self.send_close().await;
+            return Err(err!("Received {oper:?} in UnOperation::ToSrv context"));
         }
 
         if msg.session() != session.id {
-            let umsg = UnMessage::new_close(self.chan_name().to_string());
-            self.uconn.send(&umsg).await.context("Unix socket send")?;
-
+            let _ = self.send_close().await;
             return Err(err!("Session mismatch"));
         }
+
+        self.check_rx_sequence(&msg, true)
+            .await
+            .context("Direction: To server")?;
+
         if DEBUG {
             println!("RX msg: {msg}");
         }
@@ -150,21 +160,22 @@ impl ProtocolHandler {
         let session = self.session();
 
         let msg = Message::deserialize(&umsg.into_payload(), self.chan.key(), session.secret)?;
-        //TODO check sequence counter
+        let oper = msg.oper();
 
-        if msg.oper() != Operation::FromSrv {
-            return Err(err!(
-                "Received {:?} in UnOperation::ReqFromSrv context",
-                msg.oper()
-            ));
+        if oper != Operation::FromSrv {
+            let _ = self.send_close().await;
+            return Err(err!("Received {oper:?} in UnOperation::ReqFromSrv context"));
         }
 
         if msg.session() != session.id {
-            let umsg = UnMessage::new_close(self.chan_name().to_string());
-            self.uconn.send(&umsg).await.context("Unix socket send")?;
-
+            let _ = self.send_close().await;
             return Err(err!("Session mismatch"));
         }
+
+        self.check_rx_sequence(&msg, false)
+            .await
+            .context("Direction: From server")?;
+
         let payload = if self.chan.is_test_channel() {
             self.chan.get_pong().await
         } else {
@@ -248,7 +259,7 @@ impl ProtocolManager {
             async move {
                 loop {
                     if let Err(e) = prot.run().await {
-                        eprintln!("Client error: {e}");
+                        eprintln!("Client error: {e:?}");
                         break;
                     }
                 }

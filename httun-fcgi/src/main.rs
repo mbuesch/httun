@@ -299,7 +299,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
         "r" => match timeout(CHAN_R_TIMEOUT, recv_from_httun_server(name, req_payload)).await {
             Err(_) => fcgi_response(&req, "408 Request Timeout", None).await,
             Ok(Err(e)) => {
-                eprintln!("FCGI: HTTP-r: recv from server failed: {e}");
+                eprintln!("FCGI: HTTP-r: recv from server failed: {e:?}");
                 fcgi_response_error(
                     &req,
                     "503 Service Unavailable",
@@ -313,7 +313,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
         },
         "w" => {
             if let Err(e) = send_to_httun_server(name, req_payload).await {
-                eprintln!("FCGI: HTTP-w: send to server failed: {e}");
+                eprintln!("FCGI: HTTP-w: send to server failed: {e:?}");
                 fcgi_response_error(
                     &req,
                     "503 Service Unavailable",
@@ -364,7 +364,7 @@ async fn async_main() -> ah::Result<()> {
                     if let Ok(_permit) = conn_semaphore.acquire().await {
                         task::spawn(async move {
                             if let Err(e) = conn.handle(fcgi_handler).await {
-                                eprintln!("FCGI conn error: {e}");
+                                eprintln!("FCGI conn error: {e:?}");
                             }
                         });
                     }

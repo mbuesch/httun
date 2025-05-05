@@ -125,18 +125,18 @@ async fn run_mode_tun(
                         let msg = match Message::new(MsgType::Data, Operation::ToSrv, pkg) {
                             Ok(msg) => msg,
                             Err(e) => {
-                                eprintln!("Make httun packet failed: {e}");
+                                eprintln!("Make httun packet failed: {e:?}");
                                 error_delay().await;
                                 continue;
                             }
                         };
                         if let Err(e) = to_httun_tx.send(msg).await {
-                            eprintln!("Send to httun failed: {e}");
+                            eprintln!("Send to httun failed: {e:?}");
                             error_delay().await;
                         }
                     }
                     Err(e) => {
-                        eprintln!("Recv from TUN error: {e}");
+                        eprintln!("Recv from TUN error: {e:?}");
                         error_delay().await;
                     }
                 }
@@ -154,7 +154,7 @@ async fn run_mode_tun(
 
                 if let Some(pkg) = from_httun_rx.lock().await.recv().await {
                     if let Err(e) = tun.send(&pkg.into_payload()).await {
-                        eprintln!("Send to TUN error: {e}");
+                        eprintln!("Send to TUN error: {e:?}");
                         error_delay().await;
                     }
                 } else {
@@ -199,7 +199,7 @@ async fn run_mode_socket(
                                 if let Err(e) =
                                     conn.handle_packets(to_httun_tx, from_httun_rx).await
                                 {
-                                    eprintln!("Local client error: {e}");
+                                    eprintln!("Local client error: {e:?}");
                                 }
                             });
                         }
@@ -237,7 +237,7 @@ async fn run_mode_test(
                 {
                     Ok(msg) => msg,
                     Err(e) => {
-                        eprintln!("Make httun packet failed: {e}");
+                        eprintln!("Make httun packet failed: {e:?}");
                         error_delay().await;
                         continue;
                     }
@@ -305,7 +305,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         &opts.channel,
         matches!(opts.mode, Some(Mode::Test {})),
         &opts.user_agent,
-        &conf,
+        Arc::clone(&conf),
     )
     .await
     .context("Connect to httun server (FCGI)")?;
@@ -321,7 +321,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 let to_httun_rx = Arc::clone(&to_httun_rx);
 
                 if let Err(e) = client.handle_packets(from_httun_tx, to_httun_rx).await {
-                    eprintln!("httun client error: {e}");
+                    eprintln!("httun client error: {e:?}");
                     error_delay().await;
                 }
             }

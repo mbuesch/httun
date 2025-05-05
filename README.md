@@ -1,4 +1,4 @@
-# IP4/6 network traffic over HTTP tunnel
+# IP4/6 network traffic over encrypted HTTP tunnel
 
 # License
 

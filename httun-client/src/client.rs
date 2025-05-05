@@ -4,7 +4,9 @@
 
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::Config;
-use httun_protocol::{Key, Message, MsgType, Operation, SessionSecret, secure_random};
+use httun_protocol::{
+    Key, Message, MsgType, Operation, SequenceValidator, SessionSecret, secure_random,
+};
 use reqwest::{Client, StatusCode};
 use std::{
     sync::{
@@ -37,6 +39,8 @@ fn make_url(base_url: &str, serial: u64) -> String {
 macro_rules! define_direction {
     ($struct:ident, $urlpath:literal) => {
         struct $struct {
+            #[allow(dead_code)]
+            conf: Arc<Config>,
             url: String,
             session_id: u16,
             session_secret: SessionSecret,
@@ -45,8 +49,14 @@ macro_rules! define_direction {
         }
 
         impl $struct {
-            fn new(base_url: &str, session_id: u16, session_secret: SessionSecret) -> Self {
+            fn new(
+                conf: Arc<Config>,
+                base_url: &str,
+                session_id: u16,
+                session_secret: SessionSecret,
+            ) -> Self {
                 Self {
+                    conf,
                     url: format!("{base_url}/{}", $urlpath),
                     session_id,
                     session_secret,
@@ -69,6 +79,8 @@ async fn direction_r(
 ) -> ah::Result<()> {
     chan.serial
         .store(u64::from_ne_bytes(secure_random()), Relaxed);
+
+    let mut rx_validator = SequenceValidator::new(chan.conf.rx_window_length());
 
     let client = Client::builder()
         .user_agent(user_agent)
@@ -126,10 +138,20 @@ async fn direction_r(
 
             let msg = Message::deserialize(data, key, Some(chan.session_secret))
                 .context("Message deserialize")?;
-            if msg.session() == chan.session_id {
-                loc.send(msg).await?;
+            if msg.type_() != MsgType::Data {
+                return Err(err!("Received invalid message type"));
             }
-            //TODO check sequence counter.
+            if msg.oper() != Operation::FromSrv {
+                return Err(err!("Received invalid message operation"));
+            }
+            if msg.session() != chan.session_id {
+                return Err(err!("Received invalid message session"));
+            }
+            rx_validator
+                .check_recv_seq(&msg)
+                .context("Message sequence validation")?;
+
+            loc.send(msg).await?;
         }
     }
 }
@@ -239,8 +261,12 @@ async fn get_session(
 
         let data: &[u8] = &resp.bytes().await.context("httun session get body")?;
         let msg = Message::deserialize(data, key, None).context("Message deserialize")?;
-        //TODO check sequence counter.
-
+        if msg.type_() != MsgType::Init {
+            return Err(err!("Received invalid message type"));
+        }
+        if msg.oper() != Operation::FromSrv {
+            return Err(err!("Received invalid message operation"));
+        }
         let session_id = msg.session();
         let Ok(session_secret) = msg.into_payload().try_into() else {
             return Err(err!("Received invalid session secret"));
@@ -265,7 +291,7 @@ impl HttunClient {
         mut channel: &str,
         test_mode: bool,
         user_agent: &str,
-        conf: &Config,
+        conf: Arc<Config>,
     ) -> ah::Result<Self> {
         let key;
         if test_mode {
@@ -283,8 +309,18 @@ impl HttunClient {
         }
 
         Ok(Self {
-            r: Arc::new(DirectionR::new(&url, session_id, session_secret)),
-            w: Arc::new(DirectionW::new(&url, session_id, session_secret)),
+            r: Arc::new(DirectionR::new(
+                Arc::clone(&conf),
+                &url,
+                session_id,
+                session_secret,
+            )),
+            w: Arc::new(DirectionW::new(
+                Arc::clone(&conf),
+                &url,
+                session_id,
+                session_secret,
+            )),
             user_agent: user_agent.to_string(),
             key: Arc::new(key),
         })

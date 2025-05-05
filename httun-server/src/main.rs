@@ -133,11 +133,11 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             _ = sighup.recv() => {
                 println!("Reloading configuration.");
                 if let Err(e) = systemd_notify_reload_start() {
-                    eprintln!("Reload: Failed to notify systemd (Reloading): {e}");
+                    eprintln!("Reload: Failed to notify systemd (Reloading): {e:?}");
                 }
                 //TODO
                 if let Err(e) = systemd_notify_reload_done() {
-                    eprintln!("Reload: Failed to notify systemd (MonotonicUsec): {e}");
+                    eprintln!("Reload: Failed to notify systemd (MonotonicUsec): {e:?}");
                 }
             }
             code = exit_rx.recv() => {

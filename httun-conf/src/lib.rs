@@ -5,7 +5,7 @@
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Key;
 use serde::Deserialize;
-use std::path::Path;
+use std::{num::NonZeroUsize, path::Path};
 use toml::{Value, map::Map};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -46,6 +46,10 @@ impl Config {
         self.keys
             .get(channel)
             .map(|v| parse_key(v).expect("Parse key failed"))
+    }
+
+    pub fn rx_window_length(&self) -> NonZeroUsize {
+        128.try_into().unwrap() //TODO
     }
 }
 
