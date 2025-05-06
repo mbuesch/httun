@@ -112,21 +112,4 @@ pub fn systemd_notify_ready() -> ah::Result<()> {
     Ok(())
 }
 
-/// Notify reload-started-status to systemd.
-pub fn systemd_notify_reload_start() -> ah::Result<()> {
-    sd_notify::notify(
-        false,
-        &[
-            sd_notify::NotifyState::Reloading,
-            sd_notify::NotifyState::monotonic_usec_now()?,
-        ],
-    )?;
-    Ok(())
-}
-
-/// Notify reload-done-status to systemd.
-pub fn systemd_notify_reload_done() -> ah::Result<()> {
-    systemd_notify_ready()
-}
-
 // vim: ts=4 sw=4 expandtab

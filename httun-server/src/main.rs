@@ -8,12 +8,7 @@ mod systemd;
 mod time;
 mod unix_sock;
 
-use crate::{
-    channel::Channels,
-    protocol::ProtocolManager,
-    systemd::{systemd_notify_reload_done, systemd_notify_reload_start},
-    unix_sock::UnixSock,
-};
+use crate::{channel::Channels, protocol::ProtocolManager, unix_sock::UnixSock};
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::Parser;
 use httun_conf::Config;
@@ -28,6 +23,7 @@ use tokio::{
 #[derive(Parser, Debug, Clone)]
 struct Opts {
     /// Name of the tun interface to create.
+    //TODO: We should probably create a separate tun per channel.
     #[arg(long, short = 't', default_value = "httun-s0")]
     tun: String,
 
@@ -68,6 +64,8 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 
     // Create unix socket.
     let sock = UnixSock::new().await.context("Unix socket init")?;
+
+    //TODO: We should be able to drop root privileges here.
 
     let protman = ProtocolManager::new();
 
@@ -131,14 +129,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 break;
             }
             _ = sighup.recv() => {
-                println!("Reloading configuration.");
-                if let Err(e) = systemd_notify_reload_start() {
-                    eprintln!("Reload: Failed to notify systemd (Reloading): {e:?}");
-                }
-                //TODO
-                if let Err(e) = systemd_notify_reload_done() {
-                    eprintln!("Reload: Failed to notify systemd (MonotonicUsec): {e:?}");
-                }
+                println!("SIGHUP: Ignoring.");
             }
             code = exit_rx.recv() => {
                 exitcode = code.unwrap_or_else(|| Err(err!("Unknown error code.")));
