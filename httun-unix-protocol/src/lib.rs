@@ -8,7 +8,7 @@ use anyhow as ah;
 use bincode::serde::{decode_from_slice, encode_to_vec};
 use serde::{Deserialize, Serialize};
 
-const MAX_LEN: usize = 1024 * (64 + 2);
+const MAX_LEN: usize = u16::MAX as usize * 2;
 
 #[inline]
 fn cfg() -> impl bincode::config::Config {

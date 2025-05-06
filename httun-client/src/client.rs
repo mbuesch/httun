@@ -25,6 +25,8 @@ use tokio::{
     time::sleep,
 };
 
+//TODO: Add support for http-basic-auth as an optional first barrier to jump over.
+
 const DEBUG: bool = false;
 const HTTP_R_TIMEOUT: Duration = Duration::from_secs(15);
 const HTTP_W_TIMEOUT: Duration = Duration::from_secs(10);

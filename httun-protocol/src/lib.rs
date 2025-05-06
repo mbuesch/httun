@@ -32,6 +32,11 @@ use std::{
     sync::atomic::{self, AtomicU64},
 };
 
+//TODO: Currently we only have a symmetric common secret.
+//      Add a way to derive a symmetric key from some sort of asymmetric key handshake.
+//      We should be able to have both, a symmetric user key and an asymmetric user key
+//      and use them both at the same time.
+
 pub type Key = [u8; 32];
 type Nonce = [u8; 12];
 const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
