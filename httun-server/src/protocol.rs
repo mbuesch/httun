@@ -7,7 +7,7 @@ use crate::{
     unix_sock::UnixConn,
 };
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::{Message, MsgType, Operation, SessionSecret, secure_random};
+use httun_protocol::{Message, MsgType, Operation, SequenceType, SessionSecret, secure_random};
 use httun_tun::TunHandler;
 use httun_unix_protocol::{UnMessage, UnOperation};
 use std::sync::{
@@ -61,16 +61,20 @@ impl ProtocolHandler {
     }
 
     async fn create_new_session(&self, session_secret: SessionSecret) -> u16 {
-        let session = self.chan.create_new_session(session_secret);
-        self.pin_session(session.id);
+        let session_id = self.chan.create_new_session(session_secret);
+        self.pin_session(session_id);
         self.protman
-            .kill_old_sessions(self.chan_name(), session.id)
+            .kill_old_sessions(self.chan_name(), session_id)
             .await;
-        session.id
+        session_id
     }
 
-    async fn check_rx_sequence(&self, msg: &Message, direction_to_srv: bool) -> ah::Result<()> {
-        self.chan.check_rx_sequence(msg, direction_to_srv).await
+    async fn check_rx_sequence(
+        &self,
+        msg: &Message,
+        sequence_type: SequenceType,
+    ) -> ah::Result<()> {
+        self.chan.check_rx_sequence(msg, sequence_type).await
     }
 
     async fn send_close(&self) -> ah::Result<()> {
@@ -108,9 +112,9 @@ impl ProtocolHandler {
             return Err(err!("Session mismatch"));
         }
 
-        self.check_rx_sequence(&msg, true)
+        self.check_rx_sequence(&msg, SequenceType::B)
             .await
-            .context("Direction: To server")?;
+            .context("rx sequence validation SequenceType::B")?;
 
         if DEBUG {
             println!("RX msg: {msg}");
@@ -172,9 +176,9 @@ impl ProtocolHandler {
             return Err(err!("Session mismatch"));
         }
 
-        self.check_rx_sequence(&msg, false)
+        self.check_rx_sequence(&msg, SequenceType::C)
             .await
-            .context("Direction: From server")?;
+            .context("rx sequence validation SequenceType::C")?;
 
         let payload = if self.chan.is_test_channel() {
             self.chan.get_pong().await

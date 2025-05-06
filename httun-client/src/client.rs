@@ -5,7 +5,8 @@
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::Config;
 use httun_protocol::{
-    Key, Message, MsgType, Operation, SequenceValidator, SessionSecret, secure_random,
+    Key, Message, MsgType, Operation, SequenceGenerator, SequenceType, SequenceValidator,
+    SessionSecret, secure_random,
 };
 use reqwest::{Client, StatusCode};
 use std::{
@@ -45,7 +46,6 @@ macro_rules! define_direction {
             session_id: u16,
             session_secret: SessionSecret,
             serial: AtomicU64,
-            tx_sequence: AtomicU64,
         }
 
         impl $struct {
@@ -61,7 +61,6 @@ macro_rules! define_direction {
                     session_id,
                     session_secret,
                     serial: AtomicU64::new(0),
-                    tx_sequence: AtomicU64::new(0),
                 }
             }
         }
@@ -80,7 +79,8 @@ async fn direction_r(
     chan.serial
         .store(u64::from_ne_bytes(secure_random()), Relaxed);
 
-    let mut rx_validator = SequenceValidator::new(chan.conf.rx_window_length());
+    let tx_sequence_c = SequenceGenerator::new(SequenceType::C);
+    let mut rx_validator_a = SequenceValidator::new(SequenceType::A, chan.conf.rx_window_length());
 
     let client = Client::builder()
         .user_agent(user_agent)
@@ -96,7 +96,7 @@ async fn direction_r(
         'http: loop {
             let mut msg = Message::new(MsgType::Data, Operation::FromSrv, vec![])?;
             msg.set_session(chan.session_id);
-            msg.set_sequence(chan.tx_sequence.fetch_add(1, Relaxed));
+            msg.set_sequence(tx_sequence_c.next());
             let msg = msg.serialize_b64u(key, Some(chan.session_secret));
 
             let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
@@ -147,9 +147,9 @@ async fn direction_r(
             if msg.session() != chan.session_id {
                 return Err(err!("Received invalid message session"));
             }
-            rx_validator
+            rx_validator_a
                 .check_recv_seq(&msg)
-                .context("Message sequence validation")?;
+                .context("rx sequence validation SequenceType::A")?;
 
             loc.send(msg).await?;
         }
@@ -165,6 +165,8 @@ async fn direction_w(
     chan.serial
         .store(u64::from_ne_bytes(secure_random()), Relaxed);
 
+    let tx_sequence_b = SequenceGenerator::new(SequenceType::B);
+
     let client = Client::builder()
         .user_agent(user_agent)
         .referer(false)
@@ -179,7 +181,7 @@ async fn direction_w(
         };
 
         msg.set_session(chan.session_id);
-        msg.set_sequence(chan.tx_sequence.fetch_add(1, Relaxed));
+        msg.set_sequence(tx_sequence_b.next());
 
         let msg = msg.serialize(key, Some(chan.session_secret));
 

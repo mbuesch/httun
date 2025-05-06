@@ -5,7 +5,9 @@
 use crate::time::{now, tdiff};
 use anyhow::{self as ah, Context as _};
 use httun_conf::Config;
-use httun_protocol::{Key, Message, SequenceValidator, SessionSecret};
+use httun_protocol::{
+    Key, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret,
+};
 use std::{
     collections::HashMap,
     sync::{
@@ -38,26 +40,35 @@ pub struct Session {
     pub sequence: u64,
 }
 
+struct SessionState {
+    session: Session,
+    tx_sequence_a: SequenceGenerator,
+    rx_validator_b: SequenceValidator,
+    rx_validator_c: SequenceValidator,
+}
+
 pub struct Channel {
     name: String,
     key: Key,
     ping: PingState,
-    session: StdMutex<Session>,
+    session: StdMutex<SessionState>,
     last_activity: AtomicU64,
-    rx_validator_to_srv: StdMutex<SequenceValidator>,
-    rx_validator_from_srv: StdMutex<SequenceValidator>,
 }
 
 impl Channel {
     fn new(conf: &Config, name: &str, key: Key) -> Self {
+        let session = SessionState {
+            session: Default::default(),
+            tx_sequence_a: SequenceGenerator::new(SequenceType::A),
+            rx_validator_b: SequenceValidator::new(SequenceType::B, conf.rx_window_length()),
+            rx_validator_c: SequenceValidator::new(SequenceType::C, conf.rx_window_length()),
+        };
         Self {
             name: name.to_string(),
             key,
             ping: PingState::new(),
-            session: StdMutex::new(Default::default()),
+            session: StdMutex::new(session),
             last_activity: AtomicU64::new(now()),
-            rx_validator_to_srv: StdMutex::new(SequenceValidator::new(conf.rx_window_length())),
-            rx_validator_from_srv: StdMutex::new(SequenceValidator::new(conf.rx_window_length())),
         }
     }
 
@@ -74,44 +85,34 @@ impl Channel {
     }
 
     pub fn session(&self) -> Session {
-        let mut session = self.session.lock().expect("Mutex poisoned");
-
-        session.sequence = session
-            .sequence
-            .checked_add(1)
-            .expect("Session::sequence overflow");
-
-        session.clone()
+        let mut s = self.session.lock().expect("Mutex poisoned");
+        s.session.sequence = s.tx_sequence_a.next();
+        s.session.clone()
     }
 
-    pub fn create_new_session(&self, session_secret: SessionSecret) -> Session {
-        let session = {
-            let mut session = self.session.lock().expect("Mutex poisoned");
+    pub fn create_new_session(&self, session_secret: SessionSecret) -> u16 {
+        let mut s = self.session.lock().expect("Mutex poisoned");
 
-            session.id = session.id.wrapping_add(1);
-            session.sequence = 0;
-            session.secret = Some(session_secret);
+        s.session.id = s.session.id.wrapping_add(1);
+        s.session.sequence = 0;
+        s.session.secret = Some(session_secret);
+        s.tx_sequence_a.reset();
+        s.rx_validator_b.reset();
+        s.rx_validator_c.reset();
 
-            session.clone()
-        };
-
-        self.rx_validator_to_srv
-            .lock()
-            .expect("Mutex poisoned")
-            .reset();
-        self.rx_validator_from_srv
-            .lock()
-            .expect("Mutex poisoned")
-            .reset();
-
-        session
+        s.session.id
     }
 
-    pub async fn check_rx_sequence(&self, msg: &Message, direction_to_srv: bool) -> ah::Result<()> {
-        let mut validator = if direction_to_srv {
-            self.rx_validator_to_srv.lock().expect("Mutex poisoned")
-        } else {
-            self.rx_validator_from_srv.lock().expect("Mutex poisoned")
+    pub async fn check_rx_sequence(
+        &self,
+        msg: &Message,
+        sequence_type: SequenceType,
+    ) -> ah::Result<()> {
+        let mut s = self.session.lock().expect("Mutex poisoned");
+        let validator = match sequence_type {
+            SequenceType::B => &mut s.rx_validator_b,
+            SequenceType::C => &mut s.rx_validator_c,
+            t => panic!("Invalid {t:?}"),
         };
         validator
             .check_recv_seq(msg)
