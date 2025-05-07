@@ -15,5 +15,5 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 httun-protocol = { workspace = true }
-tokio = { workspace = true, features = [ "sync", "net", "time" ] }
+tokio = { workspace = true, features = [ "sync", "net", "time", "macros" ] }
 tokio-tun = { workspace = true }

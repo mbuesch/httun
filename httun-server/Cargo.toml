@@ -19,7 +19,7 @@ httun-conf = { workspace = true }
 httun-protocol = { workspace = true }
 httun-unix-protocol = { workspace = true }
 libc = { workspace = true }
-tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time" ] }
+tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros" ] }
 
 [target.'cfg(any(target_os="linux", target_os="android"))'.dependencies]
 sd-notify = { workspace = true }
