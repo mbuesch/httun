@@ -12,7 +12,6 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use clap::{Parser, Subcommand};
 use httun_conf::Config;
 use httun_protocol::{Key, Message, MsgType, Operation, secure_random};
-use httun_tun::TunHandler;
 use std::{num::Wrapping, path::Path, sync::Arc, time::Duration};
 use tokio::{
     runtime,
@@ -103,13 +102,14 @@ pub async fn run_genkey(channel: &str) -> ah::Result<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 async fn run_mode_tun(
     to_httun_tx: Arc<Sender<Message>>,
     from_httun_rx: Arc<Mutex<Receiver<Message>>>,
     tun_name: &str,
 ) -> ah::Result<()> {
     let tun = Arc::new(
-        TunHandler::new(tun_name)
+        httun_tun::TunHandler::new(tun_name)
             .await
             .context("Create TUN interface")?,
     );
@@ -168,6 +168,15 @@ async fn run_mode_tun(
     });
 
     Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+async fn run_mode_tun(
+    _to_httun_tx: Arc<Sender<Message>>,
+    _from_httun_rx: Arc<Mutex<Receiver<Message>>>,
+    _tun_name: &str,
+) -> ah::Result<()> {
+    Err(err!("TUN is only supported on Linux."))
 }
 
 async fn run_mode_socket(
