@@ -22,7 +22,7 @@ homepage = "https://bues.ch/"
 repository = "https://github.com/mbuesch/httun"
 readme = "README.md"
 categories = [ "network-programming", "web-programming::http-client", "web-programming::http-server", "cryptography" ]
-keywords = [ "http", "tun", "network", "tunnel" ]
+keywords = [ "http", "tun", "network", "tunnel", "encrypted" ]
 
 [workspace.dependencies]
 aes-gcm = "0.10"

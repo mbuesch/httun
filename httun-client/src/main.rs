@@ -16,13 +16,15 @@ use httun_tun::TunHandler;
 use std::{num::Wrapping, path::Path, sync::Arc, time::Duration};
 use tokio::{
     runtime,
-    signal::unix::{SignalKind, signal},
     sync::{
         Mutex, Semaphore,
         mpsc::{self, Receiver, Sender},
     },
     task, time,
 };
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use tokio::signal::unix::{SignalKind, signal};
 
 #[derive(Parser, Debug, Clone)]
 struct Opts {
@@ -263,6 +265,41 @@ async fn run_mode_test(
     Ok(())
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+macro_rules! register_signal {
+    ($kind:ident) => {
+        signal(SignalKind::$kind()).unwrap()
+    };
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+macro_rules! register_signal {
+    ($kind:ident) => {
+        ()
+    };
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+macro_rules! recv_signal {
+    ($sig:ident) => {
+        $sig.recv()
+    };
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+async fn signal_dummy(_: &mut ()) {
+    loop {
+        time::sleep(Duration::MAX).await;
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+macro_rules! recv_signal {
+    ($sig:ident) => {
+        signal_dummy(&mut $sig)
+    };
+}
+
 async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     if matches!(opts.mode, Some(Mode::Genkey {})) {
         return run_genkey(&opts.channel).await;
@@ -296,9 +333,9 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let to_httun_rx = Arc::new(Mutex::new(to_httun_rx));
 
     // Register unix signal handlers.
-    let mut sigterm = signal(SignalKind::terminate()).unwrap();
-    let mut sigint = signal(SignalKind::interrupt()).unwrap();
-    let mut sighup = signal(SignalKind::hangup()).unwrap();
+    let mut sigterm = register_signal!(terminate);
+    let mut sigint = register_signal!(interrupt);
+    let mut sighup = register_signal!(hangup);
 
     let mut client = HttunClient::connect(
         opts.server_url.as_ref().unwrap(),
@@ -357,16 +394,16 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let exitcode;
     loop {
         tokio::select! {
-            _ = sigterm.recv() => {
+            _ = recv_signal!(sigterm) => {
                 eprintln!("SIGTERM: Terminating.");
                 exitcode = Ok(());
                 break;
             }
-            _ = sigint.recv() => {
+            _ = recv_signal!(sigint) => {
                 exitcode = Err(err!("Interrupted by SIGINT."));
                 break;
             }
-            _ = sighup.recv() => {
+            _ = recv_signal!(sighup) => {
                 println!("SIGHUP: Ignoring.");
             }
             code = exit_rx.recv() => {
