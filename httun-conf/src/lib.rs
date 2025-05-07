@@ -8,6 +8,11 @@ use serde::Deserialize;
 use std::{num::NonZeroUsize, path::Path};
 use toml::{Value, map::Map};
 
+pub struct HttpAuth {
+    pub user: String,
+    pub password: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     keys: Map<String, Value>,
@@ -46,6 +51,10 @@ impl Config {
         self.keys
             .get(channel)
             .map(|v| parse_key(v).expect("Parse key failed"))
+    }
+
+    pub fn http_auth(&self, _channel: &str) -> Option<HttpAuth> {
+        None //TODO
     }
 
     pub fn rx_window_length(&self) -> NonZeroUsize {

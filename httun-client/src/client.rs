@@ -25,8 +25,6 @@ use tokio::{
     time::sleep,
 };
 
-//TODO: Add support for http-basic-auth as an optional first barrier to jump over.
-
 const DEBUG: bool = false;
 const HTTP_R_TIMEOUT: Duration = Duration::from_secs(15);
 const HTTP_W_TIMEOUT: Duration = Duration::from_secs(10);
@@ -44,6 +42,7 @@ macro_rules! define_direction {
         struct $struct {
             #[allow(dead_code)]
             conf: Arc<Config>,
+            name: String,
             url: String,
             session_id: u16,
             session_secret: SessionSecret,
@@ -53,12 +52,14 @@ macro_rules! define_direction {
         impl $struct {
             fn new(
                 conf: Arc<Config>,
+                name: &str,
                 base_url: &str,
                 session_id: u16,
                 session_secret: SessionSecret,
             ) -> Self {
                 Self {
                     conf,
+                    name: name.to_string(),
                     url: format!("{base_url}/{}", $urlpath),
                     session_id,
                     session_secret,
@@ -92,6 +93,8 @@ async fn direction_r(
         .build()
         .context("httun HTTP-r build HTTP client")?;
 
+    let http_auth = chan.conf.http_auth(&chan.name);
+
     loop {
         let mut resp;
 
@@ -102,10 +105,13 @@ async fn direction_r(
             let msg = msg.serialize_b64u(key, Some(chan.session_secret));
 
             let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
-            let req = client
+            let mut req = client
                 .get(&url)
                 .query(&[("m", &msg)])
                 .header("Cache-Control", "no-store");
+            if let Some(http_auth) = &http_auth {
+                req = req.basic_auth(&http_auth.user, http_auth.password.as_ref());
+            }
             resp = req.send().await.context("httun HTTP-r send")?;
 
             match resp.status() {
@@ -177,6 +183,8 @@ async fn direction_w(
         .build()
         .context("httun HTTP-w build HTTP client")?;
 
+    let http_auth = chan.conf.http_auth(&chan.name);
+
     loop {
         let Some(mut msg) = loc.lock().await.recv().await else {
             return Err(err!("ToHttun IPC closed"));
@@ -193,11 +201,14 @@ async fn direction_w(
 
         'http: loop {
             let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
-            let req = client
+            let mut req = client
                 .post(&url)
                 .header("Cache-Control", "no-store")
                 .header("Content-Type", "application/octet-stream")
                 .body(msg.clone());
+            if let Some(http_auth) = &http_auth {
+                req = req.basic_auth(&http_auth.user, http_auth.password.as_ref());
+            }
             let resp = req.send().await.context("httun HTTP-w send")?;
 
             match resp.status() {
@@ -227,6 +238,8 @@ async fn direction_w(
 }
 
 async fn get_session(
+    conf: &Config,
+    chan_name: &str,
     base_url: &str,
     user_agent: &str,
     key: &Key,
@@ -239,6 +252,8 @@ async fn get_session(
         .build()
         .context("httun session build HTTP client")?;
 
+    let http_auth = conf.http_auth(chan_name);
+
     for _ in 0..SESSION_INIT_RETRIES {
         let mut msg = Message::new(MsgType::Init, Operation::FromSrv, vec![])?;
         msg.set_session(u16::from_ne_bytes(secure_random()));
@@ -249,10 +264,13 @@ async fn get_session(
             &format!("{base_url}/r"),
             u64::from_ne_bytes(secure_random()),
         );
-        let req = client
+        let mut req = client
             .get(&url)
             .query(&[("m", &msg)])
             .header("Cache-Control", "no-store");
+        if let Some(http_auth) = &http_auth {
+            req = req.basic_auth(&http_auth.user, http_auth.password.as_ref());
+        }
         let resp = req.send().await.context("httun session send")?;
 
         match resp.status() {
@@ -307,7 +325,8 @@ impl HttunClient {
 
         let url = format!("{}/{}", url, channel);
 
-        let (session_id, session_secret) = get_session(&url, user_agent, &key).await?;
+        let (session_id, session_secret) =
+            get_session(&conf, channel, &url, user_agent, &key).await?;
         if DEBUG {
             println!("Got session ID: {session_id}");
         }
@@ -315,12 +334,14 @@ impl HttunClient {
         Ok(Self {
             r: Arc::new(DirectionR::new(
                 Arc::clone(&conf),
+                channel,
                 &url,
                 session_id,
                 session_secret,
             )),
             w: Arc::new(DirectionW::new(
                 Arc::clone(&conf),
+                channel,
                 &url,
                 session_id,
                 session_secret,

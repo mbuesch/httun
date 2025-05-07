@@ -100,8 +100,6 @@ fn path_element_is_valid(name: &str) -> bool {
         .all(|c| c.is_ascii_alphanumeric() || ['-', '_'].contains(&c))
 }
 
-//TODO try again is server disconnected (Broken Pipe, os error 32)
-
 async fn recv_from_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<Vec<u8>> {
     let conn = get_connection(name, false).await?;
     match conn.recv(req_payload).await {
