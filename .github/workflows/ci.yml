@@ -8,8 +8,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build
+  full:
+    name: Full
     strategy:
       matrix:
         toolchain:
@@ -26,5 +26,27 @@ jobs:
       - run: cargo clippy -- --deny warnings
       - run: cargo clippy --tests -- --deny warnings
       - run: cargo test
+
+  client_only:
+    name: Client only
+    strategy:
+      matrix:
+        toolchain:
+          - 1.86.0
+        os:
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update ${{ matrix.toolchain }}
+      - run: rustup default ${{ matrix.toolchain }}
+      - run: rustup component add clippy
+      - run: cargo build --verbose --package httun-client
+      - run: cargo clippy --package httun-client -- --deny warnings
+      - run: cargo clippy --tests --package httun-client -- --deny warnings
+      - run: cargo test --package httun-client
+      - run: cargo test --package httun-conf
+      - run: cargo test --package httun-protocol
 
 # vim: ts=2 sw=2 expandtab
