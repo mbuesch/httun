@@ -57,11 +57,12 @@ pub struct Channel {
 
 impl Channel {
     fn new(conf: &Config, name: &str, key: Key) -> Self {
+        let window_length = conf.parameters().receive().window_length();
         let session = SessionState {
             session: Default::default(),
             tx_sequence_a: SequenceGenerator::new(SequenceType::A),
-            rx_validator_b: SequenceValidator::new(SequenceType::B, conf.rx_window_length()),
-            rx_validator_c: SequenceValidator::new(SequenceType::C, conf.rx_window_length()),
+            rx_validator_b: SequenceValidator::new(SequenceType::B, window_length),
+            rx_validator_c: SequenceValidator::new(SequenceType::C, window_length),
         };
         Self {
             name: name.to_string(),
@@ -155,9 +156,13 @@ impl Channels {
     pub async fn new(conf: Arc<Config>, enable_test: bool) -> Self {
         let mut channels = HashMap::new();
 
-        for (chan, key) in conf.keys_iter() {
-            println!("Active channel: {chan}");
-            channels.insert(chan.to_string(), Arc::new(Channel::new(&conf, &chan, key)));
+        for chan in conf.channels_iter() {
+            let key = chan.shared_secret();
+            println!("Active channel: {}", chan.name());
+            channels.insert(
+                chan.name().to_string(),
+                Arc::new(Channel::new(&conf, chan.name(), key)),
+            );
         }
         if channels.is_empty() {
             eprintln!("WARNING: There are no [keys] configured in the configuration file!");

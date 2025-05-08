@@ -83,7 +83,8 @@ async fn direction_r(
         .store(u64::from_ne_bytes(secure_random()), Relaxed);
 
     let tx_sequence_c = SequenceGenerator::new(SequenceType::C);
-    let mut rx_validator_a = SequenceValidator::new(SequenceType::A, chan.conf.rx_window_length());
+    let window_length = chan.conf.parameters().receive().window_length();
+    let mut rx_validator_a = SequenceValidator::new(SequenceType::A, window_length);
 
     let client = Client::builder()
         .user_agent(user_agent)
@@ -93,7 +94,10 @@ async fn direction_r(
         .build()
         .context("httun HTTP-r build HTTP client")?;
 
-    let http_auth = chan.conf.http_auth(&chan.name);
+    let http_auth = chan
+        .conf
+        .channel(&chan.name)
+        .and_then(|c| c.http_basic_auth().clone());
 
     loop {
         let mut resp;
@@ -183,7 +187,10 @@ async fn direction_w(
         .build()
         .context("httun HTTP-w build HTTP client")?;
 
-    let http_auth = chan.conf.http_auth(&chan.name);
+    let http_auth = chan
+        .conf
+        .channel(&chan.name)
+        .and_then(|c| c.http_basic_auth().clone());
 
     loop {
         let Some(mut msg) = loc.lock().await.recv().await else {
@@ -252,7 +259,9 @@ async fn get_session(
         .build()
         .context("httun session build HTTP client")?;
 
-    let http_auth = conf.http_auth(chan_name);
+    let http_auth = conf
+        .channel(chan_name)
+        .and_then(|c| c.http_basic_auth().clone());
 
     for _ in 0..SESSION_INIT_RETRIES {
         let mut msg = Message::new(MsgType::Init, Operation::FromSrv, vec![])?;
@@ -320,7 +329,10 @@ impl HttunClient {
             key = [0; 32];
             channel = "__test__";
         } else {
-            key = conf.key(channel).context("Get key from configuration")?;
+            key = conf
+                .channel(channel)
+                .context("Get key from configuration")?
+                .shared_secret();
         }
 
         let url = format!("{}/{}", url, channel);

@@ -6,16 +6,66 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Key;
 use serde::Deserialize;
 use std::{num::NonZeroUsize, path::Path};
-use toml::{Value, map::Map};
 
+#[derive(Debug, Clone, Deserialize)]
 pub struct HttpAuth {
     pub user: String,
     pub password: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct ConfigParametersReceive {
+    window_length: Option<NonZeroUsize>,
+}
+
+impl ConfigParametersReceive {
+    pub fn window_length(&self) -> NonZeroUsize {
+        self.window_length.unwrap_or(128.try_into().unwrap())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConfigParameters {
+    receive: ConfigParametersReceive,
+}
+
+impl ConfigParameters {
+    pub fn receive(&self) -> &ConfigParametersReceive {
+        &self.receive
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConfigChannel {
+    disabled: Option<bool>,
+    name: String,
+    shared_secret: String,
+    tun: Option<String>,
+    http_basic_auth: Option<HttpAuth>,
+}
+
+impl ConfigChannel {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn shared_secret(&self) -> Key {
+        parse_hex(&self.shared_secret).expect("Invalid key format")
+    }
+
+    pub fn tun(&self) -> Option<&str> {
+        self.tun.as_deref()
+    }
+
+    pub fn http_basic_auth(&self) -> &Option<HttpAuth> {
+        &self.http_basic_auth
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    keys: Map<String, Value>,
+    parameters: ConfigParameters,
+    channels: Vec<ConfigChannel>,
 }
 
 impl Config {
@@ -32,49 +82,55 @@ impl Config {
     }
 
     fn check(&self) -> ah::Result<()> {
-        // Check [keys] section.
-        for (key, value) in self.keys.iter() {
-            if let Err(e) = parse_key(value) {
-                return Err(err!("The value of '{key}' under [keys] is invalid: {e}"));
+        for chan in self.channels_iter() {
+            let shared_secret: ah::Result<Key> = parse_hex(&chan.shared_secret);
+            if let Err(e) = shared_secret {
+                return Err(err!(
+                    "The value of shared-secret = \"{}\" is invalid: {}",
+                    chan.shared_secret,
+                    e
+                ));
             }
         }
         Ok(())
     }
 
-    pub fn keys_iter(&self) -> KeysIter<'_> {
-        KeysIter {
-            inner_iter: self.keys.iter(),
+    pub fn channels_iter(&self) -> ChanIter<'_> {
+        ChanIter {
+            config: self,
+            index: 0,
         }
     }
 
-    pub fn key(&self, channel: &str) -> Option<Key> {
-        self.keys
-            .get(channel)
-            .map(|v| parse_key(v).expect("Parse key failed"))
+    pub fn channel(&self, channel: &str) -> Option<&ConfigChannel> {
+        self.channels_iter().find(|chan| chan.name() == channel)
     }
 
-    pub fn http_auth(&self, _channel: &str) -> Option<HttpAuth> {
-        None //TODO
-    }
-
-    pub fn rx_window_length(&self) -> NonZeroUsize {
-        128.try_into().unwrap() //TODO
+    pub fn parameters(&self) -> &ConfigParameters {
+        &self.parameters
     }
 }
 
-pub struct KeysIter<'a> {
-    inner_iter: toml::map::Iter<'a>,
+pub struct ChanIter<'a> {
+    config: &'a Config,
+    index: usize,
 }
 
-impl Iterator for KeysIter<'_> {
-    type Item = (String, Key);
+impl<'a> Iterator for ChanIter<'a> {
+    type Item = &'a ConfigChannel;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((k, v)) = self.inner_iter.next() {
-            let v = parse_key(v).expect("Parse key failed");
-            Some((k.to_string(), v))
-        } else {
-            None
+        loop {
+            if self.index >= self.config.channels.len() {
+                return None;
+            } else {
+                let index = self.index;
+                self.index += 1;
+                let chan = &self.config.channels[index];
+                if !chan.disabled.unwrap_or(false) {
+                    return Some(chan);
+                }
+            }
         }
     }
 }
@@ -103,14 +159,6 @@ fn parse_hex<const SIZE: usize>(s: &str) -> ah::Result<[u8; SIZE]> {
         ret[i] |= parse_hexdigit(&s[i * 2 + 1..i * 2 + 2])?;
     }
     Ok(ret)
-}
-
-fn parse_key(v: &Value) -> ah::Result<Key> {
-    if let Value::String(v) = v {
-        parse_hex(v)
-    } else {
-        Err(err!("Key is not a string"))
-    }
 }
 
 // vim: ts=4 sw=4 expandtab
