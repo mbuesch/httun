@@ -86,7 +86,8 @@ install_httun_fcgi()
         "$target/httun-fcgi" \
         /opt/httun/lib/fcgi-bin/
 
-    do_systemctl restart apache2.service
+    try_systemctl restart apache2.service
+    try_systemctl restart lighttpd.service
 }
 
 release="release"
