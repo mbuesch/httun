@@ -169,7 +169,8 @@ impl Channels {
         }
 
         if enable_test {
-            println!("The __test__ channel is enabled.");
+            println!("Active channel: __test__");
+            println!("  because the --enable-test command line option is present.");
             channels.insert(
                 "__test__".to_string(),
                 Arc::new(Channel::new(&conf, "__test__", [0; 32])),
