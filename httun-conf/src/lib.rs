@@ -15,6 +15,7 @@ pub struct HttpAuth {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigParametersReceive {
+    #[serde(alias = "window-length")]
     window_length: Option<NonZeroUsize>,
 }
 
@@ -38,11 +39,14 @@ impl ConfigParameters {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigChannel {
     disabled: Option<bool>,
+    #[serde(alias = "enable-test")]
     enable_test: Option<bool>,
     urls: Option<Vec<String>>,
     name: String,
+    #[serde(alias = "shared-secret")]
     shared_secret: String,
     tun: Option<String>,
+    #[serde(alias = "http-basic-auth")]
     http_basic_auth: Option<HttpAuth>,
 }
 
