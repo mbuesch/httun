@@ -60,6 +60,8 @@ pub struct ConfigChannel {
     http_basic_auth: Option<HttpAuth>,
     #[serde(alias = "http-allow-compression")]
     http_allow_compression: Option<bool>,
+    #[serde(alias = "https-ignore-tls-errors")]
+    https_ignore_tls_errors: Option<bool>,
 }
 
 impl ConfigChannel {
@@ -103,6 +105,10 @@ impl ConfigChannel {
 
     pub fn http_allow_compression(&self) -> bool {
         self.http_allow_compression.unwrap_or(false)
+    }
+
+    pub fn https_ignore_tls_errors(&self) -> bool {
+        self.https_ignore_tls_errors.unwrap_or(false)
     }
 }
 

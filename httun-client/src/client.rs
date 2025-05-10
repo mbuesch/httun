@@ -55,9 +55,8 @@ fn make_client(
     c = c.hickory_dns(true);
 
     // Allow proxies (or any other MiM) to manipulate the TLS connection.
-    //TODO make this configurable.
-    c = c.danger_accept_invalid_hostnames(true);
-    c = c.danger_accept_invalid_certs(true);
+    c = c.danger_accept_invalid_hostnames(chan_conf.https_ignore_tls_errors());
+    c = c.danger_accept_invalid_certs(chan_conf.https_ignore_tls_errors());
 
     Ok(c.build()?)
 }
