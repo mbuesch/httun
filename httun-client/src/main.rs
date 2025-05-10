@@ -62,7 +62,7 @@ enum Mode {
     /// This requires root privileges.
     Tun {
         /// Name of the tun interface to create.
-        #[arg(long, short = 't', default_value = "httun-c0")]
+        #[arg(long, short = 't', default_value = "httun-c-0")]
         tun: String,
     },
 
