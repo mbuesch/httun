@@ -6,12 +6,19 @@ mod channel;
 mod protocol;
 mod systemd;
 mod time;
+mod uid_gid;
 mod unix_sock;
 
-use crate::{channel::Channels, protocol::ProtocolManager, unix_sock::UnixSock};
+use crate::{
+    channel::Channels,
+    protocol::ProtocolManager,
+    uid_gid::{os_get_gid, os_get_uid},
+    unix_sock::UnixSock,
+};
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::Parser;
 use httun_conf::Config;
+use nix::unistd::{Gid, Uid, setgid, setuid};
 use std::{path::Path, sync::Arc, time::Duration};
 use tokio::{
     runtime,
@@ -19,11 +26,27 @@ use tokio::{
     sync, task,
 };
 
+fn drop_privileges() -> ah::Result<()> {
+    println!("Dropping root privileges.");
+
+    let uid = Uid::from_raw(os_get_uid("httun").context("Get httun user from /etc/passwd")?);
+    let gid = Gid::from_raw(os_get_gid("httun").context("Get httun group from /etc/group")?);
+
+    setgid(gid).context("Drop privileges: Set httun group id")?;
+    setuid(uid).context("Drop privileges: Set httun user id")?;
+
+    Ok(())
+}
+
 #[derive(Parser, Debug, Clone)]
 struct Opts {
     /// Path to the configuration file.
     #[arg(long, short = 'c', default_value = "/opt/httun/etc/httun/server.conf")]
     config: String,
+
+    /// Do not drop root privileges after startup.
+    #[arg(long)]
+    no_drop_root: bool,
 
     /// Show version information and exit.
     #[arg(long, short = 'v')]
@@ -50,7 +73,9 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     // Create unix socket.
     let sock = UnixSock::new().await.context("Unix socket init")?;
 
-    //TODO: We should be able to drop root privileges here.
+    if !opts.no_drop_root {
+        drop_privileges().context("Drop root privileges")?;
+    }
 
     let protman = ProtocolManager::new();
 

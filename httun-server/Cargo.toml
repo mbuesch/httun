@@ -22,8 +22,9 @@ libc = { workspace = true }
 tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros" ] }
 
 [target.'cfg(any(target_os="linux", target_os="android"))'.dependencies]
-sd-notify = { workspace = true }
 httun-tun = { workspace = true }
+nix = { workspace = true, features = [ "user" ] }
+sd-notify = { workspace = true }
 
 [lints.clippy]
 undocumented_unsafe_blocks = "warn"

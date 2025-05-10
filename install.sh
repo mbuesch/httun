@@ -9,6 +9,13 @@ entry_checks()
 {
     [ -d "$target" ] || die "httun is not built! Run ./build.sh"
     [ "$(id -u)" = "0" ] || die "Must be root to install httun."
+
+    if ! grep -qe '^httun:' /etc/passwd; then
+        die "The system user 'httun' does not exist in /etc/passwd. Please run ./create-user.sh"
+    fi
+    if ! grep -qe '^httun:' /etc/group; then
+        die "The system group 'httun' does not exist in /etc/group. Please run ./create-user.sh"
+    fi
 }
 
 install_dirs()
