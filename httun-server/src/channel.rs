@@ -50,13 +50,14 @@ struct SessionState {
 pub struct Channel {
     name: String,
     key: Key,
+    test_enabled: bool,
     ping: PingState,
     session: StdMutex<SessionState>,
     last_activity: AtomicU64,
 }
 
 impl Channel {
-    fn new(conf: &Config, name: &str, key: Key) -> Self {
+    fn new(conf: &Config, name: &str, key: Key, test_enabled: bool) -> Self {
         let window_length = conf.parameters().receive().window_length();
         let session = SessionState {
             session: Default::default(),
@@ -67,6 +68,7 @@ impl Channel {
         Self {
             name: name.to_string(),
             key,
+            test_enabled,
             ping: PingState::new(),
             session: StdMutex::new(session),
             last_activity: AtomicU64::new(now()),
@@ -77,12 +79,12 @@ impl Channel {
         &self.name
     }
 
-    pub fn is_test_channel(&self) -> bool {
-        self.name == "__test__"
-    }
-
     pub fn key(&self) -> &Key {
         &self.key
+    }
+
+    pub fn test_enabled(&self) -> bool {
+        self.test_enabled
     }
 
     pub fn session(&self) -> Session {
@@ -153,28 +155,20 @@ pub struct Channels {
 }
 
 impl Channels {
-    pub async fn new(conf: Arc<Config>, enable_test: bool) -> Self {
+    pub async fn new(conf: Arc<Config>) -> Self {
         let mut channels = HashMap::new();
 
         for chan in conf.channels_iter() {
             let key = chan.shared_secret();
+            let test_enabled = chan.enable_test();
             println!("Active channel: {}", chan.name());
             channels.insert(
                 chan.name().to_string(),
-                Arc::new(Channel::new(&conf, chan.name(), key)),
+                Arc::new(Channel::new(&conf, chan.name(), key, test_enabled)),
             );
         }
         if channels.is_empty() {
             eprintln!("WARNING: There are no [keys] configured in the configuration file!");
-        }
-
-        if enable_test {
-            println!("Active channel: __test__");
-            println!("  because the --enable-test command line option is present.");
-            channels.insert(
-                "__test__".to_string(),
-                Arc::new(Channel::new(&conf, "__test__", [0; 32])),
-            );
         }
 
         Self {

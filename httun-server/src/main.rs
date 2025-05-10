@@ -27,10 +27,6 @@ struct Opts {
     #[arg(long, short = 't', default_value = "httun-s0")]
     tun: String,
 
-    /// Enable the special __test__ channel for communication tests.
-    #[arg(long)]
-    enable_test: bool,
-
     /// Path to the configuration file.
     #[arg(long, short = 'c', default_value = "/opt/httun/etc/httun/server.conf")]
     config: String,
@@ -53,7 +49,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let conf =
         Arc::new(Config::new_parse_file(Path::new(&opts.config)).context("Parse configuration")?);
 
-    let channels = Channels::new(Arc::clone(&conf), opts.enable_test).await;
+    let channels = Channels::new(Arc::clone(&conf)).await;
 
     // Create tun network interface.
     let tun = Arc::new(

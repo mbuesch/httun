@@ -38,6 +38,8 @@ impl ConfigParameters {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigChannel {
     disabled: Option<bool>,
+    enable_test: Option<bool>,
+    urls: Option<Vec<String>>,
     name: String,
     shared_secret: String,
     tun: Option<String>,
@@ -45,8 +47,30 @@ pub struct ConfigChannel {
 }
 
 impl ConfigChannel {
+    pub fn enable_test(&self) -> bool {
+        self.enable_test.unwrap_or(false)
+    }
+
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn urls(&self) -> Option<&Vec<String>> {
+        self.urls.as_ref()
+    }
+
+    pub fn has_url(&self, url: &str) -> bool {
+        fn clean(u: &str) -> String {
+            u.trim().trim_end_matches('/').to_lowercase()
+        }
+
+        let url = clean(url);
+        for list_url in self.urls().unwrap_or(&vec![]) {
+            if clean(list_url) == url {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn shared_secret(&self) -> Key {
@@ -104,6 +128,11 @@ impl Config {
 
     pub fn channel(&self, channel: &str) -> Option<&ConfigChannel> {
         self.channels_iter().find(|chan| chan.name() == channel)
+    }
+
+    pub fn channel_with_url(&self, url: &str, channel: &str) -> Option<&ConfigChannel> {
+        self.channels_iter()
+            .find(|chan| chan.name() == channel && chan.has_url(url))
     }
 
     pub fn parameters(&self) -> &ConfigParameters {

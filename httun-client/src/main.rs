@@ -244,8 +244,11 @@ async fn run_mode_test(
                 let expected_reply = format!("Reply to: {testdata}");
                 println!("Sending test mode ping: '{testdata}'");
 
-                let msg = match Message::new(MsgType::Data, Operation::ToSrv, testdata.into_bytes())
-                {
+                let msg = match Message::new(
+                    MsgType::Data,
+                    Operation::TestToSrv,
+                    testdata.into_bytes(),
+                ) {
                     Ok(msg) => msg,
                     Err(e) => {
                         eprintln!("Make httun packet failed: {e:?}");

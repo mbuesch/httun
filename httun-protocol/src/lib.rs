@@ -110,6 +110,8 @@ impl From<MsgType> for u8 {
 pub enum Operation {
     ToSrv,
     FromSrv,
+    TestToSrv,
+    TestFromSrv,
 }
 
 impl TryFrom<u8> for Operation {
@@ -118,9 +120,13 @@ impl TryFrom<u8> for Operation {
     fn try_from(op: u8) -> ah::Result<Self> {
         const TOSRV: u8 = Operation::ToSrv as _;
         const FROMSRV: u8 = Operation::FromSrv as _;
+        const TESTTOSRV: u8 = Operation::TestToSrv as _;
+        const TESTFROMSRV: u8 = Operation::TestFromSrv as _;
         match op {
             TOSRV => Ok(Operation::ToSrv),
             FROMSRV => Ok(Operation::FromSrv),
+            TESTTOSRV => Ok(Operation::TestToSrv),
+            TESTFROMSRV => Ok(Operation::TestFromSrv),
             _ => Err(err!("Invalid Message Operation: {op}")),
         }
     }

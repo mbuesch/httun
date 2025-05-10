@@ -102,11 +102,6 @@ impl ProtocolHandler {
         let msg = Message::deserialize(&umsg.into_payload(), self.chan.key(), session.secret)?;
         let oper = msg.oper();
 
-        if oper != Operation::ToSrv {
-            let _ = self.send_close().await;
-            return Err(err!("Received {oper:?} in UnOperation::ToSrv context"));
-        }
-
         if msg.session() != session.id {
             let _ = self.send_close().await;
             return Err(err!("Session mismatch"));
@@ -120,14 +115,21 @@ impl ProtocolHandler {
             println!("RX msg: {msg}");
         }
 
-        if self.chan.is_test_channel() {
-            println!(
-                "Received test mode ping: '{}'",
-                String::from_utf8_lossy(msg.payload())
-            );
-            self.chan.put_ping(msg.into_payload()).await;
-        } else {
-            self.tun.send(msg.payload()).await.context("TUN send")?;
+        match oper {
+            Operation::ToSrv => {
+                self.tun.send(msg.payload()).await.context("TUN send")?;
+            }
+            Operation::TestToSrv if self.chan.test_enabled() => {
+                println!(
+                    "Received test mode ping: '{}'",
+                    String::from_utf8_lossy(msg.payload())
+                );
+                self.chan.put_ping(msg.into_payload()).await;
+            }
+            _ => {
+                let _ = self.send_close().await;
+                return Err(err!("Received {oper:?} in UnOperation::ToSrv context"));
+            }
         }
 
         self.chan.log_activity();
@@ -166,11 +168,6 @@ impl ProtocolHandler {
         let msg = Message::deserialize(&umsg.into_payload(), self.chan.key(), session.secret)?;
         let oper = msg.oper();
 
-        if oper != Operation::FromSrv {
-            let _ = self.send_close().await;
-            return Err(err!("Received {oper:?} in UnOperation::ReqFromSrv context"));
-        }
-
         if msg.session() != session.id {
             let _ = self.send_close().await;
             return Err(err!("Session mismatch"));
@@ -180,14 +177,22 @@ impl ProtocolHandler {
             .await
             .context("rx sequence validation SequenceType::C")?;
 
-        let payload = if self.chan.is_test_channel() {
-            self.chan.get_pong().await
-        } else {
-            self.tun.recv().await.context("TUN receive")?
+        let (reply_oper, payload) = match oper {
+            Operation::FromSrv => (
+                Operation::FromSrv,
+                self.tun.recv().await.context("TUN receive")?,
+            ),
+            Operation::TestFromSrv if self.chan.test_enabled() => {
+                (Operation::TestFromSrv, self.chan.get_pong().await)
+            }
+            _ => {
+                let _ = self.send_close().await;
+                return Err(err!("Received {oper:?} in UnOperation::ReqFromSrv context"));
+            }
         };
 
-        let mut msg = Message::new(MsgType::Data, Operation::FromSrv, payload)
-            .context("Make httun packet")?;
+        let mut msg =
+            Message::new(MsgType::Data, reply_oper, payload).context("Make httun packet")?;
         msg.set_session(session.id);
         msg.set_sequence(session.sequence);
 

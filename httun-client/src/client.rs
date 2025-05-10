@@ -33,8 +33,8 @@ const SESSION_INIT_RETRIES: usize = 5;
 pub type ToHttun = Message;
 pub type FromHttun = Message;
 
-fn make_url(base_url: &str, serial: u64) -> String {
-    format!("{}/{:010X}", base_url, serial & 0x000000FF_FFFFFFFF)
+fn make_url(url: &str, serial: u64) -> String {
+    format!("{}/{:010X}", url, serial & 0x000000FF_FFFFFFFF)
 }
 
 macro_rules! define_direction {
@@ -42,8 +42,11 @@ macro_rules! define_direction {
         struct $struct {
             #[allow(dead_code)]
             conf: Arc<Config>,
+            base_url: String,
             name: String,
             url: String,
+            #[allow(dead_code)]
+            test_mode: bool,
             session_id: u16,
             session_secret: SessionSecret,
             serial: AtomicU64,
@@ -52,15 +55,19 @@ macro_rules! define_direction {
         impl $struct {
             fn new(
                 conf: Arc<Config>,
-                name: &str,
                 base_url: &str,
+                name: &str,
+                test_mode: bool,
                 session_id: u16,
                 session_secret: SessionSecret,
             ) -> Self {
+                let url = format!("{}/{}/{}", base_url, name, $urlpath);
                 Self {
                     conf,
                     name: name.to_string(),
-                    url: format!("{base_url}/{}", $urlpath),
+                    base_url: base_url.to_string(),
+                    url,
+                    test_mode,
                     session_id,
                     session_secret,
                     serial: AtomicU64::new(0),
@@ -96,14 +103,19 @@ async fn direction_r(
 
     let http_auth = chan
         .conf
-        .channel(&chan.name)
+        .channel_with_url(&chan.base_url, &chan.name)
         .and_then(|c| c.http_basic_auth().clone());
 
     loop {
+        let oper = if chan.test_mode {
+            Operation::TestFromSrv
+        } else {
+            Operation::FromSrv
+        };
         let mut resp;
 
         'http: loop {
-            let mut msg = Message::new(MsgType::Data, Operation::FromSrv, vec![])?;
+            let mut msg = Message::new(MsgType::Data, oper, vec![])?;
             msg.set_session(chan.session_id);
             msg.set_sequence(tx_sequence_c.next());
             let msg = msg.serialize_b64u(key, Some(chan.session_secret));
@@ -153,7 +165,7 @@ async fn direction_r(
             if msg.type_() != MsgType::Data {
                 return Err(err!("Received invalid message type"));
             }
-            if msg.oper() != Operation::FromSrv {
+            if msg.oper() != oper {
                 return Err(err!("Received invalid message operation"));
             }
             if msg.session() != chan.session_id {
@@ -189,7 +201,7 @@ async fn direction_w(
 
     let http_auth = chan
         .conf
-        .channel(&chan.name)
+        .channel_with_url(&chan.base_url, &chan.name)
         .and_then(|c| c.http_basic_auth().clone());
 
     loop {
@@ -246,8 +258,8 @@ async fn direction_w(
 
 async fn get_session(
     conf: &Config,
-    chan_name: &str,
     base_url: &str,
+    chan_name: &str,
     user_agent: &str,
     key: &Key,
 ) -> ah::Result<(u16, SessionSecret)> {
@@ -260,17 +272,19 @@ async fn get_session(
         .context("httun session build HTTP client")?;
 
     let http_auth = conf
-        .channel(chan_name)
+        .channel_with_url(base_url, chan_name)
         .and_then(|c| c.http_basic_auth().clone());
 
-    for _ in 0..SESSION_INIT_RETRIES {
+    for i in 0..SESSION_INIT_RETRIES {
+        let last_try = i == SESSION_INIT_RETRIES - 1;
+
         let mut msg = Message::new(MsgType::Init, Operation::FromSrv, vec![])?;
         msg.set_session(u16::from_ne_bytes(secure_random()));
         msg.set_sequence(u64::from_ne_bytes(secure_random()));
         let msg = msg.serialize_b64u(key, None);
 
         let url = make_url(
-            &format!("{base_url}/r"),
+            &format!("{base_url}/{chan_name}/r"),
             u64::from_ne_bytes(secure_random()),
         );
         let mut req = client
@@ -284,6 +298,17 @@ async fn get_session(
 
         match resp.status() {
             StatusCode::OK => (),
+            StatusCode::UNAUTHORIZED => {
+                if last_try {
+                    return Err(err!(
+                        "The server replied with \"HTTP 401 Unauthorized\". \
+                        You probably need to use http basic-auth. \
+                        See the configuration file help."
+                    ));
+                }
+                sleep(Duration::from_millis(100)).await;
+                continue;
+            }
             _ => {
                 sleep(Duration::from_millis(100)).await;
                 continue;
@@ -318,27 +343,23 @@ pub struct HttunClient {
 
 impl HttunClient {
     pub async fn connect(
-        url: &str,
-        mut channel: &str,
+        base_url: &str,
+        channel: &str,
         test_mode: bool,
         user_agent: &str,
         conf: Arc<Config>,
     ) -> ah::Result<Self> {
-        let key;
-        if test_mode {
-            key = [0; 32];
-            channel = "__test__";
-        } else {
-            key = conf
-                .channel(channel)
-                .context("Get key from configuration")?
-                .shared_secret();
-        }
-
-        let url = format!("{}/{}", url, channel);
+        let Some(chan) = conf.channel_with_url(base_url, channel) else {
+            return Err(err!(
+                "Did not find a configuration for URL '{}' channel '{}'.",
+                base_url,
+                channel
+            ));
+        };
+        let key = chan.shared_secret();
 
         let (session_id, session_secret) =
-            get_session(&conf, channel, &url, user_agent, &key).await?;
+            get_session(&conf, base_url, channel, user_agent, &key).await?;
         if DEBUG {
             println!("Got session ID: {session_id}");
         }
@@ -346,15 +367,17 @@ impl HttunClient {
         Ok(Self {
             r: Arc::new(DirectionR::new(
                 Arc::clone(&conf),
+                base_url,
                 channel,
-                &url,
+                test_mode,
                 session_id,
                 session_secret,
             )),
             w: Arc::new(DirectionW::new(
                 Arc::clone(&conf),
+                base_url,
                 channel,
-                &url,
+                test_mode,
                 session_id,
                 session_secret,
             )),
