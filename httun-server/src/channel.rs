@@ -178,7 +178,7 @@ impl Channels {
             );
         }
         if channels.is_empty() {
-            eprintln!("WARNING: There are no [keys] configured in the configuration file!");
+            eprintln!("WARNING: There are no [[channels]] configured in the configuration file!");
         }
 
         Ok(Self {
