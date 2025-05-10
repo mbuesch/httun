@@ -22,22 +22,15 @@ pub struct ProtocolHandler {
     protman: Arc<ProtocolManager>,
     uconn: UnixConn,
     chan: Arc<Channel>,
-    tun: Arc<TunHandler>,
     pinned_session: AtomicU32,
 }
 
 impl ProtocolHandler {
-    pub async fn new(
-        protman: Arc<ProtocolManager>,
-        uconn: UnixConn,
-        chan: Arc<Channel>,
-        tun: Arc<TunHandler>,
-    ) -> Self {
+    pub async fn new(protman: Arc<ProtocolManager>, uconn: UnixConn, chan: Arc<Channel>) -> Self {
         Self {
             protman,
             uconn,
             chan,
-            tun,
             pinned_session: AtomicU32::new(u32::MAX),
         }
     }
@@ -75,6 +68,10 @@ impl ProtocolHandler {
         sequence_type: SequenceType,
     ) -> ah::Result<()> {
         self.chan.check_rx_sequence(msg, sequence_type).await
+    }
+
+    fn tun(&self) -> &TunHandler {
+        self.chan.tun()
     }
 
     async fn send_close(&self) -> ah::Result<()> {
@@ -117,7 +114,7 @@ impl ProtocolHandler {
 
         match oper {
             Operation::ToSrv => {
-                self.tun.send(msg.payload()).await.context("TUN send")?;
+                self.tun().send(msg.payload()).await.context("TUN send")?;
             }
             Operation::TestToSrv if self.chan.test_enabled() => {
                 println!(
@@ -180,7 +177,7 @@ impl ProtocolHandler {
         let (reply_oper, payload) = match oper {
             Operation::FromSrv => (
                 Operation::FromSrv,
-                self.tun.recv().await.context("TUN receive")?,
+                self.tun().recv().await.context("TUN receive")?,
             ),
             Operation::TestFromSrv if self.chan.test_enabled() => {
                 (Operation::TestFromSrv, self.chan.get_pong().await)
@@ -256,13 +253,8 @@ impl ProtocolManager {
         })
     }
 
-    pub async fn spawn(
-        self: &Arc<Self>,
-        uconn: UnixConn,
-        chan: Arc<Channel>,
-        tun: Arc<TunHandler>,
-    ) {
-        let prot = Arc::new(ProtocolHandler::new(Arc::clone(self), uconn, chan, tun).await);
+    pub async fn spawn(self: &Arc<Self>, uconn: UnixConn, chan: Arc<Channel>) {
+        let prot = Arc::new(ProtocolHandler::new(Arc::clone(self), uconn, chan).await);
         let handle = task::spawn({
             let prot = Arc::clone(&prot);
             async move {

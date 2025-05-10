@@ -12,7 +12,6 @@ use crate::{channel::Channels, protocol::ProtocolManager, unix_sock::UnixSock};
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::Parser;
 use httun_conf::Config;
-use httun_tun::TunHandler;
 use std::{path::Path, sync::Arc, time::Duration};
 use tokio::{
     runtime,
@@ -22,11 +21,6 @@ use tokio::{
 
 #[derive(Parser, Debug, Clone)]
 struct Opts {
-    /// Name of the tun interface to create.
-    //TODO: We should probably create a separate tun per channel.
-    #[arg(long, short = 't', default_value = "httun-s0")]
-    tun: String,
-
     /// Path to the configuration file.
     #[arg(long, short = 'c', default_value = "/opt/httun/etc/httun/server.conf")]
     config: String,
@@ -49,14 +43,9 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let conf =
         Arc::new(Config::new_parse_file(Path::new(&opts.config)).context("Parse configuration")?);
 
-    let channels = Channels::new(Arc::clone(&conf)).await;
-
-    // Create tun network interface.
-    let tun = Arc::new(
-        TunHandler::new(&opts.tun)
-            .await
-            .context("Tun interface init")?,
-    );
+    let channels = Channels::new(Arc::clone(&conf))
+        .await
+        .context("Initialize channels")?;
 
     // Create unix socket.
     let sock = UnixSock::new().await.context("Unix socket init")?;
@@ -81,20 +70,18 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     // Spawn task: Socket handler.
     task::spawn({
         let exit_tx = Arc::clone(&exit_tx);
-        let tun = Arc::clone(&tun);
         let protman = Arc::clone(&protman);
 
         async move {
             loop {
                 let exit_tx = Arc::clone(&exit_tx);
-                let tun = Arc::clone(&tun);
                 let protman = Arc::clone(&protman);
 
                 match sock.accept().await {
                     Ok(conn) => {
                         // Socket connection handler.
                         if let Some(chan) = channels.get(conn.chan_name()).await {
-                            protman.spawn(conn, chan, tun).await;
+                            protman.spawn(conn, chan).await;
                         } else {
                             println!(
                                 "Client connection: Channel '{}' does not exist",

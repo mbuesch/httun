@@ -8,6 +8,7 @@ use httun_conf::Config;
 use httun_protocol::{
     Key, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret,
 };
+use httun_tun::TunHandler;
 use std::{
     collections::HashMap,
     sync::{
@@ -49,6 +50,7 @@ struct SessionState {
 
 pub struct Channel {
     name: String,
+    tun: TunHandler,
     key: Key,
     test_enabled: bool,
     ping: PingState,
@@ -57,7 +59,7 @@ pub struct Channel {
 }
 
 impl Channel {
-    fn new(conf: &Config, name: &str, key: Key, test_enabled: bool) -> Self {
+    fn new(conf: &Config, name: &str, tun: TunHandler, key: Key, test_enabled: bool) -> Self {
         let window_length = conf.parameters().receive().window_length();
         let session = SessionState {
             session: Default::default(),
@@ -67,6 +69,7 @@ impl Channel {
         };
         Self {
             name: name.to_string(),
+            tun,
             key,
             test_enabled,
             ping: PingState::new(),
@@ -77,6 +80,10 @@ impl Channel {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn tun(&self) -> &TunHandler {
+        &self.tun
     }
 
     pub fn key(&self) -> &Key {
@@ -155,26 +162,29 @@ pub struct Channels {
 }
 
 impl Channels {
-    pub async fn new(conf: Arc<Config>) -> Self {
+    pub async fn new(conf: Arc<Config>) -> ah::Result<Self> {
         let mut channels = HashMap::new();
 
         for chan in conf.channels_iter() {
+            println!("Active channel: {}", chan.name());
+            let tun = TunHandler::new(chan.tun().unwrap_or("httun"))
+                .await
+                .context("Tun interface init")?;
             let key = chan.shared_secret();
             let test_enabled = chan.enable_test();
-            println!("Active channel: {}", chan.name());
             channels.insert(
                 chan.name().to_string(),
-                Arc::new(Channel::new(&conf, chan.name(), key, test_enabled)),
+                Arc::new(Channel::new(&conf, chan.name(), tun, key, test_enabled)),
             );
         }
         if channels.is_empty() {
             eprintln!("WARNING: There are no [keys] configured in the configuration file!");
         }
 
-        Self {
+        Ok(Self {
             channels: Mutex::new(channels),
             _conf: conf,
-        }
+        })
     }
 
     pub async fn get(&self, name: &str) -> Option<Arc<Channel>> {
