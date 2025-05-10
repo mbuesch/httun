@@ -3,7 +3,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_conf::Config;
+use httun_conf::{Config, ConfigChannel};
 use httun_protocol::{
     Key, Message, MsgType, Operation, SequenceGenerator, SequenceType, SequenceValidator,
     SessionSecret, secure_random,
@@ -32,6 +32,35 @@ const SESSION_INIT_RETRIES: usize = 5;
 
 pub type ToHttun = Message;
 pub type FromHttun = Message;
+
+fn make_client(
+    user_agent: &str,
+    timeout: Duration,
+    chan_conf: &ConfigChannel,
+) -> ah::Result<Client> {
+    let mut c = Client::builder();
+
+    if !user_agent.trim().is_empty() {
+        c = c.user_agent(user_agent);
+    }
+    c = c.referer(false);
+    c = c.timeout(timeout);
+    c = c.tcp_nodelay(true);
+
+    c = c.gzip(chan_conf.http_allow_compression());
+    c = c.deflate(chan_conf.http_allow_compression());
+    c = c.brotli(chan_conf.http_allow_compression());
+    c = c.zstd(chan_conf.http_allow_compression());
+
+    c = c.hickory_dns(true);
+
+    // Allow proxies (or any other MiM) to manipulate the TLS connection.
+    //TODO make this configurable.
+    c = c.danger_accept_invalid_hostnames(true);
+    c = c.danger_accept_invalid_certs(true);
+
+    Ok(c.build()?)
+}
 
 fn make_url(url: &str, serial: u64) -> String {
     format!("{}/{:010X}", url, serial & 0x000000FF_FFFFFFFF)
@@ -86,6 +115,11 @@ async fn direction_r(
     user_agent: &str,
     key: &Key,
 ) -> ah::Result<()> {
+    let chan_conf = chan
+        .conf
+        .channel_with_url(&chan.base_url, &chan.name)
+        .expect("Chan conf");
+
     chan.serial
         .store(u64::from_ne_bytes(secure_random()), Relaxed);
 
@@ -93,18 +127,10 @@ async fn direction_r(
     let window_length = chan.conf.parameters().receive().window_length();
     let mut rx_validator_a = SequenceValidator::new(SequenceType::A, window_length);
 
-    let client = Client::builder()
-        .user_agent(user_agent)
-        .referer(false)
-        .timeout(HTTP_R_TIMEOUT)
-        .tcp_nodelay(true)
-        .build()
+    let client = make_client(user_agent, HTTP_R_TIMEOUT, chan_conf)
         .context("httun HTTP-r build HTTP client")?;
 
-    let http_auth = chan
-        .conf
-        .channel_with_url(&chan.base_url, &chan.name)
-        .and_then(|c| c.http_basic_auth().clone());
+    let http_auth = chan_conf.http_basic_auth().clone();
 
     loop {
         let oper = if chan.test_mode {
@@ -126,7 +152,7 @@ async fn direction_r(
                 .query(&[("m", &msg)])
                 .header("Cache-Control", "no-store");
             if let Some(http_auth) = &http_auth {
-                req = req.basic_auth(&http_auth.user, http_auth.password.as_ref());
+                req = req.basic_auth(http_auth.user(), http_auth.password());
             }
             resp = req.send().await.context("httun HTTP-r send")?;
 
@@ -186,23 +212,20 @@ async fn direction_w(
     user_agent: &str,
     key: &Key,
 ) -> ah::Result<()> {
+    let chan_conf = chan
+        .conf
+        .channel_with_url(&chan.base_url, &chan.name)
+        .expect("Chan conf");
+
     chan.serial
         .store(u64::from_ne_bytes(secure_random()), Relaxed);
 
     let tx_sequence_b = SequenceGenerator::new(SequenceType::B);
 
-    let client = Client::builder()
-        .user_agent(user_agent)
-        .referer(false)
-        .timeout(HTTP_W_TIMEOUT)
-        .tcp_nodelay(true)
-        .build()
+    let client = make_client(user_agent, HTTP_W_TIMEOUT, chan_conf)
         .context("httun HTTP-w build HTTP client")?;
 
-    let http_auth = chan
-        .conf
-        .channel_with_url(&chan.base_url, &chan.name)
-        .and_then(|c| c.http_basic_auth().clone());
+    let http_auth = chan_conf.http_basic_auth().clone();
 
     loop {
         let Some(mut msg) = loc.lock().await.recv().await else {
@@ -226,7 +249,7 @@ async fn direction_w(
                 .header("Content-Type", "application/octet-stream")
                 .body(msg.clone());
             if let Some(http_auth) = &http_auth {
-                req = req.basic_auth(&http_auth.user, http_auth.password.as_ref());
+                req = req.basic_auth(http_auth.user(), http_auth.password());
             }
             let resp = req.send().await.context("httun HTTP-w send")?;
 
@@ -263,17 +286,14 @@ async fn get_session(
     user_agent: &str,
     key: &Key,
 ) -> ah::Result<(u16, SessionSecret)> {
-    let client = Client::builder()
-        .user_agent(user_agent)
-        .referer(false)
-        .timeout(Duration::from_secs(5))
-        .tcp_nodelay(true)
-        .build()
+    let chan_conf = conf
+        .channel_with_url(base_url, chan_name)
+        .expect("Chan conf");
+
+    let client = make_client(user_agent, Duration::from_secs(5), chan_conf)
         .context("httun session build HTTP client")?;
 
-    let http_auth = conf
-        .channel_with_url(base_url, chan_name)
-        .and_then(|c| c.http_basic_auth().clone());
+    let http_auth = chan_conf.http_basic_auth().clone();
 
     for i in 0..SESSION_INIT_RETRIES {
         let last_try = i == SESSION_INIT_RETRIES - 1;
@@ -292,7 +312,7 @@ async fn get_session(
             .query(&[("m", &msg)])
             .header("Cache-Control", "no-store");
         if let Some(http_auth) = &http_auth {
-            req = req.basic_auth(&http_auth.user, http_auth.password.as_ref());
+            req = req.basic_auth(http_auth.user(), http_auth.password());
         }
         let resp = req.send().await.context("httun session send")?;
 

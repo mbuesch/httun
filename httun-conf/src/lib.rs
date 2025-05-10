@@ -9,8 +9,18 @@ use std::{num::NonZeroUsize, path::Path};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct HttpAuth {
-    pub user: String,
-    pub password: Option<String>,
+    user: String,
+    password: Option<String>,
+}
+
+impl HttpAuth {
+    pub fn user(&self) -> &str {
+        &self.user
+    }
+
+    pub fn password(&self) -> Option<&str> {
+        self.password.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -48,6 +58,8 @@ pub struct ConfigChannel {
     tun: Option<String>,
     #[serde(alias = "http-basic-auth")]
     http_basic_auth: Option<HttpAuth>,
+    #[serde(alias = "http-allow-compression")]
+    http_allow_compression: Option<bool>,
 }
 
 impl ConfigChannel {
@@ -88,6 +100,10 @@ impl ConfigChannel {
     pub fn http_basic_auth(&self) -> &Option<HttpAuth> {
         &self.http_basic_auth
     }
+
+    pub fn http_allow_compression(&self) -> bool {
+        self.http_allow_compression.unwrap_or(false)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -110,6 +126,7 @@ impl Config {
     }
 
     fn check(&self) -> ah::Result<()> {
+        // Validate all keys
         for chan in self.channels_iter() {
             let shared_secret: ah::Result<Key> = parse_hex(&chan.shared_secret);
             if let Err(e) = shared_secret {
@@ -119,6 +136,7 @@ impl Config {
                     e
                 ));
             }
+            //TODO compare the key to http_basic_auth.password. Must not be the same!
         }
         Ok(())
     }
