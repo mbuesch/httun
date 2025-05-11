@@ -26,7 +26,7 @@ use aes_gcm::{
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
 use std::{
-    collections::HashSet,
+    collections::BTreeSet,
     fmt::{Display, Formatter},
     num::NonZeroUsize,
     sync::atomic::{self, AtomicU64},
@@ -322,7 +322,7 @@ impl Display for Message {
 
 pub struct SequenceValidator {
     win_len: NonZeroUsize,
-    rx_seq: HashSet<u64>,
+    rx_seq: BTreeSet<u64>,
     expected_flags: u64,
 }
 
@@ -330,9 +330,7 @@ impl SequenceValidator {
     pub fn new(ty: SequenceType, win_len: NonZeroUsize) -> Self {
         Self {
             win_len,
-            rx_seq: HashSet::with_capacity(
-                win_len.checked_add(1).expect("win_len overflow").into(),
-            ),
+            rx_seq: BTreeSet::new(),
             expected_flags: ty.to_flags(),
         }
     }
@@ -349,7 +347,7 @@ impl SequenceValidator {
         }
         let sequence = sequence & SequenceGenerator::SEQ_MASK;
 
-        let oldest_seq = self.rx_seq.iter().min().copied();
+        let oldest_seq = self.rx_seq.first().copied();
 
         if let Some(oldest_seq) = oldest_seq {
             if sequence <= oldest_seq {

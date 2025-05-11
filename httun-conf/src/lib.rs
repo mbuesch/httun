@@ -31,7 +31,7 @@ pub struct ConfigParametersReceive {
 
 impl ConfigParametersReceive {
     pub fn window_length(&self) -> NonZeroUsize {
-        self.window_length.unwrap_or(128.try_into().unwrap())
+        self.window_length.unwrap_or(1024.try_into().unwrap())
     }
 }
 
