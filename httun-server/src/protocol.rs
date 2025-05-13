@@ -4,12 +4,11 @@
 
 use crate::{
     channel::{Channel, Session},
-    unix_sock::UnixConn,
+    comm_backend::{CommBackend, CommRxMsg},
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::{Message, MsgType, Operation, SequenceType, SessionSecret, secure_random};
 use httun_tun::TunHandler;
-use httun_unix_protocol::{UnMessage, UnOperation};
 use std::sync::{
     Arc,
     atomic::{self, AtomicU32},
@@ -20,16 +19,16 @@ const DEBUG: bool = false;
 
 pub struct ProtocolHandler {
     protman: Arc<ProtocolManager>,
-    uconn: UnixConn,
+    comm: CommBackend,
     chan: Arc<Channel>,
     pinned_session: AtomicU32,
 }
 
 impl ProtocolHandler {
-    pub async fn new(protman: Arc<ProtocolManager>, uconn: UnixConn, chan: Arc<Channel>) -> Self {
+    pub async fn new(protman: Arc<ProtocolManager>, comm: CommBackend, chan: Arc<Channel>) -> Self {
         Self {
             protman,
-            uconn,
+            comm,
             chan,
             pinned_session: AtomicU32::new(u32::MAX),
         }
@@ -75,8 +74,7 @@ impl ProtocolHandler {
     }
 
     async fn send_close(&self) -> ah::Result<()> {
-        let umsg = UnMessage::new_close(self.chan_name().to_string());
-        self.uconn.send(&umsg).await.context("Unix socket send")
+        self.comm.send_close(self.chan_name()).await
     }
 
     async fn send_msg(&self, msg: Message, session: Session) -> ah::Result<()> {
@@ -84,19 +82,18 @@ impl ProtocolHandler {
             println!("TX msg: {msg}");
         }
 
-        let upayload = msg.serialize(self.chan.key(), session.secret);
-        let umsg = UnMessage::new_from_srv(self.chan_name().to_string(), upayload);
-        self.uconn.send(&umsg).await.context("Unix socket send")?;
+        let payload = msg.serialize(self.chan.key(), session.secret);
+        self.comm.send(self.chan_name(), payload).await?;
 
         self.chan.log_activity();
 
         Ok(())
     }
 
-    async fn handle_tosrv_data(&self, umsg: UnMessage) -> ah::Result<()> {
+    async fn handle_tosrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
         let session = self.session();
 
-        let msg = Message::deserialize(&umsg.into_payload(), self.chan.key(), session.secret)?;
+        let msg = Message::deserialize(&payload, self.chan.key(), session.secret)?;
         let oper = msg.oper();
 
         if msg.session() != session.id {
@@ -134,12 +131,12 @@ impl ProtocolHandler {
         Ok(())
     }
 
-    async fn handle_fromsrv_init(&self, umsg: UnMessage) -> ah::Result<()> {
+    async fn handle_fromsrv_init(&self, payload: Vec<u8>) -> ah::Result<()> {
         let mut session = self.session();
 
         // Deserialize the received message, even though we don't use it.
         // This checks the authenticity of the message.
-        let _msg = Message::deserialize(&umsg.into_payload(), self.chan.key(), None)?;
+        let _msg = Message::deserialize(&payload, self.chan.key(), None)?;
 
         let new_session_secret: SessionSecret = secure_random();
 
@@ -159,10 +156,10 @@ impl ProtocolHandler {
         Ok(())
     }
 
-    async fn handle_fromsrv_data(&self, umsg: UnMessage) -> ah::Result<()> {
+    async fn handle_fromsrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
         let session = self.session();
 
-        let msg = Message::deserialize(&umsg.into_payload(), self.chan.key(), session.secret)?;
+        let msg = Message::deserialize(&payload, self.chan.key(), session.secret)?;
         let oper = msg.oper();
 
         if msg.session() != session.id {
@@ -199,28 +196,15 @@ impl ProtocolHandler {
     }
 
     pub async fn run(&self) -> ah::Result<()> {
-        let Some(umsg) = self.uconn.recv().await.context("Unix socket receive")? else {
-            return Err(err!("Disconnected."));
-        };
-
-        match umsg.op() {
-            UnOperation::ToSrv => {
-                let msg_type = Message::peek_type(umsg.payload())?;
-                match msg_type {
-                    MsgType::Init => Err(err!("Received invalid ToSrv + MsgType::Init")),
-                    MsgType::Data => self.handle_tosrv_data(umsg).await,
-                }
-            }
-            UnOperation::ReqFromSrv => {
-                let msg_type = Message::peek_type(umsg.payload())?;
-                match msg_type {
-                    MsgType::Init => self.handle_fromsrv_init(umsg).await,
-                    MsgType::Data => self.handle_fromsrv_data(umsg).await,
-                }
-            }
-            UnOperation::Init | UnOperation::FromSrv | UnOperation::Close => {
-                Err(err!("Received invalid operation: {:?}", umsg.op()))
-            }
+        match self.comm.recv().await? {
+            CommRxMsg::ToSrv(payload) => match Message::peek_type(&payload)? {
+                MsgType::Init => Err(err!("Received invalid ToSrv + MsgType::Init")),
+                MsgType::Data => self.handle_tosrv_data(payload).await,
+            },
+            CommRxMsg::ReqFromSrv(payload) => match Message::peek_type(&payload)? {
+                MsgType::Init => self.handle_fromsrv_init(payload).await,
+                MsgType::Data => self.handle_fromsrv_data(payload).await,
+            },
         }
     }
 }
@@ -253,8 +237,8 @@ impl ProtocolManager {
         })
     }
 
-    pub async fn spawn(self: &Arc<Self>, uconn: UnixConn, chan: Arc<Channel>) {
-        let prot = Arc::new(ProtocolHandler::new(Arc::clone(self), uconn, chan).await);
+    pub async fn spawn(self: &Arc<Self>, comm: CommBackend, chan: Arc<Channel>) {
+        let prot = Arc::new(ProtocolHandler::new(Arc::clone(self), comm, chan).await);
         let handle = task::spawn({
             let prot = Arc::clone(&prot);
             async move {
