@@ -61,8 +61,16 @@ fn make_client(
     Ok(c.build()?)
 }
 
-fn make_url(url: &str, serial: u64) -> String {
+fn format_url_serial(url: &str, serial: u64) -> String {
+    let url = url.trim_end_matches('/');
     format!("{}/{:010X}", url, serial & 0x000000FF_FFFFFFFF)
+}
+
+fn format_url(base_url: &str, chan_name: &str, direction: &str) -> String {
+    let base_url = base_url.trim_end_matches('/');
+    let chan_name = chan_name.trim_end_matches('/');
+    let direction = direction.trim_end_matches('/');
+    format!("{base_url}/{chan_name}/{direction}")
 }
 
 macro_rules! define_direction {
@@ -80,12 +88,11 @@ macro_rules! define_direction {
 
         impl $struct {
             fn new(conf: Arc<Config>, base_url: &str, name: &str, test_mode: bool) -> Self {
-                let url = format!("{}/{}/{}", base_url, name, $urlpath);
                 Self {
                     conf,
                     name: name.to_string(),
                     base_url: base_url.to_string(),
-                    url,
+                    url: format_url(base_url, name, $urlpath),
                     test_mode,
                     serial: AtomicU64::new(0),
                 }
@@ -136,7 +143,7 @@ async fn direction_r(
             msg.set_sequence(tx_sequence_c.next());
             let msg = msg.serialize_b64u(key, Some(session_secret));
 
-            let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
+            let url = format_url_serial(&chan.url, chan.serial.fetch_add(1, Relaxed));
             let mut req = client
                 .get(&url)
                 .query(&[("m", &msg)])
@@ -234,7 +241,7 @@ async fn direction_w(
         }
 
         'http: loop {
-            let url = make_url(&chan.url, chan.serial.fetch_add(1, Relaxed));
+            let url = format_url_serial(&chan.url, chan.serial.fetch_add(1, Relaxed));
             let mut req = client
                 .post(&url)
                 .header("Cache-Control", "no-store")
@@ -295,8 +302,8 @@ async fn get_session(
         msg.set_sequence(u64::from_ne_bytes(secure_random()));
         let msg = msg.serialize_b64u(key, None);
 
-        let url = make_url(
-            &format!("{base_url}/{chan_name}/r"),
+        let url = format_url_serial(
+            &format_url(base_url, chan_name, "r"),
             u64::from_ne_bytes(secure_random()),
         );
         let mut req = client
