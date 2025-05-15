@@ -68,8 +68,8 @@ fn format_url_serial(url: &str, serial: u64) -> String {
 
 fn format_url(base_url: &str, chan_name: &str, direction: &str) -> String {
     let base_url = base_url.trim_end_matches('/');
-    let chan_name = chan_name.trim_end_matches('/');
-    let direction = direction.trim_end_matches('/');
+    let chan_name = chan_name.trim_matches('/');
+    let direction = direction.trim_matches('/');
     format!("{base_url}/{chan_name}/{direction}")
 }
 
