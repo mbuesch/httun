@@ -25,7 +25,14 @@ impl CommBackend {
         Self::Http(conn)
     }
 
-    async fn recv_unix(conn: &UnixConn) -> ah::Result<CommRxMsg> {
+    pub fn chan_name(&self) -> Option<String> {
+        match self {
+            Self::Unix(conn) => Some(conn.chan_name().to_string()),
+            Self::Http(conn) => conn.chan_name(),
+        }
+    }
+
+    async fn recv_unix(&self, conn: &UnixConn) -> ah::Result<CommRxMsg> {
         let Some(umsg) = conn.recv().await.context("Unix socket receive")? else {
             return Err(err!("Disconnected."));
         };
@@ -39,46 +46,53 @@ impl CommBackend {
         }
     }
 
-    async fn recv_http(conn: &HttpConn) -> ah::Result<CommRxMsg> {
-        todo!()
+    async fn recv_http(&self, conn: &HttpConn) -> ah::Result<CommRxMsg> {
+        conn.recv().await
     }
 
     pub async fn recv(&self) -> ah::Result<CommRxMsg> {
         match self {
-            Self::Unix(conn) => Self::recv_unix(conn).await,
-            Self::Http(conn) => Self::recv_http(conn).await,
+            Self::Unix(conn) => self.recv_unix(conn).await,
+            Self::Http(conn) => self.recv_http(conn).await,
         }
     }
 
-    async fn send_unix(conn: &UnixConn, chan_name: &str, payload: Vec<u8>) -> ah::Result<()> {
+    async fn send_unix(&self, conn: &UnixConn, payload: Vec<u8>) -> ah::Result<()> {
+        let chan_name = self
+            .chan_name()
+            .ok_or_else(|| err!("Channel name is not known, yet"))?;
         let umsg = UnMessage::new_from_srv(chan_name.to_string(), payload);
         conn.send(&umsg).await.context("Unix socket send")
     }
 
-    async fn send_http(conn: &HttpConn, chan_name: &str, payload: Vec<u8>) -> ah::Result<()> {
-        todo!()
+    async fn send_http(&self, conn: &HttpConn, payload: Vec<u8>) -> ah::Result<()> {
+        conn.send_reply(payload, "200 Ok").await
     }
 
-    pub async fn send(&self, chan_name: &str, payload: Vec<u8>) -> ah::Result<()> {
+    pub async fn send(&self, payload: Vec<u8>) -> ah::Result<()> {
         match self {
-            Self::Unix(conn) => Self::send_unix(conn, chan_name, payload).await,
-            Self::Http(conn) => Self::send_http(conn, chan_name, payload).await,
+            Self::Unix(conn) => self.send_unix(conn, payload).await,
+            Self::Http(conn) => self.send_http(conn, payload).await,
         }
     }
 
-    async fn send_close_unix(conn: &UnixConn, chan_name: &str) -> ah::Result<()> {
+    async fn send_close_unix(&self, conn: &UnixConn) -> ah::Result<()> {
+        let chan_name = self
+            .chan_name()
+            .ok_or_else(|| err!("Channel name is not known, yet"))?;
         let umsg = UnMessage::new_close(chan_name.to_string());
         conn.send(&umsg).await.context("Unix socket send")
     }
 
-    async fn send_close_http(conn: &HttpConn, chan_name: &str) -> ah::Result<()> {
-        todo!()
+    async fn send_close_http(&self, _conn: &HttpConn) -> ah::Result<()> {
+        // Nothing to do.
+        Ok(())
     }
 
-    pub async fn send_close(&self, chan_name: &str) -> ah::Result<()> {
+    pub async fn send_close(&self) -> ah::Result<()> {
         match self {
-            Self::Unix(conn) => Self::send_close_unix(conn, chan_name).await,
-            Self::Http(conn) => Self::send_close_http(conn, chan_name).await,
+            Self::Unix(conn) => self.send_close_unix(conn).await,
+            Self::Http(conn) => self.send_close_http(conn).await,
         }
     }
 }

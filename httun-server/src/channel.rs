@@ -157,7 +157,7 @@ impl Channel {
 }
 
 pub struct Channels {
-    channels: Mutex<HashMap<String, Arc<Channel>>>,
+    channels: StdMutex<HashMap<String, Arc<Channel>>>,
     _conf: Arc<Config>,
 }
 
@@ -182,14 +182,17 @@ impl Channels {
         }
 
         Ok(Self {
-            channels: Mutex::new(channels),
+            channels: StdMutex::new(channels),
             _conf: conf,
         })
     }
 
-    pub async fn get(&self, name: &str) -> Option<Arc<Channel>> {
-        let channels = self.channels.lock().await;
-        channels.get(name).map(Arc::clone)
+    pub fn get(&self, name: &str) -> Option<Arc<Channel>> {
+        self.channels
+            .lock()
+            .expect("Lock poison")
+            .get(name)
+            .map(Arc::clone)
     }
 }
 

@@ -3,16 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 mod fcgi;
-mod query;
 mod server_conn;
 
 use crate::{
     fcgi::{Fcgi, FcgiRequest, FcgiRequestResult, FcgiRole},
-    query::Query,
     server_conn::ServerUnixConn,
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
+use httun_util::Query;
 use std::{
     collections::HashMap,
     fmt::Write as _,

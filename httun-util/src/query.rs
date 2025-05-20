@@ -7,6 +7,7 @@ use std::{collections::HashMap, str::FromStr};
 
 const MAX_NR_COMP: usize = 32;
 
+#[derive(Debug, Clone)]
 pub struct Query {
     comps: HashMap<String, String>,
 }

@@ -3,39 +3,48 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::{
-    channel::{Channel, Session},
+    channel::{Channel, Channels, Session},
     comm_backend::{CommBackend, CommRxMsg},
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::{Message, MsgType, Operation, SequenceType, SessionSecret, secure_random};
-use httun_tun::TunHandler;
 use std::sync::{
     Arc,
     atomic::{self, AtomicU32},
 };
 use tokio::{sync::Mutex, task};
 
-const DEBUG: bool = false;
-
 pub struct ProtocolHandler {
     protman: Arc<ProtocolManager>,
     comm: CommBackend,
-    chan: Arc<Channel>,
+    channels: Arc<Channels>,
     pinned_session: AtomicU32,
 }
 
 impl ProtocolHandler {
-    pub async fn new(protman: Arc<ProtocolManager>, comm: CommBackend, chan: Arc<Channel>) -> Self {
+    pub async fn new(
+        protman: Arc<ProtocolManager>,
+        comm: CommBackend,
+        channels: Arc<Channels>,
+    ) -> Self {
         Self {
             protman,
             comm,
-            chan,
+            channels,
             pinned_session: AtomicU32::new(u32::MAX),
         }
     }
 
-    pub fn chan_name(&self) -> &str {
-        self.chan.name()
+    pub fn chan_name(&self) -> ah::Result<String> {
+        self.comm
+            .chan_name()
+            .ok_or_else(|| err!("Channel name is not known, yet."))
+    }
+
+    fn chan(&self) -> ah::Result<Arc<Channel>> {
+        self.channels
+            .get(&self.chan_name()?)
+            .ok_or_else(|| err!("Channel is not configured."))
     }
 
     pub fn pinned_session(&self) -> Option<u16> {
@@ -48,52 +57,42 @@ impl ProtocolHandler {
             .store(session.into(), atomic::Ordering::SeqCst);
     }
 
-    fn session(&self) -> Session {
-        self.chan.session()
-    }
-
-    async fn create_new_session(&self, session_secret: SessionSecret) -> u16 {
-        let session_id = self.chan.create_new_session(session_secret);
+    async fn create_new_session(&self, chan: &Channel, session_secret: SessionSecret) -> u16 {
+        let session_id = chan.create_new_session(session_secret);
         self.pin_session(session_id);
         self.protman
-            .kill_old_sessions(self.chan_name(), session_id)
+            .kill_old_sessions(chan.name(), session_id)
             .await;
         session_id
     }
 
     async fn check_rx_sequence(
         &self,
+        chan: &Channel,
         msg: &Message,
         sequence_type: SequenceType,
     ) -> ah::Result<()> {
-        self.chan.check_rx_sequence(msg, sequence_type).await
-    }
-
-    fn tun(&self) -> &TunHandler {
-        self.chan.tun()
+        chan.check_rx_sequence(msg, sequence_type).await
     }
 
     async fn send_close(&self) -> ah::Result<()> {
-        self.comm.send_close(self.chan_name()).await
+        self.comm.send_close().await
     }
 
-    async fn send_msg(&self, msg: Message, session: Session) -> ah::Result<()> {
-        if DEBUG {
-            println!("TX msg: {msg}");
-        }
+    async fn send_msg(&self, chan: &Channel, msg: Message, session: Session) -> ah::Result<()> {
+        let payload = msg.serialize(chan.key(), session.secret);
+        self.comm.send(payload).await?;
 
-        let payload = msg.serialize(self.chan.key(), session.secret);
-        self.comm.send(self.chan_name(), payload).await?;
-
-        self.chan.log_activity();
+        chan.log_activity();
 
         Ok(())
     }
 
     async fn handle_tosrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
-        let session = self.session();
+        let chan = self.chan()?;
+        let session = chan.session();
 
-        let msg = Message::deserialize(&payload, self.chan.key(), session.secret)?;
+        let msg = Message::deserialize(&payload, chan.key(), session.secret)?;
         let oper = msg.oper();
 
         if msg.session() != session.id {
@@ -101,24 +100,20 @@ impl ProtocolHandler {
             return Err(err!("Session mismatch"));
         }
 
-        self.check_rx_sequence(&msg, SequenceType::B)
+        self.check_rx_sequence(&chan, &msg, SequenceType::B)
             .await
             .context("rx sequence validation SequenceType::B")?;
 
-        if DEBUG {
-            println!("RX msg: {msg}");
-        }
-
         match oper {
             Operation::ToSrv => {
-                self.tun().send(msg.payload()).await.context("TUN send")?;
+                chan.tun().send(msg.payload()).await.context("TUN send")?;
             }
-            Operation::TestToSrv if self.chan.test_enabled() => {
+            Operation::TestToSrv if chan.test_enabled() => {
                 println!(
                     "Received test mode ping: '{}'",
                     String::from_utf8_lossy(msg.payload())
                 );
-                self.chan.put_ping(msg.into_payload()).await;
+                chan.put_ping(msg.into_payload()).await;
             }
             _ => {
                 let _ = self.send_close().await;
@@ -126,17 +121,18 @@ impl ProtocolHandler {
             }
         }
 
-        self.chan.log_activity();
+        chan.log_activity();
 
         Ok(())
     }
 
     async fn handle_fromsrv_init(&self, payload: Vec<u8>) -> ah::Result<()> {
-        let mut session = self.session();
+        let chan = self.chan()?;
+        let mut session = chan.session();
 
         // Deserialize the received message, even though we don't use it.
         // This checks the authenticity of the message.
-        let _msg = Message::deserialize(&payload, self.chan.key(), None)?;
+        let _msg = Message::deserialize(&payload, chan.key(), None)?;
 
         let new_session_secret: SessionSecret = secure_random();
 
@@ -148,18 +144,19 @@ impl ProtocolHandler {
             new_session_secret.to_vec(),
         )
         .context("Make httun packet")?;
-        msg.set_session(self.create_new_session(new_session_secret).await);
+        msg.set_session(self.create_new_session(&chan, new_session_secret).await);
         msg.set_sequence(u64::from_ne_bytes(secure_random()));
 
-        self.send_msg(msg, session).await?;
+        self.send_msg(&chan, msg, session).await?;
 
         Ok(())
     }
 
     async fn handle_fromsrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
-        let session = self.session();
+        let chan = self.chan()?;
+        let session = chan.session();
 
-        let msg = Message::deserialize(&payload, self.chan.key(), session.secret)?;
+        let msg = Message::deserialize(&payload, chan.key(), session.secret)?;
         let oper = msg.oper();
 
         if msg.session() != session.id {
@@ -167,17 +164,17 @@ impl ProtocolHandler {
             return Err(err!("Session mismatch"));
         }
 
-        self.check_rx_sequence(&msg, SequenceType::C)
+        self.check_rx_sequence(&chan, &msg, SequenceType::C)
             .await
             .context("rx sequence validation SequenceType::C")?;
 
         let (reply_oper, payload) = match oper {
             Operation::FromSrv => (
                 Operation::FromSrv,
-                self.tun().recv().await.context("TUN receive")?,
+                chan.tun().recv().await.context("TUN receive")?,
             ),
-            Operation::TestFromSrv if self.chan.test_enabled() => {
-                (Operation::TestFromSrv, self.chan.get_pong().await)
+            Operation::TestFromSrv if chan.test_enabled() => {
+                (Operation::TestFromSrv, chan.get_pong().await)
             }
             _ => {
                 let _ = self.send_close().await;
@@ -190,7 +187,7 @@ impl ProtocolHandler {
         msg.set_session(session.id);
         msg.set_sequence(session.sequence);
 
-        self.send_msg(msg, session).await?;
+        self.send_msg(&chan, msg, session).await?;
 
         Ok(())
     }
@@ -206,6 +203,12 @@ impl ProtocolHandler {
                 MsgType::Data => self.handle_fromsrv_data(payload).await,
             },
         }
+    }
+
+    fn activity_timed_out(&self) -> bool {
+        self.chan()
+            .map(|c| c.activity_timed_out())
+            .unwrap_or_default()
     }
 }
 
@@ -237,8 +240,8 @@ impl ProtocolManager {
         })
     }
 
-    pub async fn spawn(self: &Arc<Self>, comm: CommBackend, chan: Arc<Channel>) {
-        let prot = Arc::new(ProtocolHandler::new(Arc::clone(self), comm, chan).await);
+    pub async fn spawn(self: &Arc<Self>, comm: CommBackend, channels: Arc<Channels>) {
+        let prot = Arc::new(ProtocolHandler::new(Arc::clone(self), comm, channels).await);
         let handle = task::spawn({
             let prot = Arc::clone(&prot);
             async move {
@@ -257,14 +260,18 @@ impl ProtocolManager {
 
     async fn kill_old_sessions(self: &Arc<Self>, chan_name: &str, new_session_id: u16) {
         self.insts.lock().await.retain(|inst| {
-            if inst.prot.chan_name() == chan_name {
-                if let Some(pinned_session) = inst.prot.pinned_session() {
-                    pinned_session == new_session_id
+            if let Ok(name) = inst.prot.chan_name() {
+                if name == chan_name {
+                    if let Some(pinned_session) = inst.prot.pinned_session() {
+                        pinned_session == new_session_id
+                    } else {
+                        false
+                    }
                 } else {
-                    false
+                    true
                 }
             } else {
-                true
+                false
             }
         });
     }
@@ -273,7 +280,7 @@ impl ProtocolManager {
         self.insts
             .lock()
             .await
-            .retain(|inst| !inst.prot.chan.activity_timed_out());
+            .retain(|inst| !inst.prot.activity_timed_out());
     }
 }
 

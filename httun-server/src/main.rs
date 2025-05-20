@@ -158,13 +158,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 
                     match unix_sock.accept().await {
                         Ok(conn) => {
-                            let chan_name = conn.chan_name().to_string();
-                            let comm = CommBackend::new_unix(conn);
-                            if let Some(chan) = channels.get(&chan_name).await {
-                                protman.spawn(comm, chan).await;
-                            } else {
-                                println!("Client connection: Channel '{chan_name}' does not exist",);
-                            }
+                            protman.spawn(CommBackend::new_unix(conn), channels).await;
                         }
                         Err(e) => {
                             let _ = exit_tx.send(Err(e)).await;
@@ -191,15 +185,11 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 
                     match http_srv.accept().await {
                         Ok(conn) => {
-                            let chan_name = conn.chan_name().to_string();
-                            let comm = CommBackend::new_http(conn);
-                            if let Some(chan) = channels.get(&chan_name).await {
-                                protman.spawn(comm, chan).await;
-                            } else {
-                                println!("Client connection: Channel '{chan_name}' does not exist",);
-                            }
+                            conn.spawn_rx_task().await;
+                            protman.spawn(CommBackend::new_http(conn), channels).await;
                         }
                         Err(e) => {
+                            //TODO do not exit here
                             let _ = exit_tx.send(Err(e)).await;
                             break;
                         }

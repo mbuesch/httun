@@ -9,6 +9,7 @@ members = [
     "httun-server",
     "httun-tun",
     "httun-unix-protocol",
+    "httun-util",
 ]
 resolver = "3"
 
@@ -45,6 +46,7 @@ httun-conf = { path = "./httun-conf", version = "0.1" }
 httun-protocol = { path = "./httun-protocol", version = "0.1" }
 httun-tun = { path = "./httun-tun", version = "0.1" }
 httun-unix-protocol = { path = "./httun-unix-protocol", version = "0.1" }
+httun-util = { path = "./httun-util", version = "0.1" }
 
 [profile.release]
 opt-level = "z"
