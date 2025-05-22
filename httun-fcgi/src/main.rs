@@ -11,7 +11,7 @@ use crate::{
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
-use httun_util::Query;
+use httun_util::{CHAN_R_TIMEOUT, Query};
 use std::{
     collections::HashMap,
     fmt::Write as _,
@@ -32,7 +32,6 @@ use tokio::{
 const MAX_NUM_CONNECTIONS: usize = 16;
 const SERVER_SOCK: &str = "/run/httun-server/httun-server.sock";
 
-const CHAN_R_TIMEOUT: Duration = Duration::from_secs(5);
 const UNIX_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]

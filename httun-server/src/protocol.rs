@@ -13,7 +13,7 @@ use std::sync::{
     Arc,
     atomic::{self, AtomicU32},
 };
-use tokio::{sync::Mutex, task};
+use tokio::{sync::Mutex, task, time::timeout};
 
 pub struct ProtocolHandler {
     protman: Arc<ProtocolManager>,
@@ -76,13 +76,18 @@ impl ProtocolHandler {
         chan.check_rx_sequence(msg, sequence_type).await
     }
 
-    async fn send_close(&self) -> ah::Result<()> {
-        self.comm.send_close().await
+    async fn close(&self) -> ah::Result<()> {
+        self.comm.close().await
     }
 
-    async fn send_msg(&self, chan: &Channel, msg: Message, session: Session) -> ah::Result<()> {
+    async fn send_reply_msg(
+        &self,
+        chan: &Channel,
+        msg: Message,
+        session: Session,
+    ) -> ah::Result<()> {
         let payload = msg.serialize(chan.key(), session.secret);
-        self.comm.send(payload).await?;
+        self.comm.send_reply(payload).await?;
 
         chan.log_activity();
 
@@ -99,7 +104,7 @@ impl ProtocolHandler {
         let oper = msg.oper();
 
         if msg.session() != session.id {
-            let _ = self.send_close().await;
+            let _ = self.close().await;
             return Err(err!("Session mismatch"));
         }
 
@@ -119,7 +124,7 @@ impl ProtocolHandler {
                 chan.put_ping(msg.into_payload()).await;
             }
             _ => {
-                let _ = self.send_close().await;
+                let _ = self.close().await;
                 return Err(err!("Received {oper:?} in UnOperation::ToSrv context"));
             }
         }
@@ -127,6 +132,13 @@ impl ProtocolHandler {
         chan.log_activity();
 
         Ok(())
+    }
+
+    async fn handle_tosrv(&self, payload: Vec<u8>) -> ah::Result<()> {
+        match Message::peek_type(&payload)? {
+            MsgType::Init => Err(err!("Received invalid ToSrv + MsgType::Init")),
+            MsgType::Data => self.handle_tosrv_data(payload).await,
+        }
     }
 
     async fn handle_fromsrv_init(&self, payload: Vec<u8>) -> ah::Result<()> {
@@ -153,7 +165,7 @@ impl ProtocolHandler {
         msg.set_session(self.create_new_session(&chan, new_session_secret).await);
         msg.set_sequence(u64::from_ne_bytes(secure_random()));
 
-        self.send_msg(&chan, msg, session).await?;
+        self.send_reply_msg(&chan, msg, session).await?;
 
         Ok(())
     }
@@ -168,7 +180,7 @@ impl ProtocolHandler {
         let oper = msg.oper();
 
         if msg.session() != session.id {
-            let _ = self.send_close().await;
+            let _ = self.close().await;
             return Err(err!("Session mismatch"));
         }
 
@@ -185,7 +197,7 @@ impl ProtocolHandler {
                 (Operation::TestFromSrv, chan.get_pong().await)
             }
             _ => {
-                let _ = self.send_close().await;
+                let _ = self.close().await;
                 return Err(err!("Received {oper:?} in UnOperation::ReqFromSrv context"));
             }
         };
@@ -195,21 +207,31 @@ impl ProtocolHandler {
         msg.set_session(session.id);
         msg.set_sequence(session.sequence);
 
-        self.send_msg(&chan, msg, session).await?;
+        self.send_reply_msg(&chan, msg, session).await?;
 
         Ok(())
     }
 
+    async fn handle_fromsrv(&self, payload: Vec<u8>) -> ah::Result<()> {
+        match Message::peek_type(&payload)? {
+            MsgType::Init => self.handle_fromsrv_init(payload).await,
+            MsgType::Data => self.handle_fromsrv_data(payload).await,
+        }
+    }
+
     pub async fn run(&self) -> ah::Result<()> {
         match self.comm.recv().await? {
-            CommRxMsg::ToSrv(payload) => match Message::peek_type(&payload)? {
-                MsgType::Init => Err(err!("Received invalid ToSrv + MsgType::Init")),
-                MsgType::Data => self.handle_tosrv_data(payload).await,
-            },
-            CommRxMsg::ReqFromSrv(payload) => match Message::peek_type(&payload)? {
-                MsgType::Init => self.handle_fromsrv_init(payload).await,
-                MsgType::Data => self.handle_fromsrv_data(payload).await,
-            },
+            CommRxMsg::ToSrv(payload) => self.handle_tosrv(payload).await,
+            CommRxMsg::ReqFromSrv(payload) => {
+                if let Some(timeout_dur) = self.comm.get_reply_timeout_duration() {
+                    match timeout(timeout_dur, self.handle_fromsrv(payload)).await {
+                        Err(_) => self.comm.send_reply_timeout().await,
+                        Ok(ret) => ret,
+                    }
+                } else {
+                    self.handle_fromsrv(payload).await
+                }
+            }
         }
     }
 

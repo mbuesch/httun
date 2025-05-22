@@ -223,8 +223,8 @@ async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<HttunHttp
 async fn rx_task(
     id: u32,
     stream: &TcpStream,
-    rx_get_sender: &mpsc::Sender<HttunHttpReq>,
-    rx_post_sender: &mpsc::Sender<HttunHttpReq>,
+    rx_r_sender: &mpsc::Sender<HttunHttpReq>,
+    rx_w_sender: &mpsc::Sender<HttunHttpReq>,
     closed: &AtomicBool,
 ) -> ah::Result<()> {
     loop {
@@ -244,10 +244,10 @@ async fn rx_task(
                         req.body = msg.to_vec();
                     }
                 }
-                rx_get_sender.send(req).await?;
+                rx_r_sender.send(req).await?;
             }
             (Direction::W, HttpRequest::Post) => {
-                rx_post_sender.send(req).await?;
+                rx_w_sender.send(req).await?;
             }
             _ => {
                 return Err(err!(
@@ -270,8 +270,8 @@ pub struct HttpConn {
     stream: Arc<TcpStream>,
     closed: Arc<AtomicBool>,
     rx_task: StdMutex<Option<JoinHandle<()>>>,
-    rx_get: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
-    rx_post: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
+    rx_r: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
+    rx_w: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
     pinned_chan: StdMutex<Option<String>>,
 }
 
@@ -289,15 +289,15 @@ impl HttpConn {
             stream: Arc::new(stream),
             closed: Arc::new(AtomicBool::new(false)),
             rx_task: StdMutex::new(None),
-            rx_get: Mutex::new(None),
-            rx_post: Mutex::new(None),
+            rx_r: Mutex::new(None),
+            rx_w: Mutex::new(None),
             pinned_chan: StdMutex::new(None),
         })
     }
 
     pub async fn spawn_rx_task(&self) {
-        let (rx_get_sender, rx_get_receiver) = mpsc::channel(1);
-        let (rx_post_sender, rx_post_receiver) = mpsc::channel(8);
+        let (rx_r_sender, rx_r_receiver) = mpsc::channel(1);
+        let (rx_w_sender, rx_w_receiver) = mpsc::channel(8);
 
         let rx_task = task::spawn({
             let stream = Arc::clone(&self.stream);
@@ -305,8 +305,7 @@ impl HttpConn {
             let id = self.id;
             async move {
                 while !closed.load(atomic::Ordering::Relaxed) {
-                    if let Err(e) =
-                        rx_task(id, &stream, &rx_get_sender, &rx_post_sender, &closed).await
+                    if let Err(e) = rx_task(id, &stream, &rx_r_sender, &rx_w_sender, &closed).await
                     {
                         log::info!("Connection {id} receive: {e:?}");
                     }
@@ -316,8 +315,8 @@ impl HttpConn {
         });
 
         *self.rx_task.lock().expect("Mutex poisoned") = Some(rx_task);
-        *self.rx_get.lock().await = Some(rx_get_receiver);
-        *self.rx_post.lock().await = Some(rx_post_receiver);
+        *self.rx_r.lock().await = Some(rx_r_receiver);
+        *self.rx_w.lock().await = Some(rx_w_receiver);
     }
 
     pub fn chan_name(&self) -> Option<String> {
@@ -340,7 +339,7 @@ impl HttpConn {
         }
     }
 
-    pub async fn send_reply(&self, payload: Vec<u8>, status: &str) -> ah::Result<()> {
+    async fn send_reply(&self, payload: Vec<u8>, status: &str) -> ah::Result<()> {
         let mut headers = String::with_capacity(256);
         write!(&mut headers, "HTTP/1.1 {status}\r\n")?;
         write!(&mut headers, "Cache-Control: no-store\r\n")?;
@@ -356,28 +355,38 @@ impl HttpConn {
         Ok(())
     }
 
+    pub async fn send_reply_ok(&self, payload: Vec<u8>) -> ah::Result<()> {
+        self.send_reply(payload, "200 Ok").await
+    }
+
+    pub async fn send_reply_timeout(&self) -> ah::Result<()> {
+        self.send_reply(vec![], "408 Request Timeout").await
+    }
+
     pub async fn recv(&self) -> ah::Result<CommRxMsg> {
-        let mut rx_get = self.rx_get.lock().await;
-        let mut rx_post = self.rx_post.lock().await;
+        let mut rx_r = self.rx_r.lock().await;
+        let mut rx_w = self.rx_w.lock().await;
+        let closed;
 
         let ret = tokio::select! {
-            req = rx_get.as_mut().expect("RX thread not running").recv() => {
-                if let Some(req) = req {
-                    drop((rx_get, rx_post));
-                    self.pin_channel(&req.chan_name)?;
+            req = rx_r.as_mut().expect("RX thread not running").recv() => {
+                closed = self.closed.load(atomic::Ordering::Relaxed);
+                drop((rx_r, rx_w)); // drop locks
 
+                if let Some(req) = req {
+                    self.pin_channel(&req.chan_name)?;
                     Ok(CommRxMsg::ReqFromSrv(req.body))
                 } else {
                     Err(err!("RX channel closed"))
                 }
             }
-            req = rx_post.as_mut().expect("RX thread not running").recv() => {
+            req = rx_w.as_mut().expect("RX thread not running").recv() => {
+                closed = self.closed.load(atomic::Ordering::Relaxed);
+                drop((rx_r, rx_w)); // drop locks
+
                 if let Some(req) = req {
-                    drop((rx_get, rx_post));
                     self.pin_channel(&req.chan_name)?;
-
-                    self.send_reply(vec![], "200 Ok").await.context("Send POST reply")?;
-
+                    self.send_reply_ok(vec![]).await.context("Send POST reply")?;
                     Ok(CommRxMsg::ToSrv(req.body))
                 } else {
                     Err(err!("RX channel closed"))
@@ -385,11 +394,24 @@ impl HttpConn {
             }
         };
 
-        if self.closed.load(atomic::Ordering::Relaxed) {
+        if closed {
             return Err(DisconnectedError.into());
         }
 
         ret
+    }
+
+    pub async fn close(&self) -> ah::Result<()> {
+        let mut rx_r = self.rx_r.lock().await;
+        let mut rx_w = self.rx_w.lock().await;
+        self.closed.store(true, atomic::Ordering::Relaxed);
+        if let Some(rx_r) = rx_r.as_mut() {
+            rx_r.close();
+        }
+        if let Some(rx_w) = rx_w.as_mut() {
+            rx_w.close();
+        }
+        Ok(())
     }
 }
 
