@@ -29,7 +29,7 @@ async fn local_rx(stream: Arc<TcpStream>, tun: Arc<Sender<ToHttun>>) -> ah::Resu
                 }
                 buf.truncate(n);
 
-                println!("Local rx: {buf:?}");
+                log::trace!("Local rx: {buf:?}");
 
                 //TODO: We have to add TCP/IP headers.
 
@@ -54,7 +54,7 @@ async fn local_tx(stream: Arc<TcpStream>, tun: Arc<Mutex<Receiver<FromHttun>>>) 
             return Err(err!("FromHttun IPC closed"));
         };
 
-        println!("Local tx: {msg:?}");
+        log::trace!("Local tx: {msg:?}");
 
         let payload = msg.payload();
 

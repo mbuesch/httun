@@ -25,7 +25,6 @@ use tokio::{
     time::sleep,
 };
 
-const DEBUG: bool = false;
 const HTTP_R_TIMEOUT: Duration = Duration::from_secs(8);
 const HTTP_W_TIMEOUT: Duration = Duration::from_secs(5);
 const SESSION_INIT_RETRIES: usize = 5;
@@ -179,9 +178,7 @@ async fn direction_r(
 
         let data: &[u8] = &resp.bytes().await.context("httun HTTP-r get body")?;
         if !data.is_empty() {
-            if DEBUG {
-                println!("Received from HTTP-r: {data:?}");
-            }
+            log::trace!("Received from HTTP-r: {data:?}");
 
             let msg = Message::deserialize(data, key, Some(session_secret))
                 .context("Message deserialize")?;
@@ -236,9 +233,7 @@ async fn direction_w(
 
         let msg = msg.serialize(key, Some(session_secret));
 
-        if DEBUG {
-            println!("Send to HTTP-w: {msg:?}");
-        }
+        log::trace!("Send to HTTP-w: {msg:?}");
 
         'http: loop {
             let url = format_url_serial(&chan.url, chan.serial.fetch_add(1, Relaxed));
@@ -414,9 +409,7 @@ impl HttunClient {
             &self.key,
         )
         .await?;
-        if DEBUG {
-            println!("Got session ID: {session_id}");
-        }
+        log::debug!("Got session ID: {session_id}");
 
         let r_task = task::spawn({
             let r = Arc::clone(&self.r);

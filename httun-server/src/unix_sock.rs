@@ -11,7 +11,6 @@ use tokio::{
     time::timeout,
 };
 
-const DEBUG: bool = false;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
@@ -46,7 +45,7 @@ impl UnixConn {
         }
         this.name = msg.chan_name().to_string();
 
-        println!("Connected: {}", this.name);
+        log::info!("Connected: {}", this.name);
 
         Ok(this)
     }
@@ -91,9 +90,7 @@ impl UnixConn {
             return Ok(None);
         };
         let msg = UnMessage::deserialize(&msg)?;
-        if DEBUG {
-            println!("RX Unix msg: {msg:?}");
-        }
+        log::trace!("RX Unix msg: {msg:?}");
         Ok(Some(msg))
     }
 
@@ -119,9 +116,7 @@ impl UnixConn {
     }
 
     pub async fn send(&self, msg: &UnMessage) -> ah::Result<()> {
-        if DEBUG {
-            println!("TX Unix msg: {msg:?}");
-        }
+        log::trace!("TX Unix msg: {msg:?}");
         let msg = msg.serialize();
         let hdr = UnMessageHeader::new(msg.len()).serialize();
         self.do_send(&hdr).await?;
@@ -138,7 +133,7 @@ impl UnixSock {
     pub async fn new() -> ah::Result<Self> {
         let sockets = SystemdSocket::get_all()?;
         if let Some(SystemdSocket::Unix(socket)) = sockets.into_iter().next() {
-            println!("Using Unix socket from systemd.");
+            log::info!("Using Unix socket from systemd.");
 
             socket
                 .set_nonblocking(true)

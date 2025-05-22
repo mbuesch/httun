@@ -9,7 +9,7 @@
 use crate::comm_backend::CommRxMsg;
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
-use httun_util::Query;
+use httun_util::{DisconnectedError, Query};
 use std::{
     fmt::Write as _,
     net::SocketAddr,
@@ -24,11 +24,10 @@ use tokio::{
     task::{self, JoinHandle},
 };
 
-const DEBUG: bool = false;
 const MAX_RX_BYTES: usize = 1024 * (64 + 8);
 static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(0);
 
-async fn recv_all_limited(stream: &TcpStream, max_size: usize) -> ah::Result<Option<Vec<u8>>> {
+async fn recv_all_limited(stream: &TcpStream, max_size: usize) -> ah::Result<Vec<u8>> {
     let mut count = 0;
     let mut data = vec![0_u8; max_size];
     stream.readable().await?;
@@ -36,7 +35,7 @@ async fn recv_all_limited(stream: &TcpStream, max_size: usize) -> ah::Result<Opt
         match stream.try_read(&mut data[count..max_size - count]) {
             Ok(n) => {
                 if n == 0 {
-                    return Ok(None);
+                    return Err(DisconnectedError.into());
                 }
                 if count >= max_size {
                     return Err(err!("Received too many bytes. (>{max_size})"));
@@ -45,7 +44,7 @@ async fn recv_all_limited(stream: &TcpStream, max_size: usize) -> ah::Result<Opt
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 data.truncate(count);
-                return Ok(Some(data));
+                return Ok(data);
             }
             Err(e) => {
                 return Err(e.into());
@@ -185,13 +184,10 @@ pub struct HttunHttpReq {
     body: Vec<u8>,
 }
 
-async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<Option<HttunHttpReq>> {
-    let Some(buf) = recv_all_limited(stream, MAX_RX_BYTES)
+async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<HttunHttpReq> {
+    let buf = recv_all_limited(stream, MAX_RX_BYTES)
         .await
-        .context("HTTP recv")?
-    else {
-        return Ok(None); // Client disconnected.
-    };
+        .context("HTTP recv")?;
 
     // Parse the request header.
     let Some((h, mut tail)) = next_hdr(&buf) else {
@@ -199,9 +195,7 @@ async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<Option<Ht
     };
     let (request, chan_name, direction, query) = parse_request_header(h)?;
 
-    if DEBUG {
-        println!("HTTP: conn {id}: {request:?} / {chan_name} / {direction:?} / {query:?}");
-    }
+    log::trace!("Conn {id}: {request:?} / {chan_name} / {direction:?} / {query:?}");
 
     //TODO add support for "authorization" header?
 
@@ -217,13 +211,13 @@ async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<Option<Ht
     }
     .to_vec();
 
-    Ok(Some(HttunHttpReq {
+    Ok(HttunHttpReq {
         request,
         chan_name,
         direction,
         query,
         body,
-    }))
+    })
 }
 
 async fn rx_task(
@@ -234,9 +228,13 @@ async fn rx_task(
     closed: &AtomicBool,
 ) -> ah::Result<()> {
     loop {
-        let Some(mut req) = recv_httun_request(id, stream).await? else {
-            closed.store(true, atomic::Ordering::Relaxed);
-            return Ok(());
+        let mut req = match recv_httun_request(id, stream).await {
+            Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
+                closed.store(true, atomic::Ordering::Relaxed);
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+            Ok(req) => req,
         };
 
         match (req.direction, req.request) {
@@ -284,9 +282,7 @@ impl HttpConn {
         stream.set_ttl(255)?;
 
         let id = NEXT_CONN_ID.fetch_add(1, atomic::Ordering::Relaxed);
-        if DEBUG {
-            println!("HTTP: new connection: {id}");
-        }
+        log::debug!("New connection: {id}");
 
         Ok(Self {
             id,
@@ -312,7 +308,7 @@ impl HttpConn {
                     if let Err(e) =
                         rx_task(id, &stream, &rx_get_sender, &rx_post_sender, &closed).await
                     {
-                        eprintln!("HTTP connection {id} receive: {e:?}");
+                        log::info!("Connection {id} receive: {e:?}");
                     }
                 }
                 // senders are dropped -> channels are closed.
@@ -390,7 +386,7 @@ impl HttpConn {
         };
 
         if self.closed.load(atomic::Ordering::Relaxed) {
-            return Err(err!("Client connection {} disconnected", self.id));
+            return Err(DisconnectedError.into());
         }
 
         ret

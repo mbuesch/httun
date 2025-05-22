@@ -127,18 +127,18 @@ async fn run_mode_tun(
                         let msg = match Message::new(MsgType::Data, Operation::ToSrv, pkg) {
                             Ok(msg) => msg,
                             Err(e) => {
-                                eprintln!("Make httun packet failed: {e:?}");
+                                log::error!("Make httun packet failed: {e:?}");
                                 error_delay().await;
                                 continue;
                             }
                         };
                         if let Err(e) = to_httun_tx.send(msg).await {
-                            eprintln!("Send to httun failed: {e:?}");
+                            log::error!("Send to httun failed: {e:?}");
                             error_delay().await;
                         }
                     }
                     Err(e) => {
-                        eprintln!("Recv from TUN error: {e:?}");
+                        log::error!("Recv from TUN error: {e:?}");
                         error_delay().await;
                     }
                 }
@@ -156,11 +156,11 @@ async fn run_mode_tun(
 
                 if let Some(pkg) = from_httun_rx.lock().await.recv().await {
                     if let Err(e) = tun.send(&pkg.into_payload()).await {
-                        eprintln!("Send to TUN error: {e:?}");
+                        log::error!("Send to TUN error: {e:?}");
                         error_delay().await;
                     }
                 } else {
-                    eprintln!("Recv from httun failed.");
+                    log::error!("Recv from httun failed.");
                     error_delay().await;
                 }
             }
@@ -210,7 +210,7 @@ async fn run_mode_socket(
                                 if let Err(e) =
                                     conn.handle_packets(to_httun_tx, from_httun_rx).await
                                 {
-                                    eprintln!("Local client error: {e:?}");
+                                    log::error!("Local client: {e:?}");
                                 }
                             });
                         }
@@ -242,7 +242,7 @@ async fn run_mode_test(
 
                 let testdata = format!("TEST {count:08X}");
                 let expected_reply = format!("Reply to: {testdata}");
-                println!("Sending test mode ping: '{testdata}'");
+                log::info!("Sending test mode ping: '{testdata}'");
 
                 let msg = match Message::new(
                     MsgType::Data,
@@ -251,7 +251,7 @@ async fn run_mode_test(
                 ) {
                     Ok(msg) => msg,
                     Err(e) => {
-                        eprintln!("Make httun packet failed: {e:?}");
+                        log::error!("Make httun packet failed: {e:?}");
                         error_delay().await;
                         continue;
                     }
@@ -260,7 +260,7 @@ async fn run_mode_test(
 
                 if let Some(msg) = from_httun_rx.lock().await.recv().await {
                     let replydata = String::from_utf8_lossy(msg.payload());
-                    println!("Received test mode pong: '{replydata}'");
+                    log::info!("Received test mode pong: '{replydata}'");
                     if replydata != expected_reply {
                         let _ = exit_tx.send(Err(err!("Test RX: Invalid reply."))).await;
                         break;
@@ -370,7 +370,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 let to_httun_rx = Arc::clone(&to_httun_rx);
 
                 if let Err(e) = client.handle_packets(from_httun_tx, to_httun_rx).await {
-                    eprintln!("httun client error: {e:?}");
+                    log::error!("httun client: {e:?}");
                     error_delay().await;
                 }
             }
@@ -407,7 +407,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     loop {
         tokio::select! {
             _ = recv_signal!(sigterm) => {
-                eprintln!("SIGTERM: Terminating.");
+                log::info!("SIGTERM: Terminating.");
                 exitcode = Ok(());
                 break;
             }
@@ -416,7 +416,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 break;
             }
             _ = recv_signal!(sighup) => {
-                println!("SIGHUP: Ignoring.");
+                log::info!("SIGHUP: Ignoring.");
             }
             code = exit_rx.recv() => {
                 exitcode = code.unwrap_or_else(|| Err(err!("Unknown error code.")));
@@ -428,6 +428,12 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 }
 
 fn main() -> ah::Result<()> {
+    env_logger::init_from_env(
+        env_logger::Env::new()
+            .filter_or("HTTUN_LOG", "info")
+            .write_style_or("HTTUN_LOG_STYLE", "auto"),
+    );
+
     let opts = Arc::new(Opts::parse());
 
     if opts.version {

@@ -4,8 +4,10 @@
 
 #![forbid(unsafe_code)]
 
+mod errors;
 mod query;
 
+pub use errors::DisconnectedError;
 pub use query::Query;
 
 // vim: ts=4 sw=4 expandtab

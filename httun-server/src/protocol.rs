@@ -8,6 +8,7 @@ use crate::{
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::{Message, MsgType, Operation, SequenceType, SessionSecret, secure_random};
+use httun_util::DisconnectedError;
 use std::sync::{
     Arc,
     atomic::{self, AtomicU32},
@@ -89,6 +90,8 @@ impl ProtocolHandler {
     }
 
     async fn handle_tosrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
+        log::debug!("W direction packet received");
+
         let chan = self.chan()?;
         let session = chan.session();
 
@@ -109,7 +112,7 @@ impl ProtocolHandler {
                 chan.tun().send(msg.payload()).await.context("TUN send")?;
             }
             Operation::TestToSrv if chan.test_enabled() => {
-                println!(
+                log::debug!(
                     "Received test mode ping: '{}'",
                     String::from_utf8_lossy(msg.payload())
                 );
@@ -127,12 +130,15 @@ impl ProtocolHandler {
     }
 
     async fn handle_fromsrv_init(&self, payload: Vec<u8>) -> ah::Result<()> {
+        log::debug!("Session init packet received");
+
         let chan = self.chan()?;
         let mut session = chan.session();
 
         // Deserialize the received message, even though we don't use it.
         // This checks the authenticity of the message.
-        let _msg = Message::deserialize(&payload, chan.key(), None)?;
+        let msg = Message::deserialize(&payload, chan.key(), None)?;
+        log::trace!("Session init message: {msg:?}");
 
         let new_session_secret: SessionSecret = secure_random();
 
@@ -153,6 +159,8 @@ impl ProtocolHandler {
     }
 
     async fn handle_fromsrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
+        log::debug!("R direction packet received");
+
         let chan = self.chan()?;
         let session = chan.session();
 
@@ -247,7 +255,11 @@ impl ProtocolManager {
             async move {
                 loop {
                     if let Err(e) = prot.run().await {
-                        eprintln!("Client error: {e:?}");
+                        if e.downcast_ref::<DisconnectedError>().is_some() {
+                            log::debug!("Client disconnected.");
+                        } else {
+                            log::error!("Client error: {e:?}");
+                        }
                         break;
                     }
                 }

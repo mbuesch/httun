@@ -26,7 +26,7 @@ impl TunHandler {
             .context("Create tun interface (build)")?
             .pop()
             .context("Create tun interface (pop)")?;
-        println!("Tun interface: {}", tun.name());
+        log::info!("Tun interface: {}", tun.name());
 
         Ok(Self { tun })
     }

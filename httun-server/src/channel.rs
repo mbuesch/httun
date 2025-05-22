@@ -166,7 +166,7 @@ impl Channels {
         let mut channels = HashMap::new();
 
         for chan in conf.channels_iter() {
-            println!("Active channel: {}", chan.name());
+            log::info!("Active channel: {}", chan.name());
             let tun = TunHandler::new(chan.tun().unwrap_or("httun"))
                 .await
                 .context("Tun interface init")?;
@@ -178,7 +178,7 @@ impl Channels {
             );
         }
         if channels.is_empty() {
-            eprintln!("WARNING: There are no [[channels]] configured in the configuration file!");
+            log::warn!("There are no [[channels]] configured in the configuration file!");
         }
 
         Ok(Self {

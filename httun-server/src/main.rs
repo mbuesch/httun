@@ -36,7 +36,7 @@ use tokio::{
 };
 
 fn drop_privileges() -> ah::Result<()> {
-    println!("Dropping root privileges.");
+    log::info!("Dropping root privileges.");
 
     let uid = Uid::from_raw(os_get_uid("httun").context("Get httun user from /etc/passwd")?);
     let gid = Gid::from_raw(os_get_gid("httun").context("Get httun group from /etc/group")?);
@@ -204,7 +204,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     loop {
         tokio::select! {
             _ = sigterm.recv() => {
-                eprintln!("SIGTERM: Terminating.");
+                log::info!("SIGTERM: Terminating.");
                 exitcode = Ok(());
                 break;
             }
@@ -213,7 +213,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 break;
             }
             _ = sighup.recv() => {
-                println!("SIGHUP: Ignoring.");
+                log::info!("SIGHUP: Ignoring.");
             }
             code = exit_rx.recv() => {
                 exitcode = code.unwrap_or_else(|| Err(err!("Unknown error code.")));
@@ -225,6 +225,12 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 }
 
 fn main() -> ah::Result<()> {
+    env_logger::init_from_env(
+        env_logger::Env::new()
+            .filter_or("HTTUN_LOG", "info")
+            .write_style_or("HTTUN_LOG_STYLE", "auto"),
+    );
+
     let opts = Arc::new(Opts::parse());
 
     if opts.version {
