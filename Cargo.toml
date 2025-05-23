@@ -52,7 +52,8 @@ httun-util = { path = "./httun-util", version = "0.1" }
 
 [profile.release]
 opt-level = "z"
-lto = "fat"
+#lto = "fat"
+lto = "thin"
 panic = "abort"
 strip = "symbols"
 debug-assertions = false
