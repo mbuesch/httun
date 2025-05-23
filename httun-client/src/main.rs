@@ -441,10 +441,11 @@ fn main() -> ah::Result<()> {
         return Ok(());
     }
 
+    const WORKER_THREADS: usize = 4;
     runtime::Builder::new_multi_thread()
         .thread_keep_alive(Duration::from_millis(5000))
-        .max_blocking_threads(4)
-        .worker_threads(4)
+        .max_blocking_threads(WORKER_THREADS * 2)
+        .worker_threads(WORKER_THREADS)
         .enable_all()
         .build()
         .context("Tokio runtime builder")?

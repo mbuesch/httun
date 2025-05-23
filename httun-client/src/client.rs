@@ -8,6 +8,7 @@ use httun_protocol::{
     Key, Message, MsgType, Operation, SequenceGenerator, SequenceType, SequenceValidator,
     SessionSecret, secure_random,
 };
+use httun_util::CHAN_R_TIMEOUT_S;
 use reqwest::{Client, StatusCode};
 use std::{
     sync::{
@@ -25,8 +26,8 @@ use tokio::{
     time::sleep,
 };
 
-const HTTP_R_TIMEOUT: Duration = Duration::from_secs(8);
-const HTTP_W_TIMEOUT: Duration = Duration::from_secs(5);
+const HTTP_R_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S + 3);
+const HTTP_W_TIMEOUT: Duration = Duration::from_secs(3);
 const SESSION_INIT_RETRIES: usize = 5;
 
 pub type ToHttun = Message;
@@ -56,6 +57,8 @@ fn make_client(
     // Allow proxies (or any other MiM) to manipulate the TLS connection.
     c = c.danger_accept_invalid_hostnames(chan_conf.https_ignore_tls_errors());
     c = c.danger_accept_invalid_certs(chan_conf.https_ignore_tls_errors());
+
+    //c = c.pool_max_idle_per_host(0); //TODO: Add configuration
 
     Ok(c.build()?)
 }
@@ -142,6 +145,8 @@ async fn direction_r(
             msg.set_sequence(tx_sequence_c.next());
             let msg = msg.serialize_b64u(key, Some(session_secret));
 
+            log::trace!("Requesting from HTTP-r");
+
             let url = format_url_serial(&chan.url, chan.serial.fetch_add(1, Relaxed));
             let mut req = client
                 .get(&url)
@@ -178,7 +183,7 @@ async fn direction_r(
 
         let data: &[u8] = &resp.bytes().await.context("httun HTTP-r get body")?;
         if !data.is_empty() {
-            log::trace!("Received from HTTP-r: {data:?}");
+            log::trace!("Received from HTTP-r");
 
             let msg = Message::deserialize(data, key, Some(session_secret))
                 .context("Message deserialize")?;
@@ -233,7 +238,7 @@ async fn direction_w(
 
         let msg = msg.serialize(key, Some(session_secret));
 
-        log::trace!("Send to HTTP-w: {msg:?}");
+        log::trace!("Send to HTTP-w");
 
         'http: loop {
             let url = format_url_serial(&chan.url, chan.serial.fetch_add(1, Relaxed));

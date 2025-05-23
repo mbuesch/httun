@@ -689,6 +689,7 @@ dependencies = [
  "httun-conf",
  "httun-protocol",
  "httun-tun",
+ "httun-util",
  "log",
  "reqwest",
  "tokio",
