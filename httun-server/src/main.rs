@@ -24,7 +24,7 @@ use clap::Parser;
 use httun_conf::Config;
 use nix::unistd::{Gid, Uid, setgid, setuid};
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     path::Path,
     sync::Arc,
     time::Duration,
@@ -64,11 +64,15 @@ struct Opts {
     /// If you specify this option, then this is the address or address:port to listen on.
     /// For example:
     ///
-    /// 0.0.0.0:80 Listen on all IPv4 interfaces on port 80.
+    /// `0.0.0.0:80` Listen on all IPv4 interfaces on port 80.
     ///
-    /// [::]:80 Listen on all IPv4 + IPv6 interfaces on port 80.
+    /// `[::]:80` Listen on all IPv4 + IPv6 interfaces on port 80.
     ///
-    /// 192.168.1.1:8080 Listen on IPv4 192.168.1.1 on port 8080.
+    /// `192.168.1.1:8080` Listen on IPv4 192.168.1.1 on port 8080.
+    ///
+    /// `all` Listen on all IPv4 + IPv6 on port 80
+    ///
+    /// `any` Listen on all IPv4 + IPv6 on port 80
     ///
     /// If you don't specify the port, then it will default to 80.
     #[arg(long)]
@@ -81,11 +85,16 @@ struct Opts {
 
 impl Opts {
     pub fn get_http_listen(&self) -> ah::Result<Option<SocketAddr>> {
+        const DEFAULT_ADDR: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+        const DEFAULT_PORT: u16 = 80;
+
         if let Some(http_listen) = &self.http_listen {
-            if let Ok(addr) = http_listen.parse::<SocketAddr>() {
+            if ["all", "any"].contains(&http_listen.trim().to_lowercase().as_str()) {
+                Ok(Some(SocketAddr::new(DEFAULT_ADDR, DEFAULT_PORT)))
+            } else if let Ok(addr) = http_listen.parse::<SocketAddr>() {
                 Ok(Some(addr))
             } else if let Ok(addr) = http_listen.parse::<IpAddr>() {
-                Ok(Some(SocketAddr::new(addr, 80)))
+                Ok(Some(SocketAddr::new(addr, DEFAULT_PORT)))
             } else {
                 Err(err!(
                     "Failed to parse the command line option --http-listen"
