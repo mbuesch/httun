@@ -10,13 +10,14 @@ use crate::comm_backend::CommRxMsg;
 use anyhow::{self as ah, Context as _, format_err as err};
 use atoi::atoi;
 use base64::prelude::*;
+use httun_conf::{Config, HttpAuth};
 use httun_util::{DisconnectedError, Query};
 use memchr::{memchr, memmem::find};
 use std::{
     fmt::Write as _,
     net::SocketAddr,
     sync::{
-        Arc, Mutex as StdMutex,
+        Arc, OnceLock as StdOnceLock,
         atomic::{self, AtomicBool, AtomicU32},
     },
 };
@@ -141,8 +142,8 @@ async fn send_all(stream: &TcpStream, data: &[u8]) -> ah::Result<()> {
 }
 
 fn next_hdr(buf: &[u8]) -> Option<(&[u8], &[u8])> {
-    if let Some(pos) = buf.iter().position(|b| *b == b'\n') {
-        let (mut l, mut r) = buf.split_at(pos);
+    if let Some(p) = memchr(b'\n', buf) {
+        let (mut l, mut r) = buf.split_at(p);
         if !l.is_empty() && l[l.len() - 1] == b'\r' {
             l = &l[..l.len() - 1];
         }
@@ -157,13 +158,17 @@ fn find_hdr<'a>(buf: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
     let mut tail = buf;
     while let Some((h, t)) = next_hdr(tail) {
         tail = t;
-        if let Some(p) = memchr(b':', h) {
-            if h[..p].trim_ascii().eq_ignore_ascii_case(name) {
-                return Some(&h[p + 1..]);
+        if let Some((n, v)) = split_hdr(h) {
+            if n.trim_ascii().eq_ignore_ascii_case(name) {
+                return Some(v);
             }
         }
     }
     None
+}
+
+fn split_hdr(h: &[u8]) -> Option<(&[u8], &[u8])> {
+    memchr(b':', h).map(|p| (&h[..p], &h[p + 1..]))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -236,7 +241,7 @@ fn parse_request_header(h: &[u8]) -> ah::Result<(HttpRequest, String, Direction,
     };
     let path;
     let query;
-    if let Some(qpos) = path_info.iter().position(|c| *c == b'?') {
+    if let Some(qpos) = memchr(b'?', path_info) {
         let (p, q) = path_info.split_at(qpos);
         path = p;
         query = &q[1..];
@@ -255,12 +260,31 @@ fn parse_request_header(h: &[u8]) -> ah::Result<(HttpRequest, String, Direction,
     Ok((request, chan_name, direction, query))
 }
 
+fn decode_auth_header(value: &[u8]) -> Option<HttpAuth> {
+    let value = value.trim_ascii_start();
+    let p = memchr(b' ', value)?;
+    if !value[..p].trim_ascii().eq_ignore_ascii_case(b"Basic") {
+        return None;
+    }
+    let cred = BASE64_STANDARD.decode(value[p + 1..].trim_ascii()).ok()?;
+    let p = memchr(b':', &cred)?;
+    let user = String::from_utf8(cred[..p].to_vec()).ok()?;
+    let password = String::from_utf8(cred[p + 1..].to_vec()).ok()?;
+    let password = if password.is_empty() {
+        None
+    } else {
+        Some(password)
+    };
+    Some(HttpAuth::new(user, password))
+}
+
 #[derive(Clone, Debug)]
 pub struct HttunHttpReq {
     request: HttpRequest,
     chan_name: String,
     direction: Direction,
     query: Query,
+    authorization: Option<HttpAuth>,
     body: Vec<u8>,
 }
 
@@ -279,6 +303,7 @@ impl HttunHttpReq {
 async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<HttunHttpReq> {
     let buf = recv_http(stream).await.context("HTTP recv")?;
     let buf = buf.buf;
+    let mut authorization = None;
 
     // Parse the request header.
     let Some((h, mut tail)) = next_hdr(&buf) else {
@@ -287,8 +312,6 @@ async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<HttunHttp
     let (request, chan_name, direction, query) = parse_request_header(h)?;
 
     log::trace!("Conn {id}: {request:?} / {chan_name} / {direction:?} / {query:?}");
-
-    //TODO add support for "authorization" header?
 
     // Ignore all other headers.
     let body = loop {
@@ -299,6 +322,12 @@ async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<HttunHttp
         if h.is_empty() {
             break tail;
         }
+
+        if let Some((n, v)) = split_hdr(h) {
+            if n.trim_ascii().eq_ignore_ascii_case(b"Authorization") {
+                authorization = decode_auth_header(v);
+            }
+        }
     }
     .to_vec();
 
@@ -307,6 +336,7 @@ async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<HttunHttp
         chan_name,
         direction,
         query,
+        authorization,
         body,
     };
     req.extract_body();
@@ -347,14 +377,15 @@ pub struct HttpConn {
     id: u32,
     stream: Arc<TcpStream>,
     closed: Arc<AtomicBool>,
-    rx_task: StdMutex<Option<JoinHandle<()>>>,
+    rx_task: StdOnceLock<JoinHandle<()>>,
     rx_r: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
     rx_w: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
-    pinned_chan: StdMutex<Option<String>>,
+    pinned_chan: StdOnceLock<(String, Option<HttpAuth>)>,
+    conf: Arc<Config>,
 }
 
 impl HttpConn {
-    async fn new(stream: TcpStream) -> ah::Result<Self> {
+    async fn new(stream: TcpStream, conf: Arc<Config>) -> ah::Result<Self> {
         stream.set_nodelay(true)?;
         stream.set_linger(None)?;
         stream.set_ttl(255)?;
@@ -366,10 +397,11 @@ impl HttpConn {
             id,
             stream: Arc::new(stream),
             closed: Arc::new(AtomicBool::new(false)),
-            rx_task: StdMutex::new(None),
+            rx_task: StdOnceLock::new(),
             rx_r: Mutex::new(None),
             rx_w: Mutex::new(None),
-            pinned_chan: StdMutex::new(None),
+            pinned_chan: StdOnceLock::new(),
+            conf,
         })
     }
 
@@ -392,27 +424,61 @@ impl HttpConn {
             }
         });
 
-        *self.rx_task.lock().expect("Mutex poisoned") = Some(rx_task);
+        self.rx_task
+            .set(rx_task)
+            .expect("spawn_rx_task was called twice");
         *self.rx_r.lock().await = Some(rx_r_receiver);
         *self.rx_w.lock().await = Some(rx_w_receiver);
     }
 
     pub fn chan_name(&self) -> Option<String> {
-        self.pinned_chan.lock().expect("Mutex poisoned").clone()
+        self.pinned_chan.get().map(|c| &c.0).cloned()
     }
 
-    fn pin_channel(&self, chan_name: &str) -> ah::Result<()> {
-        let mut pinned_chan = self.pinned_chan.lock().expect("Mutex poisoned");
-        if let Some(pinned_chan) = pinned_chan.as_ref() {
-            if pinned_chan != chan_name {
-                Err(err!(
-                    "Http connection is already pinned to a different channel."
-                ))
-            } else {
-                Ok(())
+    fn check_auth(&self, req: &HttunHttpReq, conf_auth: &Option<HttpAuth>) -> ah::Result<()> {
+        if let Some(conf_auth) = conf_auth {
+            if req.authorization.as_ref() != Some(conf_auth) {
+                return Err(err!(
+                    "HTTP basic authorization failed. Received wrong user/key."
+                ));
             }
+        } else if req.authorization.is_some() {
+            log::warn!(
+                "The client sent an HTTP authorization header, \
+                but the server did not check it, \
+                because http basic auth is not configured."
+            );
+        }
+        Ok(())
+    }
+
+    fn pin_channel(&self, req: &HttunHttpReq) -> ah::Result<()> {
+        if let Some(pinned_chan) = self.pinned_chan.get() {
+            if pinned_chan.0 == req.chan_name {
+                self.check_auth(req, &pinned_chan.1)?;
+                return Ok(());
+            } else {
+                return Err(err!(
+                    "Http connection is already pinned to a different channel."
+                ));
+            }
+        }
+
+        let chan = self
+            .conf
+            .channel(&req.chan_name)
+            .context("Get channel from configuration")?;
+        self.check_auth(req, chan.http_basic_auth())?;
+
+        let pinned_chan = self
+            .pinned_chan
+            .get_or_init(|| (req.chan_name.to_string(), chan.http_basic_auth().clone()));
+
+        if pinned_chan.0 != req.chan_name {
+            Err(err!(
+                "Http connection is already pinned to a different channel."
+            ))
         } else {
-            *pinned_chan = Some(chan_name.to_string());
             Ok(())
         }
     }
@@ -452,7 +518,7 @@ impl HttpConn {
                 drop((rx_r, rx_w)); // drop locks
 
                 if let Some(req) = req {
-                    self.pin_channel(&req.chan_name)?;
+                    self.pin_channel(&req)?;
                     Ok(CommRxMsg::ReqFromSrv(req.body))
                 } else {
                     Err(err!("RX channel closed"))
@@ -463,7 +529,7 @@ impl HttpConn {
                 drop((rx_r, rx_w)); // drop locks
 
                 if let Some(req) = req {
-                    self.pin_channel(&req.chan_name)?;
+                    self.pin_channel(&req)?;
                     self.send_reply_ok(vec![]).await.context("Send POST reply")?;
                     Ok(CommRxMsg::ToSrv(req.body))
                 } else {
@@ -495,19 +561,20 @@ impl HttpConn {
 
 pub struct HttpServer {
     listener: TcpListener,
+    conf: Arc<Config>,
 }
 
 impl HttpServer {
-    pub async fn new(addr: SocketAddr) -> ah::Result<Self> {
+    pub async fn new(addr: SocketAddr, conf: Arc<Config>) -> ah::Result<Self> {
         let listener = TcpListener::bind(addr)
             .await
             .context("HTTP server listener")?;
-        Ok(Self { listener })
+        Ok(Self { listener, conf })
     }
 
     pub async fn accept(&self) -> ah::Result<HttpConn> {
         let (stream, _addr) = self.listener.accept().await.context("HTTP accept")?;
-        HttpConn::new(stream).await
+        HttpConn::new(stream, Arc::clone(&self.conf)).await
     }
 }
 

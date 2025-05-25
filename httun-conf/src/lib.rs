@@ -7,13 +7,17 @@ use httun_protocol::Key;
 use serde::Deserialize;
 use std::{num::NonZeroUsize, path::Path};
 
-#[derive(Debug, Clone, Deserialize)]
+//TODO use constant time compare
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct HttpAuth {
     user: String,
     password: Option<String>,
 }
 
 impl HttpAuth {
+    pub fn new(user: String, password: Option<String>) -> Self {
+        HttpAuth { user, password }
+    }
     pub fn user(&self) -> &str {
         &self.user
     }

@@ -122,7 +122,11 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let mut http_srv = None;
     let mut unix_sock = None;
     if let Some(addr) = opts.get_http_listen()? {
-        http_srv = Some(HttpServer::new(addr).await.context("HTTP server init")?);
+        http_srv = Some(
+            HttpServer::new(addr, Arc::clone(&conf))
+                .await
+                .context("HTTP server init")?,
+        );
     } else {
         unix_sock = Some(UnixSock::new().await.context("Unix socket init")?);
     }
