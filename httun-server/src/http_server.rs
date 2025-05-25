@@ -546,6 +546,9 @@ impl HttpConn {
     }
 
     pub async fn close(&self) -> ah::Result<()> {
+        if let Some(rx_task) = self.rx_task.get() {
+            rx_task.abort();
+        }
         let mut rx_r = self.rx_r.lock().await;
         let mut rx_w = self.rx_w.lock().await;
         self.closed.store(true, atomic::Ordering::Relaxed);
@@ -556,6 +559,12 @@ impl HttpConn {
             rx_w.close();
         }
         Ok(())
+    }
+}
+
+impl Drop for HttpConn {
+    fn drop(&mut self) {
+        let _ = self.close();
     }
 }
 
