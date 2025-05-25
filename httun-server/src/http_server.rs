@@ -51,17 +51,17 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
                     return Err(DisconnectedError.into());
                 }
                 buf.count = buf.count.saturating_add(n);
-                if buf.count >= RX_BUF_SIZE {
-                    return Err(err!("Received too many bytes. (>={RX_BUF_SIZE})"));
+                if buf.count > buf.buf.len() {
+                    return Err(err!("Received too many bytes. (>{})", buf.buf.len()));
                 }
-                if let Some(p) = find(&buf.buf[buf.count - n..buf.count], b"\r\n\r\n") {
-                    buf.hdr_len = (buf.count - n) + p + 4;
-                    buf.cont_len = match find_hdr(&buf.buf[0..buf.count], b"Content-Length") {
-                        Some(clen) => {
-                            let Some(clen) = atoi::<usize>(clen.trim_ascii()) else {
+                if let Some(p) = find(&buf.buf[..buf.count], b"\r\n\r\n") {
+                    buf.hdr_len = p + 4;
+                    buf.cont_len = match find_hdr(&buf.buf[..buf.count], b"Content-Length") {
+                        Some(cont_len) => {
+                            let Some(cont_len) = atoi::<usize>(cont_len.trim_ascii()) else {
                                 return Err(err!("Content-Length header number decode error."));
                             };
-                            clen
+                            cont_len
                         }
                         None => 0,
                     };
@@ -82,9 +82,12 @@ async fn recv_rest(stream: &TcpStream, mut buf: RecvBuf) -> ah::Result<RecvBuf> 
     let full_len = buf
         .hdr_len
         .checked_add(buf.cont_len)
-        .ok_or_else(|| err!("Len overflow"))?;
-    if full_len >= RX_BUF_SIZE {
-        return Err(err!("Received HTTP packet is too large. (>={RX_BUF_SIZE})"));
+        .ok_or_else(|| err!("HTTP packet length calculation overflow"))?;
+    if full_len > buf.buf.len() {
+        return Err(err!(
+            "Received HTTP packet is too large. (>{})",
+            buf.buf.len()
+        ));
     }
     if buf.count < full_len {
         loop {
@@ -95,7 +98,7 @@ async fn recv_rest(stream: &TcpStream, mut buf: RecvBuf) -> ah::Result<RecvBuf> 
                         return Err(DisconnectedError.into());
                     }
                     buf.count = buf.count.saturating_add(n);
-                    assert!(buf.count <= full_len);
+                    debug_assert!(buf.count <= full_len);
                     if buf.count == full_len {
                         break;
                     }
