@@ -261,6 +261,18 @@ pub struct HttunHttpReq {
     body: Vec<u8>,
 }
 
+impl HttunHttpReq {
+    pub fn extract_body(&mut self) {
+        if self.request == HttpRequest::Get {
+            if let Some(qmsg) = self.query.get("m") {
+                if let Ok(qmsg) = &BASE64_URL_SAFE_NO_PAD.decode(qmsg.as_bytes()) {
+                    self.body = qmsg.to_vec();
+                }
+            }
+        }
+    }
+}
+
 async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<HttunHttpReq> {
     let buf = recv_http(stream).await.context("HTTP recv")?;
     let buf = buf.buf;
@@ -287,13 +299,16 @@ async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<HttunHttp
     }
     .to_vec();
 
-    Ok(HttunHttpReq {
+    let mut req = HttunHttpReq {
         request,
         chan_name,
         direction,
         query,
         body,
-    })
+    };
+    req.extract_body();
+
+    Ok(req)
 }
 
 async fn rx_task(
@@ -304,7 +319,7 @@ async fn rx_task(
     closed: &AtomicBool,
 ) -> ah::Result<()> {
     loop {
-        let mut req = match recv_httun_request(id, stream).await {
+        let req = match recv_httun_request(id, stream).await {
             Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
                 closed.store(true, atomic::Ordering::Relaxed);
                 return Ok(());
@@ -313,25 +328,9 @@ async fn rx_task(
             Ok(req) => req,
         };
 
-        match (req.direction, req.request) {
-            (Direction::R, HttpRequest::Get) => {
-                if let Some(msg) = req.query.get("m") {
-                    if let Ok(msg) = &BASE64_URL_SAFE_NO_PAD.decode(msg.as_bytes()) {
-                        req.body = msg.to_vec();
-                    }
-                }
-                rx_r_sender.send(req).await?;
-            }
-            (Direction::W, HttpRequest::Post) => {
-                rx_w_sender.send(req).await?;
-            }
-            _ => {
-                return Err(err!(
-                    "Unknown combination {:?} {:?}",
-                    req.direction,
-                    req.request
-                ));
-            }
+        match req.direction {
+            Direction::R => rx_r_sender.send(req).await?,
+            Direction::W => rx_w_sender.send(req).await?,
         }
     }
 }
