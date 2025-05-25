@@ -6,9 +6,9 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Key;
 use serde::Deserialize;
 use std::{num::NonZeroUsize, path::Path};
+use subtle::ConstantTimeEq as _;
 
-//TODO use constant time compare
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Eq, Deserialize)]
 pub struct HttpAuth {
     user: String,
     password: Option<String>,
@@ -24,6 +24,21 @@ impl HttpAuth {
 
     pub fn password(&self) -> Option<&str> {
         self.password.as_deref()
+    }
+}
+
+impl PartialEq for HttpAuth {
+    fn eq(&self, other: &Self) -> bool {
+        let self_user = self.user().as_bytes();
+        let other_user = other.user().as_bytes();
+
+        let self_password = self.password().map(|p| p.as_bytes()).unwrap_or(b"");
+        let other_password = other.password().map(|p| p.as_bytes()).unwrap_or(b"");
+
+        let user_eq = self_user.ct_eq(other_user);
+        let password_eq = self_password.ct_eq(other_password);
+
+        (user_eq & password_eq).into()
     }
 }
 

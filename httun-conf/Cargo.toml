@@ -16,4 +16,5 @@ publish = false
 anyhow = { workspace = true }
 httun-protocol = { workspace = true }
 serde = { workspace = true, features = [ "derive" ] }
+subtle = { workspace = true }
 toml = { workspace = true }
