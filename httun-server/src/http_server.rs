@@ -8,8 +8,10 @@
 
 use crate::comm_backend::CommRxMsg;
 use anyhow::{self as ah, Context as _, format_err as err};
+use atoi::atoi;
 use base64::prelude::*;
 use httun_util::{DisconnectedError, Query};
+use memchr::{memchr, memmem::find};
 use std::{
     fmt::Write as _,
     net::SocketAddr,
@@ -24,33 +26,95 @@ use tokio::{
     task::{self, JoinHandle},
 };
 
-const MAX_RX_BYTES: usize = 1024 * (64 + 8);
+const RX_BUF_SIZE: usize = 1024 * (64 + 8);
 static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(0);
 
-async fn recv_all_limited(stream: &TcpStream, max_size: usize) -> ah::Result<Vec<u8>> {
-    let mut count = 0;
-    let mut data = vec![0_u8; max_size];
-    stream.readable().await?;
+struct RecvBuf {
+    buf: Vec<u8>,
+    count: usize,
+    hdr_len: usize,
+    cont_len: usize,
+}
+
+async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
+    let mut buf = RecvBuf {
+        buf: vec![0_u8; RX_BUF_SIZE],
+        count: 0,
+        hdr_len: 0,
+        cont_len: 0,
+    };
     loop {
-        match stream.try_read(&mut data[count..max_size - count]) {
+        stream.readable().await?;
+        match stream.try_read(&mut buf.buf[buf.count..RX_BUF_SIZE - buf.count]) {
             Ok(n) => {
                 if n == 0 {
                     return Err(DisconnectedError.into());
                 }
-                if count >= max_size {
-                    return Err(err!("Received too many bytes. (>{max_size})"));
+                buf.count = buf.count.saturating_add(n);
+                if buf.count >= RX_BUF_SIZE {
+                    return Err(err!("Received too many bytes. (>={RX_BUF_SIZE})"));
                 }
-                count += n;
+                if let Some(p) = find(&buf.buf[buf.count - n..buf.count], b"\r\n\r\n") {
+                    buf.hdr_len = (buf.count - n) + p + 4;
+                    buf.cont_len = match find_hdr(&buf.buf[0..buf.count], b"Content-Length") {
+                        Some(clen) => {
+                            let Some(clen) = atoi::<usize>(clen.trim_ascii()) else {
+                                return Err(err!("Content-Length header number decode error."));
+                            };
+                            clen
+                        }
+                        None => 0,
+                    };
+                    return Ok(buf);
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                data.truncate(count);
-                return Ok(data);
+                continue;
             }
             Err(e) => {
                 return Err(e.into());
             }
         }
     }
+}
+
+async fn recv_rest(stream: &TcpStream, mut buf: RecvBuf) -> ah::Result<RecvBuf> {
+    let full_len = buf
+        .hdr_len
+        .checked_add(buf.cont_len)
+        .ok_or_else(|| err!("Len overflow"))?;
+    if full_len >= RX_BUF_SIZE {
+        return Err(err!("Received HTTP packet is too large. (>={RX_BUF_SIZE})"));
+    }
+    if buf.count < full_len {
+        loop {
+            stream.readable().await?;
+            match stream.try_read(&mut buf.buf[buf.count..full_len - buf.count]) {
+                Ok(n) => {
+                    if n == 0 {
+                        return Err(DisconnectedError.into());
+                    }
+                    buf.count = buf.count.saturating_add(n);
+                    assert!(buf.count <= full_len);
+                    if buf.count == full_len {
+                        break;
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    continue;
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+    buf.buf.truncate(full_len);
+    Ok(buf)
+}
+
+async fn recv_http(stream: &TcpStream) -> ah::Result<RecvBuf> {
+    recv_rest(stream, recv_headers(stream).await?).await
 }
 
 async fn send_all(stream: &TcpStream, data: &[u8]) -> ah::Result<()> {
@@ -84,6 +148,19 @@ fn next_hdr(buf: &[u8]) -> Option<(&[u8], &[u8])> {
     } else {
         None
     }
+}
+
+fn find_hdr<'a>(buf: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
+    let mut tail = buf;
+    while let Some((h, t)) = next_hdr(tail) {
+        tail = t;
+        if let Some(p) = memchr(b':', h) {
+            if h[..p].trim_ascii().eq_ignore_ascii_case(name) {
+                return Some(&h[p + 1..]);
+            }
+        }
+    }
+    None
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -185,9 +262,8 @@ pub struct HttunHttpReq {
 }
 
 async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<HttunHttpReq> {
-    let buf = recv_all_limited(stream, MAX_RX_BYTES)
-        .await
-        .context("HTTP recv")?;
+    let buf = recv_http(stream).await.context("HTTP recv")?;
+    let buf = buf.buf;
 
     // Parse the request header.
     let Some((h, mut tail)) = next_hdr(&buf) else {
