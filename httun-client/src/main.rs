@@ -438,7 +438,7 @@ fn main() -> ah::Result<()> {
         return Ok(());
     }
 
-    const WORKER_THREADS: usize = 4;
+    const WORKER_THREADS: usize = 6;
     runtime::Builder::new_multi_thread()
         .thread_keep_alive(Duration::from_millis(5000))
         .max_blocking_threads(WORKER_THREADS * 2)
