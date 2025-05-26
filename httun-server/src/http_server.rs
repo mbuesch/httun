@@ -11,7 +11,7 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use atoi::atoi;
 use base64::prelude::*;
 use httun_conf::{Config, HttpAuth};
-use httun_util::{DisconnectedError, Query};
+use httun_util::{DisconnectedError, Query, path_is_valid};
 use memchr::{memchr, memmem::find};
 use std::{
     fmt::Write as _,
@@ -183,26 +183,42 @@ pub enum Direction {
     W,
 }
 
-fn parse_path(path: &[u8]) -> ah::Result<(String, Direction)> {
-    let mut path = path.split(|c| *c == b'/');
+fn next_path_comp(mut path: &[u8]) -> Option<(&[u8], &[u8])> {
+    loop {
+        if path.is_empty() {
+            break None;
+        }
+        if let Some(p) = memchr(b'/', path) {
+            let (l, r) = path.split_at(p);
+            path = &r[1..];
+            if !l.is_empty() {
+                break Some((l, path));
+            }
+        } else {
+            break Some((path, &path[path.len()..path.len()]));
+        }
+    }
+}
 
-    let Some(comp) = path.next() else {
-        return Err(err!("1st path component is missing."));
-    };
-    if !comp.is_empty() {
-        return Err(err!("1st path component is not empty."));
+fn parse_path(path: &[u8]) -> ah::Result<(String, Direction)> {
+    if !path_is_valid(path) {
+        return Err(err!("Invalid characters in path."));
     }
 
-    //TODO ignore all empty path components
-
-    let Some(comp) = path.next() else {
+    let Some((chan_name, tail)) = next_path_comp(path) else {
+        return Err(err!("1st path component is missing."));
+    };
+    let Some((direction, tail)) = next_path_comp(tail) else {
         return Err(err!("2nd path component is missing."));
     };
-    let chan_name = String::from_utf8(comp.to_vec()).context("Convert chan_name to string")?;
-
-    let Some(direction) = path.next() else {
+    let Some((_serial, tail)) = next_path_comp(tail) else {
         return Err(err!("3rd path component is missing."));
     };
+    if next_path_comp(tail).is_some() {
+        return Err(err!("Got trailing garbage in path."));
+    }
+
+    let chan_name = String::from_utf8(chan_name.to_vec())?;
     let direction = match direction {
         b"r" => Direction::R,
         b"w" => Direction::W,
@@ -210,14 +226,6 @@ fn parse_path(path: &[u8]) -> ah::Result<(String, Direction)> {
             return Err(err!("Unknown direction in path."));
         }
     };
-
-    let Some(_serial) = path.next() else {
-        return Err(err!("4th path component is missing."));
-    };
-
-    if path.next().is_some() {
-        return Err(err!("Got trailing garbage in path."));
-    }
 
     Ok((chan_name, direction))
 }

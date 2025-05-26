@@ -6,9 +6,11 @@
 
 mod errors;
 mod query;
+mod strings;
 
 pub use errors::DisconnectedError;
 pub use query::Query;
+pub use strings::path_is_valid;
 
 pub const CHAN_R_TIMEOUT_S: u64 = 5;
 pub const CHAN_R_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(CHAN_R_TIMEOUT_S);

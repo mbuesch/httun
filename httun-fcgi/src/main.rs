@@ -11,7 +11,7 @@ use crate::{
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
-use httun_util::{CHAN_R_TIMEOUT, Query};
+use httun_util::{CHAN_R_TIMEOUT, Query, path_is_valid};
 use std::{
     collections::HashMap,
     fmt::Write as _,
@@ -91,11 +91,6 @@ async fn check_connection_timeouts() {
     let mut connections = get_connections().await;
     let now = Instant::now();
     connections.retain(|_, conn| !conn.is_timed_out(now));
-}
-
-fn path_element_is_valid(name: &str) -> bool {
-    name.chars()
-        .all(|c| c.is_ascii_alphanumeric() || ['-', '_'].contains(&c))
 }
 
 async fn recv_from_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<Vec<u8>> {
@@ -185,6 +180,14 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: No path_info.").await;
     };
 
+    if !path_is_valid(path_info.as_bytes()) {
+        return fcgi_response_error(
+            &req,
+            "400 Bad Request",
+            "FCGI: path_info: Invalid characters.",
+        )
+        .await;
+    }
     let mut path = path_info.split('/');
     let Some(first) = path.next() else {
         return fcgi_response_error(
@@ -228,22 +231,6 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
             &req,
             "400 Bad Request",
             "FCGI: path_info: First entry is not empty.",
-        )
-        .await;
-    }
-    if !path_element_is_valid(name) {
-        return fcgi_response_error(
-            &req,
-            "400 Bad Request",
-            "FCGI: path_info: Invalid tunnel name.",
-        )
-        .await;
-    }
-    if !path_element_is_valid(direction) {
-        return fcgi_response_error(
-            &req,
-            "400 Bad Request",
-            "FCGI: path_info: Invalid direction (r/w).",
         )
         .await;
     }
