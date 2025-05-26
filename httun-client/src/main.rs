@@ -236,10 +236,7 @@ async fn run_mode_test(
         let mut count = Wrapping(0_u32);
 
         async move {
-            let mut interval = time::interval(Duration::from_millis(1000));
             loop {
-                interval.tick().await;
-
                 let testdata = format!("TEST {count:08X}");
                 let expected_reply = format!("Reply to: {testdata}");
                 log::info!("Sending test mode ping: '{testdata}'");
