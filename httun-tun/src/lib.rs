@@ -5,7 +5,6 @@
 #![forbid(unsafe_code)]
 
 use anyhow::{self as ah, Context as _};
-use httun_protocol::OVERHEAD_LEN;
 use tokio_tun::Tun;
 
 const RX_BUF_SIZE: usize = 1024 * 64;
@@ -18,7 +17,7 @@ impl TunHandler {
     pub async fn new(name: &str) -> ah::Result<Self> {
         let tun: Tun = Tun::builder()
             .name(name)
-            .mtu((1500 - OVERHEAD_LEN).try_into().unwrap())
+            .mtu((1024 * 62).try_into().unwrap())
             .owner(0)
             .group(0)
             .up()
