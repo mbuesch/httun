@@ -46,7 +46,7 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
     };
     loop {
         stream.readable().await?;
-        match stream.try_read(&mut buf.buf[buf.count..RX_BUF_SIZE - buf.count]) {
+        match stream.try_read(&mut buf.buf[buf.count..]) {
             Ok(n) => {
                 if n == 0 {
                     return Err(DisconnectedError.into());
@@ -93,7 +93,7 @@ async fn recv_rest(stream: &TcpStream, mut buf: RecvBuf) -> ah::Result<RecvBuf> 
     if buf.count < full_len {
         loop {
             stream.readable().await?;
-            match stream.try_read(&mut buf.buf[buf.count..full_len - buf.count]) {
+            match stream.try_read(&mut buf.buf[buf.count..full_len]) {
                 Ok(n) => {
                     if n == 0 {
                         return Err(DisconnectedError.into());

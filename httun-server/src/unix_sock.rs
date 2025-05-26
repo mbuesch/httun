@@ -60,7 +60,7 @@ impl UnixConn {
         loop {
             self.stream.readable().await?;
 
-            match self.stream.try_read(&mut data[count..size - count]) {
+            match self.stream.try_read(&mut data[count..]) {
                 Ok(n) => {
                     if n == 0 {
                         return Ok(None);

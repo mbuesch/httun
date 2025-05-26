@@ -61,7 +61,7 @@ impl ServerUnixConn {
                 .await
                 .context("Socket polling (recv)")?;
 
-            match self.stream.try_read(&mut data[count..size - count]) {
+            match self.stream.try_read(&mut data[count..]) {
                 Ok(n) => {
                     if n == 0 {
                         return Err(err!("Socket read: Peer disconnected"));
