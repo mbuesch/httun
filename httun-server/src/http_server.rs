@@ -406,8 +406,8 @@ impl HttpConn {
     }
 
     pub async fn spawn_rx_task(&self) {
-        let (rx_r_sender, rx_r_receiver) = mpsc::channel(1);
-        let (rx_w_sender, rx_w_receiver) = mpsc::channel(8);
+        let (rx_r_sender, rx_r_receiver) = mpsc::channel(2);
+        let (rx_w_sender, rx_w_receiver) = mpsc::channel(4);
 
         let rx_task = task::spawn({
             let stream = Arc::clone(&self.stream);
@@ -545,13 +545,17 @@ impl HttpConn {
         ret
     }
 
-    pub async fn close(&self) -> ah::Result<()> {
+    fn abort_rx_task(&self) {
+        self.closed.store(true, atomic::Ordering::Relaxed);
         if let Some(rx_task) = self.rx_task.get() {
             rx_task.abort();
         }
+    }
+
+    pub async fn close(&self) -> ah::Result<()> {
         let mut rx_r = self.rx_r.lock().await;
         let mut rx_w = self.rx_w.lock().await;
-        self.closed.store(true, atomic::Ordering::Relaxed);
+        self.abort_rx_task();
         if let Some(rx_r) = rx_r.as_mut() {
             rx_r.close();
         }
@@ -564,7 +568,7 @@ impl HttpConn {
 
 impl Drop for HttpConn {
     fn drop(&mut self) {
-        let _ = self.close();
+        self.abort_rx_task();
     }
 }
 

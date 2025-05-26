@@ -32,7 +32,8 @@ use std::{
 use tokio::{
     runtime,
     signal::unix::{SignalKind, signal},
-    sync, task,
+    sync::{self, Semaphore},
+    task,
 };
 
 fn drop_privileges() -> ah::Result<()> {
@@ -77,6 +78,12 @@ struct Opts {
     /// If you don't specify the port, then it will default to 80.
     #[arg(long)]
     http_listen: Option<String>,
+
+    /// Maximum number of simultaneous connections.
+    ///
+    /// Note that two simultaneous connections are required per user.
+    #[arg(short, long, default_value = "64")]
+    num_connections: usize,
 
     /// Show version information and exit.
     #[arg(long, short = 'v')]
@@ -151,7 +158,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             let mut interval = tokio::time::interval(Duration::from_secs(3));
             loop {
                 interval.tick().await;
-                protman.check_timeouts().await;
+                protman.check_dead_instances().await;
             }
         }
     });
@@ -159,11 +166,13 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     // Spawn task: Unix socket handler (from/to FCGI).
     if let Some(unix_sock) = unix_sock {
         task::spawn({
+            let opts = Arc::clone(&opts);
             let exit_tx = Arc::clone(&exit_tx);
             let channels = Arc::clone(&channels);
             let protman = Arc::clone(&protman);
 
             async move {
+                let conn_semaphore = Semaphore::new(opts.num_connections);
                 loop {
                     let exit_tx = Arc::clone(&exit_tx);
                     let channels = Arc::clone(&channels);
@@ -171,7 +180,9 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 
                     match unix_sock.accept().await {
                         Ok(conn) => {
-                            protman.spawn(CommBackend::new_unix(conn), channels).await;
+                            if let Ok(_permit) = conn_semaphore.acquire().await {
+                                protman.spawn(CommBackend::new_unix(conn), channels).await;
+                            }
                         }
                         Err(e) => {
                             let _ = exit_tx.send(Err(e)).await;
@@ -186,24 +197,25 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     // Spawn task: HTTP server handler.
     if let Some(http_srv) = http_srv {
         task::spawn({
-            let exit_tx = Arc::clone(&exit_tx);
+            let opts = Arc::clone(&opts);
             let channels = Arc::clone(&channels);
             let protman = Arc::clone(&protman);
 
             async move {
+                let conn_semaphore = Semaphore::new(opts.num_connections);
                 loop {
-                    let exit_tx = Arc::clone(&exit_tx);
                     let channels = Arc::clone(&channels);
                     let protman = Arc::clone(&protman);
 
                     match http_srv.accept().await {
                         Ok(conn) => {
-                            conn.spawn_rx_task().await;
-                            protman.spawn(CommBackend::new_http(conn), channels).await;
+                            if let Ok(_permit) = conn_semaphore.acquire().await {
+                                conn.spawn_rx_task().await;
+                                protman.spawn(CommBackend::new_http(conn), channels).await;
+                            }
                         }
                         Err(e) => {
-                            //TODO do not exit here
-                            let _ = exit_tx.send(Err(e)).await;
+                            log::error!("HTTP accept: {e:?}");
                             break;
                         }
                     }

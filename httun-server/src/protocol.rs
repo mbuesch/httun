@@ -11,7 +11,7 @@ use httun_protocol::{Message, MsgType, Operation, SequenceType, SessionSecret, s
 use httun_util::DisconnectedError;
 use std::sync::{
     Arc,
-    atomic::{self, AtomicU32},
+    atomic::{self, AtomicBool, AtomicU32},
 };
 use tokio::{sync::Mutex, task, time::timeout};
 
@@ -20,6 +20,7 @@ pub struct ProtocolHandler {
     comm: CommBackend,
     channels: Arc<Channels>,
     pinned_session: AtomicU32,
+    dead: AtomicBool,
 }
 
 impl ProtocolHandler {
@@ -33,6 +34,7 @@ impl ProtocolHandler {
             comm,
             channels,
             pinned_session: AtomicU32::new(u32::MAX),
+            dead: AtomicBool::new(false),
         }
     }
 
@@ -235,10 +237,16 @@ impl ProtocolHandler {
         }
     }
 
-    fn activity_timed_out(&self) -> bool {
-        self.chan()
-            .map(|c| c.activity_timed_out())
-            .unwrap_or_default()
+    fn set_dead(&self) {
+        self.dead.store(true, atomic::Ordering::Relaxed);
+    }
+
+    fn is_dead(&self) -> bool {
+        self.dead.load(atomic::Ordering::Relaxed)
+            || self
+                .chan()
+                .map(|c| c.activity_timed_out())
+                .unwrap_or_default()
     }
 }
 
@@ -266,13 +274,17 @@ pub struct ProtocolManager {
 impl ProtocolManager {
     pub fn new() -> Arc<Self> {
         Arc::new(ProtocolManager {
-            insts: Mutex::new(vec![]),
+            insts: Mutex::new(Vec::with_capacity(8)),
         })
     }
 
     pub async fn spawn(self: &Arc<Self>, comm: CommBackend, channels: Arc<Channels>) {
         let prot = Arc::new(ProtocolHandler::new(Arc::clone(self), comm, channels).await);
+
+        let mut insts = self.insts.lock().await;
+
         let handle = task::spawn({
+            let this = Arc::clone(self);
             let prot = Arc::clone(&prot);
             async move {
                 loop {
@@ -285,11 +297,12 @@ impl ProtocolManager {
                         break;
                     }
                 }
+                prot.set_dead();
+                this.check_dead_instances().await;
             }
         });
 
-        let inst = ProtocolInstance::new(handle, prot);
-        self.insts.lock().await.push(inst);
+        insts.push(ProtocolInstance::new(handle, prot));
     }
 
     async fn kill_old_sessions(self: &Arc<Self>, chan_name: &str, new_session_id: u16) {
@@ -310,11 +323,8 @@ impl ProtocolManager {
         });
     }
 
-    pub async fn check_timeouts(self: &Arc<Self>) {
-        self.insts
-            .lock()
-            .await
-            .retain(|inst| !inst.prot.activity_timed_out());
+    pub async fn check_dead_instances(self: &Arc<Self>) {
+        self.insts.lock().await.retain(|inst| !inst.prot.is_dead());
     }
 }
 
