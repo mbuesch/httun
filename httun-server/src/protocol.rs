@@ -77,6 +77,7 @@ impl ProtocolHandler {
     }
 
     async fn close(&self) -> ah::Result<()> {
+        self.set_dead();
         self.comm.close().await
     }
 
@@ -119,7 +120,6 @@ impl ProtocolHandler {
                 chan.put_ping(msg.into_payload()).await;
             }
             _ => {
-                let _ = self.close().await;
                 return Err(err!("Received {oper:?} in UnOperation::ToSrv context"));
             }
         }
@@ -185,7 +185,6 @@ impl ProtocolHandler {
                 (Operation::TestFromSrv, chan.get_pong().await)
             }
             _ => {
-                let _ = self.close().await;
                 return Err(err!("Received {oper:?} in UnOperation::ReqFromSrv context"));
             }
         };
@@ -206,7 +205,7 @@ impl ProtocolHandler {
         }
     }
 
-    pub async fn run(&self) -> ah::Result<()> {
+    async fn do_run(&self) -> ah::Result<()> {
         match self.comm.recv().await? {
             CommRxMsg::ToSrv(payload) => self.handle_tosrv(payload).await,
             CommRxMsg::ReqFromSrv(payload) => {
@@ -219,6 +218,15 @@ impl ProtocolHandler {
                     self.handle_fromsrv(payload).await
                 }
             }
+        }
+    }
+
+    pub async fn run(&self) -> ah::Result<()> {
+        if let Err(e) = self.do_run().await {
+            let _ = self.close().await;
+            Err(e)
+        } else {
+            Ok(())
         }
     }
 
