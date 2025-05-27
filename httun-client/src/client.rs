@@ -111,7 +111,6 @@ async fn direction_r(
     loc: Arc<Sender<FromHttun>>,
     user_agent: &str,
     key: &Key,
-    session_id: u16,
     session_secret: SessionSecret,
 ) -> ah::Result<()> {
     let chan_conf = chan
@@ -141,7 +140,6 @@ async fn direction_r(
 
         'http: loop {
             let mut msg = Message::new(MsgType::Data, oper, vec![])?;
-            msg.set_session(session_id);
             msg.set_sequence(tx_sequence_c.next());
             let msg = msg.serialize_b64u(key, Some(session_secret));
 
@@ -193,9 +191,6 @@ async fn direction_r(
             if msg.oper() != oper {
                 return Err(err!("Received invalid message operation"));
             }
-            if msg.session() != session_id {
-                return Err(err!("Received invalid message session"));
-            }
             rx_validator_a
                 .check_recv_seq(&msg)
                 .context("rx sequence validation SequenceType::A")?;
@@ -210,7 +205,6 @@ async fn direction_w(
     loc: Arc<Mutex<Receiver<ToHttun>>>,
     user_agent: &str,
     key: &Key,
-    session_id: u16,
     session_secret: SessionSecret,
 ) -> ah::Result<()> {
     let chan_conf = chan
@@ -233,7 +227,6 @@ async fn direction_w(
             return Err(err!("ToHttun IPC closed"));
         };
 
-        msg.set_session(session_id);
         msg.set_sequence(tx_sequence_b.next());
 
         let msg = msg.serialize(key, Some(session_secret));
@@ -284,7 +277,7 @@ async fn get_session(
     chan_name: &str,
     user_agent: &str,
     key: &Key,
-) -> ah::Result<(u16, SessionSecret)> {
+) -> ah::Result<SessionSecret> {
     let chan_conf = conf
         .channel_with_url(base_url, chan_name)
         .expect("Chan conf");
@@ -297,9 +290,7 @@ async fn get_session(
     for i in 0..SESSION_INIT_RETRIES {
         let last_try = i == SESSION_INIT_RETRIES - 1;
 
-        let mut msg = Message::new(MsgType::Init, Operation::FromSrv, vec![])?;
-        msg.set_session(u16::from_ne_bytes(secure_random()));
-        msg.set_sequence(u64::from_ne_bytes(secure_random()));
+        let msg = Message::new(MsgType::Init, Operation::FromSrv, vec![])?;
         let msg = msg.serialize_b64u(key, None);
 
         let url = format_url_serial(
@@ -342,12 +333,11 @@ async fn get_session(
         if msg.oper() != Operation::FromSrv {
             return Err(err!("Received invalid message operation"));
         }
-        let session_id = msg.session();
         let Ok(session_secret) = msg.into_payload().try_into() else {
             return Err(err!("Received invalid session secret"));
         };
 
-        return Ok((session_id, session_secret));
+        return Ok(session_secret);
     }
 
     Err(err!("Failed to get session ID from server."))
@@ -406,7 +396,7 @@ impl HttunClient {
         from_httun: Arc<Sender<FromHttun>>,
         to_httun: Arc<Mutex<Receiver<ToHttun>>>,
     ) -> ah::Result<()> {
-        let (session_id, session_secret) = get_session(
+        let session_secret = get_session(
             &self.conf,
             &self.base_url,
             &self.chan_name,
@@ -414,22 +404,20 @@ impl HttunClient {
             &self.key,
         )
         .await?;
-        log::debug!("Got session ID: {session_id}");
+        log::debug!("Initialized new session.");
 
         let r_task = task::spawn({
             let r = Arc::clone(&self.r);
             let user_agent = self.user_agent.clone();
             let key = Arc::clone(&self.key);
-            async move {
-                direction_r(r, from_httun, &user_agent, &key, session_id, session_secret).await
-            }
+            async move { direction_r(r, from_httun, &user_agent, &key, session_secret).await }
         });
 
         let w_task = task::spawn({
             let w = Arc::clone(&self.w);
             let user_agent = self.user_agent.clone();
             let key = Arc::clone(&self.key);
-            async move { direction_w(w, to_httun, &user_agent, &key, session_id, session_secret).await }
+            async move { direction_w(w, to_httun, &user_agent, &key, session_secret).await }
         });
 
         tokio::select! {

@@ -7,11 +7,11 @@ use crate::{
     comm_backend::{CommBackend, CommRxMsg},
 };
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::{Message, MsgType, Operation, SequenceType, SessionSecret, secure_random};
+use httun_protocol::{Message, MsgType, Operation, SequenceType, SessionSecret};
 use httun_util::DisconnectedError;
 use std::sync::{
-    Arc,
-    atomic::{self, AtomicBool, AtomicU32},
+    Arc, RwLock as StdRwLock,
+    atomic::{self, AtomicBool},
 };
 use tokio::{sync::Mutex, task, time::timeout};
 
@@ -19,7 +19,7 @@ pub struct ProtocolHandler {
     protman: Arc<ProtocolManager>,
     comm: CommBackend,
     channels: Arc<Channels>,
-    pinned_session: AtomicU32,
+    pinned_session: StdRwLock<Option<SessionSecret>>,
     dead: AtomicBool,
 }
 
@@ -33,7 +33,7 @@ impl ProtocolHandler {
             protman,
             comm,
             channels,
-            pinned_session: AtomicU32::new(u32::MAX),
+            pinned_session: StdRwLock::new(None),
             dead: AtomicBool::new(false),
         }
     }
@@ -50,23 +50,21 @@ impl ProtocolHandler {
             .ok_or_else(|| err!("Channel is not configured."))
     }
 
-    pub fn pinned_session(&self) -> Option<u16> {
-        let pinned_session = self.pinned_session.load(atomic::Ordering::SeqCst);
-        pinned_session.try_into().ok()
+    pub fn pinned_session(&self) -> Option<SessionSecret> {
+        *self.pinned_session.read().expect("RwLock poisoned")
     }
 
-    fn pin_session(&self, session: u16) {
-        self.pinned_session
-            .store(session.into(), atomic::Ordering::SeqCst);
+    fn pin_session(&self, session_secret: &SessionSecret) {
+        *self.pinned_session.write().expect("RwLock poisoned") = Some(*session_secret);
     }
 
-    async fn create_new_session(&self, chan: &Channel, session_secret: SessionSecret) -> u16 {
-        let session_id = chan.create_new_session(session_secret);
-        self.pin_session(session_id);
+    async fn create_new_session(&self, chan: &Channel) -> SessionSecret {
+        let session_secret = chan.create_new_session();
+        self.pin_session(&session_secret);
         self.protman
-            .kill_old_sessions(chan.name(), session_id)
+            .kill_old_sessions(chan.name(), &session_secret)
             .await;
-        session_id
+        session_secret
     }
 
     async fn check_rx_sequence(
@@ -104,11 +102,6 @@ impl ProtocolHandler {
 
         let msg = Message::deserialize(&payload, chan.key(), session.secret)?;
         let oper = msg.oper();
-
-        if msg.session() != session.id {
-            let _ = self.close().await;
-            return Err(err!("Session mismatch"));
-        }
 
         self.check_rx_sequence(&chan, &msg, SequenceType::B)
             .await
@@ -154,18 +147,16 @@ impl ProtocolHandler {
         let msg = Message::deserialize(&payload, chan.key(), None)?;
         log::trace!("Session init message: {msg:?}");
 
-        let new_session_secret: SessionSecret = secure_random();
+        let new_session_secret = self.create_new_session(&chan).await;
 
         session.secret = None; // Don't use it for *this* message.
 
-        let mut msg = Message::new(
+        let msg = Message::new(
             MsgType::Init,
             Operation::FromSrv,
             new_session_secret.to_vec(),
         )
         .context("Make httun packet")?;
-        msg.set_session(self.create_new_session(&chan, new_session_secret).await);
-        msg.set_sequence(u64::from_ne_bytes(secure_random()));
 
         self.send_reply_msg(&chan, msg, session).await?;
 
@@ -180,11 +171,6 @@ impl ProtocolHandler {
 
         let msg = Message::deserialize(&payload, chan.key(), session.secret)?;
         let oper = msg.oper();
-
-        if msg.session() != session.id {
-            let _ = self.close().await;
-            return Err(err!("Session mismatch"));
-        }
 
         self.check_rx_sequence(&chan, &msg, SequenceType::C)
             .await
@@ -206,7 +192,6 @@ impl ProtocolHandler {
 
         let mut msg =
             Message::new(MsgType::Data, reply_oper, payload).context("Make httun packet")?;
-        msg.set_session(session.id);
         msg.set_sequence(session.sequence);
 
         self.send_reply_msg(&chan, msg, session).await?;
@@ -305,12 +290,16 @@ impl ProtocolManager {
         insts.push(ProtocolInstance::new(handle, prot));
     }
 
-    async fn kill_old_sessions(self: &Arc<Self>, chan_name: &str, new_session_id: u16) {
+    async fn kill_old_sessions(
+        self: &Arc<Self>,
+        chan_name: &str,
+        new_session_secret: &SessionSecret,
+    ) {
         self.insts.lock().await.retain(|inst| {
             if let Ok(name) = inst.prot.chan_name() {
                 if name == chan_name {
                     if let Some(pinned_session) = inst.prot.pinned_session() {
-                        pinned_session == new_session_id
+                        pinned_session == *new_session_secret
                     } else {
                         false
                     }

@@ -6,7 +6,7 @@ use crate::time::{now, tdiff};
 use anyhow::{self as ah, Context as _};
 use httun_conf::Config;
 use httun_protocol::{
-    Key, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret,
+    Key, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret, secure_random,
 };
 use httun_tun::TunHandler;
 use std::{
@@ -36,7 +36,6 @@ impl PingState {
 
 #[derive(Clone, Debug, Default)]
 pub struct Session {
-    pub id: u16,
     pub secret: Option<SessionSecret>,
     pub sequence: u64,
 }
@@ -100,17 +99,20 @@ impl Channel {
         s.session.clone()
     }
 
-    pub fn create_new_session(&self, session_secret: SessionSecret) -> u16 {
-        let mut s = self.session.lock().expect("Mutex poisoned");
+    pub fn create_new_session(&self) -> SessionSecret {
+        let session_secret: SessionSecret = secure_random();
 
-        s.session.id = s.session.id.wrapping_add(1);
-        s.session.sequence = 0;
-        s.session.secret = Some(session_secret);
-        s.tx_sequence_a.reset();
-        s.rx_validator_b.reset();
-        s.rx_validator_c.reset();
+        {
+            let mut s = self.session.lock().expect("Mutex poisoned");
 
-        s.session.id
+            s.session.sequence = u64::MAX;
+            s.session.secret = Some(session_secret);
+            s.tx_sequence_a.reset();
+            s.rx_validator_b.reset();
+            s.rx_validator_c.reset();
+        }
+
+        session_secret
     }
 
     pub async fn check_rx_sequence(

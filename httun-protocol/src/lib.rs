@@ -9,12 +9,12 @@
 //! | Byte offset | Name                 | Byte size | Area  |
 //! | ----------- | -------------------- | --------- | ----- |
 //! | 0           | Type                 | 1         | assoc |
+//TODO increase nonce size
 //! | 1           | Nonce                | 12        | nonce |
 //! | 13          | Operation            | 1         | crypt |
-//! | 14          | Session              | 2 (be)    | crypt |
-//! | 16          | Sequence counter     | 8 (be)    | crypt |
-//! | 24          | Payload length       | 2 (be)    | crypt |
-//! | 26          | Payload              | var       | crypt |
+//! | 14          | Sequence counter     | 8 (be)    | crypt |
+//! | 22          | Payload length       | 2 (be)    | crypt |
+//! | 24          | Payload              | var       | crypt |
 //! | var         | Authentication tag   | 16        | tag   |
 
 #![forbid(unsafe_code)]
@@ -49,13 +49,12 @@ const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
 const OFFS_TYPE: usize = 0;
 const OFFS_NONCE: usize = 1;
 const OFFS_OPER: usize = 13;
-const OFFS_SESSION: usize = 14;
-const OFFS_SEQ: usize = 16;
-const OFFS_LEN: usize = 24;
-const OFFS_PAYLOAD: usize = 26;
+const OFFS_SEQ: usize = 14;
+const OFFS_LEN: usize = 22;
+const OFFS_PAYLOAD: usize = 24;
 
 const AREA_ASSOC_LEN: usize = 1;
-const AREA_CRYPT_LEN: usize = 1 + 2 + 8 + 2;
+const AREA_CRYPT_LEN: usize = 1 + 8 + 2;
 pub const OVERHEAD_LEN: usize = AREA_ASSOC_LEN + NONCE_LEN + AREA_CRYPT_LEN + AUTHTAG_LEN;
 
 /// Generate a cryptographically secure random token.
@@ -142,7 +141,6 @@ impl From<Operation> for u8 {
 pub struct Message {
     type_: MsgType,
     oper: Operation,
-    session: u16,
     sequence: u64,
     payload: Vec<u8>,
 }
@@ -155,8 +153,7 @@ impl Message {
         Ok(Self {
             type_,
             oper,
-            session: 0,
-            sequence: 0,
+            sequence: u64::MAX,
             payload,
         })
     }
@@ -167,14 +164,6 @@ impl Message {
 
     pub fn oper(&self) -> Operation {
         self.oper
-    }
-
-    pub fn session(&self) -> u16 {
-        self.session
-    }
-
-    pub fn set_session(&mut self, session: u16) {
-        self.session = session;
     }
 
     pub fn sequence(&self) -> u64 {
@@ -197,7 +186,6 @@ impl Message {
         let type_: u8 = self.type_.into();
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
         let oper: u8 = self.oper.into();
-        let session: u16 = self.session;
         let sequence: u64 = self.sequence;
         let len: u16 = self.payload.len().try_into().expect("Payload too big");
 
@@ -205,7 +193,6 @@ impl Message {
         buf.extend(&type_.to_be_bytes());
         buf.extend(&nonce);
         buf.extend(&oper.to_be_bytes());
-        buf.extend(&session.to_be_bytes());
         buf.extend(&sequence.to_be_bytes());
         buf.extend(&len.to_be_bytes());
         buf.extend(&self.payload);
@@ -261,7 +248,6 @@ impl Message {
         }
 
         let oper = u8::from_be_bytes(buf[OFFS_OPER..OFFS_OPER + 1].try_into()?);
-        let session = u16::from_be_bytes(buf[OFFS_SESSION..OFFS_SESSION + 2].try_into()?);
         let sequence = u64::from_be_bytes(buf[OFFS_SEQ..OFFS_SEQ + 8].try_into()?);
         let len = u16::from_be_bytes(buf[OFFS_LEN..OFFS_LEN + 2].try_into()?);
 
@@ -277,7 +263,6 @@ impl Message {
         Ok(Message {
             type_,
             oper,
-            session,
             sequence,
             payload,
         })
