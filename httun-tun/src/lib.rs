@@ -17,7 +17,7 @@ impl TunHandler {
     pub async fn new(name: &str) -> ah::Result<Self> {
         let tun: Tun = Tun::builder()
             .name(name)
-            .mtu((1024 * 62).try_into().unwrap())
+            .mtu(1024 * 62)
             .owner(0)
             .group(0)
             .up()
