@@ -26,7 +26,10 @@ use nix::unistd::{Gid, Uid, setgid, setuid};
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
     path::Path,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{self, AtomicU32},
+    },
     time::Duration,
 };
 use tokio::{
@@ -36,11 +39,14 @@ use tokio::{
     task,
 };
 
+static WEBSERVER_UID: AtomicU32 = AtomicU32::new(u32::MAX);
+static WEBSERVER_GID: AtomicU32 = AtomicU32::new(u32::MAX);
+
 fn drop_privileges() -> ah::Result<()> {
     log::info!("Dropping root privileges.");
 
-    let uid = Uid::from_raw(os_get_uid("httun").context("Get httun user from /etc/passwd")?);
-    let gid = Gid::from_raw(os_get_gid("httun").context("Get httun group from /etc/group")?);
+    let uid = Uid::from_raw(os_get_uid("httun").context("Get httun uid from /etc/passwd")?);
+    let gid = Gid::from_raw(os_get_gid("httun").context("Get httun gid from /etc/group")?);
 
     setgid(gid).context("Drop privileges: Set httun group id")?;
     setuid(uid).context("Drop privileges: Set httun user id")?;
@@ -48,15 +54,46 @@ fn drop_privileges() -> ah::Result<()> {
     Ok(())
 }
 
+/// Get web server UID and GID.
+fn get_webserver_uid_gid(opts: &Opts) -> ah::Result<()> {
+    let user = &opts.webserver_user;
+    let group = &opts.webserver_group;
+
+    let uid = os_get_uid(user).context("Get web server uid from /etc/passwd")?;
+    let gid = os_get_gid(group).context("Get web server gid from /etc/group")?;
+
+    WEBSERVER_UID.store(uid, atomic::Ordering::Relaxed);
+    WEBSERVER_GID.store(gid, atomic::Ordering::Relaxed);
+
+    Ok(())
+}
+
 #[derive(Parser, Debug, Clone)]
 struct Opts {
     /// Path to the configuration file.
-    #[arg(long, short = 'c', default_value = "/opt/httun/etc/httun/server.conf")]
+    #[arg(
+        long,
+        short = 'c',
+        id = "PATH",
+        default_value = "/opt/httun/etc/httun/server.conf"
+    )]
     config: String,
 
     /// Do not drop root privileges after startup.
     #[arg(long)]
     no_drop_root: bool,
+
+    /// User name the web server FastCGI runs as.
+    ///
+    /// This option is only used, if --http-listen is not used.
+    #[arg(long, id = "USER", default_value = "www-data")]
+    webserver_user: String,
+
+    /// Group name the web server FastCGI runs as.
+    ///
+    /// This option is only used, if --http-listen is not used.
+    #[arg(long, id = "GROUP", default_value = "www-data")]
+    webserver_group: String,
 
     /// Instead of running as an FastCGI backend run a simple HTTP server.
     ///
@@ -76,13 +113,13 @@ struct Opts {
     /// `any` Listen on all IPv4 + IPv6 on port 80
     ///
     /// If you don't specify the port, then it will default to 80.
-    #[arg(long)]
+    #[arg(long, id = "ADDR:PORT")]
     http_listen: Option<String>,
 
     /// Maximum number of simultaneous connections.
     ///
     /// Note that two simultaneous connections are required per user.
-    #[arg(short, long, default_value = "64")]
+    #[arg(short, long, id = "NUMBER", default_value = "64")]
     num_connections: usize,
 
     /// Show version information and exit.
@@ -135,6 +172,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 .context("HTTP server init")?,
         );
     } else {
+        get_webserver_uid_gid(&opts).context("Get web server UID/GID")?;
         unix_sock = Some(UnixSock::new().await.context("Unix socket init")?);
     }
 

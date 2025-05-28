@@ -2,10 +2,13 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::systemd::{SystemdSocket, systemd_notify_ready};
+use crate::{
+    WEBSERVER_GID, WEBSERVER_UID,
+    systemd::{SystemdSocket, systemd_notify_ready},
+};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
-use std::time::Duration;
+use std::{sync::atomic, time::Duration};
 use tokio::{
     net::{UnixListener, UnixStream},
     time::timeout,
@@ -154,15 +157,37 @@ impl UnixSock {
         let (stream, _addr) = self.listener.accept().await?;
 
         // Get the credentials of the connected process.
-        let _cred = stream
+        let cred = stream
             .peer_cred()
             .context("Get Unix socket peer credentials")?;
 
-        //TODO check PID
+        let web_uid = WEBSERVER_UID.load(atomic::Ordering::Relaxed);
+        let web_gid = WEBSERVER_GID.load(atomic::Ordering::Relaxed);
 
-        //TODO check UID
+        let peer_uid = cred.uid();
+        let peer_gid = cred.gid();
 
-        //TODO check GID
+        if peer_uid != web_uid {
+            return Err(err!(
+                "Unix socket: \
+                The connected uid {} is not the web server's uid ({}). \
+                Rejecting connection. \
+                Please see the --webserver-user command line option.",
+                peer_uid,
+                web_uid
+            ));
+        }
+
+        if peer_gid != web_gid {
+            return Err(err!(
+                "Unix socket: \
+                The connected gid {} is not the web server's gid ({}). \
+                Rejecting connection. \
+                Please see the --webserver-group command line option.",
+                peer_uid,
+                web_uid
+            ));
+        }
 
         UnixConn::new(stream).await
     }
