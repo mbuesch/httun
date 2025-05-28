@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use anyhow::{self as ah, Context as _};
+use anyhow as ah;
 use httun_protocol::Message;
 use std::sync::Arc;
 use tokio::sync::{
@@ -17,6 +17,7 @@ pub async fn run_mode_tun(
     tun_name: &str,
 ) -> ah::Result<()> {
     use crate::error_delay;
+    use anyhow::Context as _;
     use httun_protocol::{Message, MsgType, Operation};
     use tokio::task;
 
