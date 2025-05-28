@@ -53,27 +53,31 @@ try_systemctl()
 
 stop_services()
 {
-    local mode="$1"
-
-    if [ "$mode" = "fcgi" ]; then
-        try_systemctl stop httun-server.socket
-    fi
+    try_systemctl stop httun-server.socket
     try_systemctl stop httun-server.service
+    try_systemctl stop httun-server-standalone.service
 
     try_systemctl disable httun-server.service
-    if [ "$mode" = "fcgi" ]; then
-        try_systemctl disable httun-server.socket
-    fi
+    try_systemctl disable httun-server.socket
+    try_systemctl disable httun-server-standalone.service
 }
 
 start_services()
 {
     local mode="$1"
 
-    if [ "$mode" = "fcgi" ]; then
-        do_systemctl start httun-server.socket
-    fi
-    do_systemctl start httun-server.service
+    case "$mode" in
+        fcgi)
+            do_systemctl start httun-server.socket
+            do_systemctl start httun-server.service
+            ;;
+        standalone)
+            do_systemctl start httun-server-standalone.service
+            ;;
+        *)
+            die "start_services: Invalid mode"
+            ;;
+    esac
 }
 
 install_entry_checks()

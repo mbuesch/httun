@@ -23,7 +23,7 @@ done
 target="$basedir/target/$release"
 
 install_entry_checks
-stop_services standalone
+stop_services
 install_dirs
 install_httun_server standalone
 install_httun_client

@@ -34,7 +34,7 @@ done
 target="$basedir/target/$release"
 
 install_entry_checks
-stop_services fcgi
+stop_services
 install_dirs
 install_httun_server fcgi
 install_httun_client
