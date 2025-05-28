@@ -2,16 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use crate::error_delay;
 use anyhow::{self as ah, Context as _};
-use httun_protocol::{Message, MsgType, Operation};
+use httun_protocol::Message;
 use std::sync::Arc;
-use tokio::{
-    sync::{
-        Mutex,
-        mpsc::{Receiver, Sender},
-    },
-    task,
+use tokio::sync::{
+    Mutex,
+    mpsc::{Receiver, Sender},
 };
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -20,6 +16,10 @@ pub async fn run_mode_tun(
     from_httun_rx: Arc<Mutex<Receiver<Message>>>,
     tun_name: &str,
 ) -> ah::Result<()> {
+    use crate::error_delay;
+    use httun_protocol::{Message, MsgType, Operation};
+    use tokio::task;
+
     let tun = Arc::new(
         httun_tun::TunHandler::new(tun_name)
             .await
@@ -88,7 +88,7 @@ pub async fn run_mode_tun(
     _from_httun_rx: Arc<Mutex<Receiver<Message>>>,
     _tun_name: &str,
 ) -> ah::Result<()> {
-    Err(err!("TUN is only supported on Linux."))
+    Err(ah::format_err!("TUN is only supported on Linux."))
 }
 
 // vim: ts=4 sw=4 expandtab
