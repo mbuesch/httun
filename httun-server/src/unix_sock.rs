@@ -184,8 +184,8 @@ impl UnixSock {
                 The connected gid {} is not the web server's gid ({}). \
                 Rejecting connection. \
                 Please see the --webserver-group command line option.",
-                peer_uid,
-                web_uid
+                peer_gid,
+                web_gid
             ));
         }
 
