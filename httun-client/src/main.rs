@@ -6,19 +6,21 @@
 
 mod client;
 mod local_listener;
+mod mode;
 
-use crate::{client::HttunClient, local_listener::LocalListener};
+use crate::{
+    client::HttunClient,
+    mode::{
+        genkey::run_mode_genkey, socket::run_mode_socket, test::run_mode_test, tun::run_mode_tun,
+    },
+};
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::{Parser, Subcommand};
 use httun_conf::Config;
-use httun_protocol::{Key, Message, MsgType, Operation, secure_random};
-use std::{num::Wrapping, path::Path, sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 use tokio::{
     runtime,
-    sync::{
-        Mutex, Semaphore,
-        mpsc::{self, Receiver, Sender},
-    },
+    sync::{Mutex, mpsc},
     task, time,
 };
 
@@ -89,189 +91,8 @@ enum Mode {
     Genkey {},
 }
 
-async fn error_delay() {
+pub async fn error_delay() {
     time::sleep(Duration::from_millis(500)).await;
-}
-
-/// Generate a new truly random and secure key.
-pub async fn run_genkey(channel: &str) -> ah::Result<()> {
-    let key: Key = secure_random();
-    let key: Vec<String> = key.iter().map(|b| format!("{b:02X}")).collect();
-    let key: String = key.join("");
-    println!("{channel} = \"{key}\"");
-    Ok(())
-}
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-async fn run_mode_tun(
-    to_httun_tx: Arc<Sender<Message>>,
-    from_httun_rx: Arc<Mutex<Receiver<Message>>>,
-    tun_name: &str,
-) -> ah::Result<()> {
-    let tun = Arc::new(
-        httun_tun::TunHandler::new(tun_name)
-            .await
-            .context("Create TUN interface")?,
-    );
-
-    // Spawn task: TUN to HTTP.
-    task::spawn({
-        let tun = Arc::clone(&tun);
-
-        async move {
-            loop {
-                let tun = Arc::clone(&tun);
-
-                match tun.recv().await {
-                    Ok(pkg) => {
-                        let msg = match Message::new(MsgType::Data, Operation::ToSrv, pkg) {
-                            Ok(msg) => msg,
-                            Err(e) => {
-                                log::error!("Make httun packet failed: {e:?}");
-                                error_delay().await;
-                                continue;
-                            }
-                        };
-                        if let Err(e) = to_httun_tx.send(msg).await {
-                            log::error!("Send to httun failed: {e:?}");
-                            error_delay().await;
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Recv from TUN error: {e:?}");
-                        error_delay().await;
-                    }
-                }
-            }
-        }
-    });
-
-    // Spawn task: HTTP to TUN.
-    task::spawn({
-        let tun = Arc::clone(&tun);
-
-        async move {
-            loop {
-                let tun = Arc::clone(&tun);
-
-                if let Some(pkg) = from_httun_rx.lock().await.recv().await {
-                    if let Err(e) = tun.send(&pkg.into_payload()).await {
-                        log::error!("Send to TUN error: {e:?}");
-                        error_delay().await;
-                    }
-                } else {
-                    log::error!("Recv from httun failed.");
-                    error_delay().await;
-                }
-            }
-        }
-    });
-
-    Ok(())
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-async fn run_mode_tun(
-    _to_httun_tx: Arc<Sender<Message>>,
-    _from_httun_rx: Arc<Mutex<Receiver<Message>>>,
-    _tun_name: &str,
-) -> ah::Result<()> {
-    Err(err!("TUN is only supported on Linux."))
-}
-
-async fn run_mode_socket(
-    exit_tx: Arc<Sender<ah::Result<()>>>,
-    to_httun_tx: Arc<Sender<Message>>,
-    from_httun_rx: Arc<Mutex<Receiver<Message>>>,
-    target: &str,
-    local_port: u16,
-) -> ah::Result<()> {
-    let local = LocalListener::bind(local_port)
-        .await
-        .context("Connect to localhost port")?;
-
-    let _ = target; //TODO
-
-    // Spawn task: Local socket handler.
-    task::spawn({
-        async move {
-            let conn_semaphore = Semaphore::new(1);
-
-            loop {
-                let exit_tx = Arc::clone(&exit_tx);
-                let to_httun_tx = Arc::clone(&to_httun_tx);
-                let from_httun_rx = Arc::clone(&from_httun_rx);
-
-                match local.accept().await {
-                    Ok(conn) => {
-                        // Socket connection handler.
-                        if let Ok(_permit) = conn_semaphore.acquire().await {
-                            task::spawn(async move {
-                                if let Err(e) =
-                                    conn.handle_packets(to_httun_tx, from_httun_rx).await
-                                {
-                                    log::error!("Local client: {e:?}");
-                                }
-                            });
-                        }
-                    }
-                    Err(e) => {
-                        let _ = exit_tx.send(Err(e)).await;
-                        break;
-                    }
-                }
-            }
-        }
-    });
-    Ok(())
-}
-
-async fn run_mode_test(
-    exit_tx: Arc<Sender<ah::Result<()>>>,
-    to_httun_tx: Arc<Sender<Message>>,
-    from_httun_rx: Arc<Mutex<Receiver<Message>>>,
-) -> ah::Result<()> {
-    // Spawn task: Test handler.
-    task::spawn({
-        let mut count = Wrapping(0_u32);
-
-        async move {
-            loop {
-                let testdata = format!("TEST {count:08X}");
-                let expected_reply = format!("Reply to: {testdata}");
-                log::info!("Sending test mode ping: '{testdata}'");
-
-                let msg = match Message::new(
-                    MsgType::Data,
-                    Operation::TestToSrv,
-                    testdata.into_bytes(),
-                ) {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        log::error!("Make httun packet failed: {e:?}");
-                        error_delay().await;
-                        continue;
-                    }
-                };
-                to_httun_tx.send(msg).await.unwrap();
-
-                if let Some(msg) = from_httun_rx.lock().await.recv().await {
-                    let replydata = String::from_utf8_lossy(msg.payload());
-                    log::info!("Received test mode pong: '{replydata}'");
-                    if replydata != expected_reply {
-                        let _ = exit_tx.send(Err(err!("Test RX: Invalid reply."))).await;
-                        break;
-                    }
-                } else {
-                    let _ = exit_tx.send(Err(err!("Test RX: No message."))).await;
-                    break;
-                }
-
-                count += 1;
-            }
-        }
-    });
-    Ok(())
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -311,7 +132,7 @@ macro_rules! recv_signal {
 
 async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     if matches!(opts.mode, Some(Mode::Genkey {})) {
-        return run_genkey(&opts.channel).await;
+        return run_mode_genkey(&opts.channel).await;
     }
 
     if opts.mode.is_none() {
