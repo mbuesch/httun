@@ -1,13 +1,12 @@
 [Unit]
-Description=httun server daemon (unix socket + FastCGI)
-Requires=httun-server.socket nftables.service
-PartOf=httun-server.socket
+Description=httun server daemon (http standalone)
+Requires=nftables.service
 StartLimitIntervalSec=0
 
 [Service]
 Type=notify
 NotifyAccess=main
-ExecStart=/opt/httun/bin/httun-server --webserver-user=www-data --webserver-group=www-data
+ExecStart=/opt/httun/bin/httun-server --http-listen any
 RuntimeDirectory=httun-server
 RuntimeDirectoryMode=0755
 StandardOutput=journal
