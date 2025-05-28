@@ -58,8 +58,6 @@ fn make_client(
     c = c.danger_accept_invalid_hostnames(chan_conf.https_ignore_tls_errors());
     c = c.danger_accept_invalid_certs(chan_conf.https_ignore_tls_errors());
 
-    //c = c.pool_max_idle_per_host(0); //TODO: Add configuration
-
     Ok(c.build()?)
 }
 
