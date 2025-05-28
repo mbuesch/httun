@@ -142,6 +142,34 @@ async fn send_all(stream: &TcpStream, data: &[u8]) -> ah::Result<()> {
     }
 }
 
+async fn send_http_reply(stream: &TcpStream, payload: Vec<u8>, status: &str) -> ah::Result<()> {
+    let mut headers = String::with_capacity(256);
+    write!(&mut headers, "HTTP/1.1 {status}\r\n")?;
+    write!(&mut headers, "Cache-Control: no-store\r\n")?;
+    if !payload.is_empty() {
+        write!(&mut headers, "Content-Length: {}\r\n", payload.len())?;
+        write!(&mut headers, "Content-Type: application/octet-stream\r\n")?;
+    }
+    write!(&mut headers, "\r\n")?;
+    send_all(stream, headers.as_bytes()).await?;
+    if !payload.is_empty() {
+        send_all(stream, &payload).await?;
+    }
+    Ok(())
+}
+
+async fn send_http_reply_ok(stream: &TcpStream, payload: Vec<u8>) -> ah::Result<()> {
+    send_http_reply(stream, payload, "200 Ok").await
+}
+
+async fn send_http_reply_timeout(stream: &TcpStream) -> ah::Result<()> {
+    send_http_reply(stream, vec![], "408 Request Timeout").await
+}
+
+async fn send_http_reply_badrequest(stream: &TcpStream) -> ah::Result<()> {
+    send_http_reply(stream, vec![], "400 Bad Request").await
+}
+
 fn next_hdr(buf: &[u8]) -> Option<(&[u8], &[u8])> {
     if let Some(p) = memchr(b'\n', buf) {
         let (mut l, mut r) = buf.split_at(p);
@@ -254,50 +282,48 @@ impl HttunHttpReq {
             }
         }
     }
-}
 
-async fn recv_httun_request(id: u32, stream: &TcpStream) -> ah::Result<HttunHttpReq> {
-    let buf = recv_http(stream).await.context("HTTP recv")?;
-    let buf = buf.buf;
-    let mut authorization = None;
+    pub async fn parse(id: u32, buf: &[u8]) -> ah::Result<HttunHttpReq> {
+        let mut authorization = None;
 
-    // Parse the request header.
-    let Some((h, mut tail)) = next_hdr(&buf) else {
-        return Err(err!("No GET/POST header found"));
-    };
-    let (request, chan_name, direction, query) = parse_request_header(h)?;
-
-    log::trace!("Conn {id}: {request:?} / {chan_name} / {direction:?} / {query:?}");
-
-    // Ignore all other headers.
-    let body = loop {
-        let Some((h, t)) = next_hdr(tail) else {
-            return Err(err!("Header end not found"));
+        // Parse the request header.
+        let Some((h, mut tail)) = next_hdr(buf) else {
+            return Err(err!("No GET/POST header found"));
         };
-        tail = t;
-        if h.is_empty() {
-            break tail;
-        }
+        let (request, chan_name, direction, query) = parse_request_header(h)?;
 
-        if let Some((n, v)) = split_hdr(h) {
-            if n.trim_ascii().eq_ignore_ascii_case(b"Authorization") {
-                authorization = decode_auth_header(v);
+        log::trace!("Conn {id}: {request:?} / {chan_name} / {direction:?} / {query:?}");
+
+        // Ignore all other headers.
+        let body = loop {
+            let Some((h, t)) = next_hdr(tail) else {
+                return Err(err!("Header end not found"));
+            };
+            tail = t;
+            if h.is_empty() {
+                break tail;
+            }
+
+            if let Some((n, v)) = split_hdr(h) {
+                if n.trim_ascii().eq_ignore_ascii_case(b"Authorization") {
+                    authorization = decode_auth_header(v);
+                }
             }
         }
+        .to_vec();
+
+        let mut req = HttunHttpReq {
+            request,
+            chan_name,
+            direction,
+            query,
+            authorization,
+            body,
+        };
+        req.extract_body();
+
+        Ok(req)
     }
-    .to_vec();
-
-    let mut req = HttunHttpReq {
-        request,
-        chan_name,
-        direction,
-        query,
-        authorization,
-        body,
-    };
-    req.extract_body();
-
-    Ok(req)
 }
 
 async fn rx_task(
@@ -308,13 +334,25 @@ async fn rx_task(
     closed: &AtomicBool,
 ) -> ah::Result<()> {
     loop {
-        let req = match recv_httun_request(id, stream).await {
+        let buf = match recv_http(stream).await.context("HTTP recv") {
             Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
                 closed.store(true, atomic::Ordering::Relaxed);
                 return Ok(());
             }
             Err(e) => return Err(e),
-            Ok(req) => req,
+            Ok(b) => b,
+        };
+
+        let req = match HttunHttpReq::parse(id, &buf.buf).await {
+            Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
+                closed.store(true, atomic::Ordering::Relaxed);
+                return Ok(());
+            }
+            Err(e) => {
+                let _ = send_http_reply_badrequest(stream).await;
+                return Err(e);
+            }
+            Ok(r) => r,
         };
 
         match req.direction {
@@ -439,30 +477,6 @@ impl HttpConn {
         }
     }
 
-    async fn send_reply(&self, payload: Vec<u8>, status: &str) -> ah::Result<()> {
-        let mut headers = String::with_capacity(256);
-        write!(&mut headers, "HTTP/1.1 {status}\r\n")?;
-        write!(&mut headers, "Cache-Control: no-store\r\n")?;
-        if !payload.is_empty() {
-            write!(&mut headers, "Content-Length: {}\r\n", payload.len())?;
-            write!(&mut headers, "Content-Type: application/octet-stream\r\n")?;
-        }
-        write!(&mut headers, "\r\n")?;
-        send_all(&self.stream, headers.as_bytes()).await?;
-        if !payload.is_empty() {
-            send_all(&self.stream, &payload).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn send_reply_ok(&self, payload: Vec<u8>) -> ah::Result<()> {
-        self.send_reply(payload, "200 Ok").await
-    }
-
-    pub async fn send_reply_timeout(&self) -> ah::Result<()> {
-        self.send_reply(vec![], "408 Request Timeout").await
-    }
-
     pub async fn recv(&self) -> ah::Result<CommRxMsg> {
         let mut rx_r = self.rx_r.lock().await;
         let mut rx_w = self.rx_w.lock().await;
@@ -519,6 +533,14 @@ impl HttpConn {
             rx_w.close();
         }
         Ok(())
+    }
+
+    pub async fn send_reply_ok(&self, payload: Vec<u8>) -> ah::Result<()> {
+        send_http_reply_ok(&self.stream, payload).await
+    }
+
+    pub async fn send_reply_timeout(&self) -> ah::Result<()> {
+        send_http_reply_timeout(&self.stream).await
     }
 }
 
