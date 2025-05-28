@@ -9,20 +9,16 @@
 //! | Byte offset | Name                 | Byte size | Area  |
 //! | ----------- | -------------------- | --------- | ----- |
 //! | 0           | Type                 | 1         | assoc |
-//TODO increase nonce size
-//! | 1           | Nonce                | 12        | nonce |
-//! | 13          | Operation            | 1         | crypt |
-//! | 14          | Sequence counter     | 8 (be)    | crypt |
-//! | 22          | Payload length       | 2 (be)    | crypt |
-//! | 24          | Payload              | var       | crypt |
+//! | 1           | Nonce                | 16        | nonce |
+//! | 17          | Operation            | 1         | crypt |
+//! | 18          | Sequence counter     | 8 (be)    | crypt |
+//! | 26          | Payload length       | 2 (be)    | crypt |
+//! | 28          | Payload              | var       | crypt |
 //! | var         | Authentication tag   | 16        | tag   |
 
 #![forbid(unsafe_code)]
 
-use aes_gcm::{
-    Aes256Gcm,
-    aead::{AeadCore as _, AeadInPlace as _, KeyInit as _, OsRng},
-};
+use aes_gcm::aead::{AeadCore as _, AeadInPlace as _, KeyInit as _, OsRng};
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
 use std::{
@@ -37,8 +33,9 @@ use std::{
 //      We should be able to have both, a symmetric user key and an asymmetric user key
 //      and use them both at the same time.
 
+type Aes256GcmN16 = aes_gcm::AesGcm<aes_gcm::aes::Aes256, aes_gcm::aes::cipher::consts::U16>;
 pub type Key = [u8; 32];
-type Nonce = [u8; 12];
+type Nonce = [u8; 16];
 const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
 const AUTHTAG_LEN: usize = 16;
 pub type SessionSecret = [u8; 16];
@@ -48,10 +45,10 @@ const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
 
 const OFFS_TYPE: usize = 0;
 const OFFS_NONCE: usize = 1;
-const OFFS_OPER: usize = 13;
-const OFFS_SEQ: usize = 14;
-const OFFS_LEN: usize = 22;
-const OFFS_PAYLOAD: usize = 24;
+const OFFS_OPER: usize = 17;
+const OFFS_SEQ: usize = 18;
+const OFFS_LEN: usize = 26;
+const OFFS_PAYLOAD: usize = 28;
 
 const AREA_ASSOC_LEN: usize = 1;
 const AREA_CRYPT_LEN: usize = 1 + 8 + 2;
@@ -184,7 +181,7 @@ impl Message {
 
     pub fn serialize(&self, key: &Key, session_secret: Option<SessionSecret>) -> Vec<u8> {
         let type_: u8 = self.type_.into();
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let nonce = Aes256GcmN16::generate_nonce(&mut OsRng);
         let oper: u8 = self.oper.into();
         let sequence: u64 = self.sequence;
         let len: u16 = self.payload.len().try_into().expect("Payload too big");
@@ -201,7 +198,7 @@ impl Message {
         assoc_data[0] = type_;
         assoc_data[1..].copy_from_slice(&session_secret.unwrap_or_default());
 
-        let cipher = Aes256Gcm::new(key.into());
+        let cipher = Aes256GcmN16::new(key.into());
         let authtag = cipher
             .encrypt_in_place_detached(&nonce, &assoc_data, &mut buf[AREA_ASSOC_LEN + NONCE_LEN..])
             .expect("AEAD encryption failed");
@@ -234,7 +231,7 @@ impl Message {
         assoc_data[0] = type_;
         assoc_data[1..].copy_from_slice(&session_secret.unwrap_or_default());
 
-        let cipher = Aes256Gcm::new(key.into());
+        let cipher = Aes256GcmN16::new(key.into());
         if cipher
             .decrypt_in_place_detached(
                 &nonce.into(),
