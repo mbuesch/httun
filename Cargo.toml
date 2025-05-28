@@ -54,9 +54,8 @@ httun-unix-protocol = { path = "./httun-unix-protocol", version = "0.1" }
 httun-util = { path = "./httun-util", version = "0.1" }
 
 [profile.release]
-opt-level = "z"
-#lto = "fat"
-lto = "thin"
+opt-level = 2
+lto = "fat"
 panic = "abort"
 strip = "symbols"
 debug-assertions = false
