@@ -11,7 +11,7 @@ use crate::{
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
-use httun_util::{CHAN_R_TIMEOUT, Query, path_is_valid};
+use httun_util::{CHAN_R_TIMEOUT, Direction, Query, parse_path};
 use std::{
     collections::HashMap,
     fmt::Write as _,
@@ -170,64 +170,17 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
     let Some(query) = req.get_str_param("query_string") else {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: No query_string.").await;
     };
-    let Some(path_info) = req.get_str_param("path_info") else {
+    let Some(path_info) = req.get_param("path_info") else {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: No path_info.").await;
     };
 
-    if !path_is_valid(path_info.as_bytes()) {
-        return fcgi_response_error(
-            &req,
-            "400 Bad Request",
-            "FCGI: path_info: Invalid characters.",
-        )
-        .await;
-    }
-    let mut path = path_info.split('/');
-    let Some(first) = path.next() else {
-        return fcgi_response_error(
-            &req,
-            "400 Bad Request",
-            "FCGI: path_info: Missing first entry.",
-        )
-        .await;
+    let (chan_name, direction) = match parse_path(&path_info) {
+        Err(e) => {
+            return fcgi_response_error(&req, "400 Bad Request", &format!("FCGI: path_info: {e}"))
+                .await;
+        }
+        Ok(p) => p,
     };
-    let Some(name) = path.next() else {
-        return fcgi_response_error(
-            &req,
-            "400 Bad Request",
-            "FCGI: path_info: Missing tunnel name.",
-        )
-        .await;
-    };
-    let Some(direction) = path.next() else {
-        return fcgi_response_error(
-            &req,
-            "400 Bad Request",
-            "FCGI: path_info: Missing direction (r/w).",
-        )
-        .await;
-    };
-    let Some(_serial) = path.next() else {
-        return fcgi_response_error(&req, "400 Bad Request", "FCGI: path_info: Missing serial.")
-            .await;
-    };
-    if path.next().is_some() {
-        return fcgi_response_error(
-            &req,
-            "400 Bad Request",
-            "FCGI: path_info: Got trailing garbage.",
-        )
-        .await;
-    }
-
-    if !first.is_empty() {
-        return fcgi_response_error(
-            &req,
-            "400 Bad Request",
-            "FCGI: path_info: First entry is not empty.",
-        )
-        .await;
-    }
 
     let Ok(query) = query.parse::<Query>() else {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: Invalid query string.").await;
@@ -273,7 +226,12 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
     };
 
     match direction {
-        "r" => match timeout(CHAN_R_TIMEOUT, recv_from_httun_server(name, req_payload)).await {
+        Direction::R => match timeout(
+            CHAN_R_TIMEOUT,
+            recv_from_httun_server(&chan_name, req_payload),
+        )
+        .await
+        {
             Err(_) => fcgi_response(&req, "408 Request Timeout", None).await,
             Ok(Err(e)) => {
                 eprintln!("FCGI: HTTP-r: recv from server failed: {e:?}");
@@ -288,8 +246,8 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
                 fcgi_response(&req, "200 Ok", Some((&data, "application/octet-stream"))).await
             }
         },
-        "w" => {
-            if let Err(e) = send_to_httun_server(name, req_payload).await {
+        Direction::W => {
+            if let Err(e) = send_to_httun_server(&chan_name, req_payload).await {
                 eprintln!("FCGI: HTTP-w: send to server failed: {e:?}");
                 fcgi_response_error(
                     &req,
@@ -301,7 +259,6 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
                 fcgi_response(&req, "200 Ok", None).await
             }
         }
-        _ => fcgi_response_error(&req, "400 Bad Request", "FCGI: Unknown direction.").await,
     }
 }
 

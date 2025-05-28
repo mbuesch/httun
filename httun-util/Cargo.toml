@@ -14,3 +14,4 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+memchr = { workspace = true }
