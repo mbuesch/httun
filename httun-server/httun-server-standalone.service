@@ -19,3 +19,6 @@ Nice=0
 # httun-server will drop privileges to httun:httun during startup.
 User=root
 Group=root
+
+[Install]
+WantedBy=multi-user.target
