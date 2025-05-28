@@ -10,7 +10,7 @@ use crate::{
     server_conn::ServerUnixConn,
 };
 use anyhow::{self as ah, Context as _, format_err as err};
-use base64::prelude::*;
+use httun_protocol::Message;
 use httun_util::{CHAN_R_TIMEOUT, Direction, Query, parse_path};
 use std::{
     collections::HashMap,
@@ -174,7 +174,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: No path_info.").await;
     };
 
-    let (chan_name, direction) = match parse_path(&path_info) {
+    let (chan_name, direction) = match parse_path(path_info) {
         Err(e) => {
             return fcgi_response_error(&req, "400 Bad Request", &format!("FCGI: path_info: {e}"))
                 .await;
@@ -189,7 +189,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
     let req_payload = match &method[..] {
         b"GET" => {
             if let Some(msg) = query.get("m") {
-                let Ok(msg) = &BASE64_URL_SAFE_NO_PAD.decode(msg.as_bytes()) else {
+                let Ok(msg) = Message::decode_b64u(msg) else {
                     return fcgi_response_error(
                         &req,
                         "400 Bad Request",
@@ -197,7 +197,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
                     )
                     .await;
                 };
-                msg.to_vec()
+                msg
             } else {
                 vec![]
             }

@@ -11,6 +11,7 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use atoi::atoi;
 use base64::prelude::*;
 use httun_conf::{Config, HttpAuth};
+use httun_protocol::Message;
 use httun_util::{Direction, DisconnectedError, Query, parse_path};
 use memchr::{memchr, memmem::find};
 use std::{
@@ -247,8 +248,8 @@ impl HttunHttpReq {
     pub fn extract_body(&mut self) {
         if self.request == HttpRequest::Get {
             if let Some(qmsg) = self.query.get("m") {
-                if let Ok(qmsg) = &BASE64_URL_SAFE_NO_PAD.decode(qmsg.as_bytes()) {
-                    self.body = qmsg.to_vec();
+                if let Ok(qmsg) = Message::decode_b64u(qmsg) {
+                    self.body = qmsg;
                 }
             }
         }

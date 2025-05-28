@@ -14,7 +14,7 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
-base64 = { workspace = true }
+httun-protocol = { workspace = true }
 httun-unix-protocol = { workspace = true }
 httun-util = { workspace = true }
 libc = { workspace = true }

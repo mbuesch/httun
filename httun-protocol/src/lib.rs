@@ -210,7 +210,11 @@ impl Message {
     }
 
     pub fn serialize_b64u(&self, key: &Key, session_secret: Option<SessionSecret>) -> String {
-        BASE64_URL_SAFE_NO_PAD.encode(self.serialize(key, session_secret))
+        Self::encode_b64u(&self.serialize(key, session_secret))
+    }
+
+    pub fn encode_b64u(buf: &[u8]) -> String {
+        BASE64_URL_SAFE_NO_PAD.encode(buf)
     }
 
     pub fn deserialize(
@@ -270,13 +274,13 @@ impl Message {
         key: &Key,
         session_secret: Option<SessionSecret>,
     ) -> ah::Result<Self> {
-        Self::deserialize(
-            &BASE64_URL_SAFE_NO_PAD
-                .decode(buf.as_bytes())
-                .context("Base64url decode")?,
-            key,
-            session_secret,
-        )
+        Self::deserialize(&Self::decode_b64u(buf)?, key, session_secret)
+    }
+
+    pub fn decode_b64u(buf: &str) -> ah::Result<Vec<u8>> {
+        BASE64_URL_SAFE_NO_PAD
+            .decode(buf.as_bytes())
+            .context("Base64url decode")
     }
 
     pub fn peek_type(buf: &[u8]) -> ah::Result<MsgType> {

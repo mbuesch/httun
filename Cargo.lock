@@ -720,7 +720,7 @@ name = "httun-fcgi"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
+ "httun-protocol",
  "httun-unix-protocol",
  "httun-util",
  "libc",
