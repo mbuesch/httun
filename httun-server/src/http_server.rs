@@ -553,6 +553,10 @@ impl HttpConn {
     pub async fn send_reply_timeout(&self) -> ah::Result<()> {
         send_http_reply_timeout(&self.stream, "Timeout").await
     }
+
+    pub async fn send_reply_badrequest(&self) -> ah::Result<()> {
+        send_http_reply_badrequest(&self.stream, "Bad request").await
+    }
 }
 
 impl Drop for HttpConn {

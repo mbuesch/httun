@@ -48,7 +48,13 @@ impl CommBackend {
                     }
                 }
             }
-            Self::Http(conn) => conn.recv().await,
+            Self::Http(conn) => match conn.recv().await {
+                Ok(msg) => Ok(msg),
+                Err(e) => {
+                    let _ = conn.send_reply_badrequest().await;
+                    Err(e)
+                }
+            },
         }
     }
 
