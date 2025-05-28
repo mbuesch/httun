@@ -16,6 +16,7 @@ use crate::{
     comm_backend::CommBackend,
     http_server::HttpServer,
     protocol::ProtocolManager,
+    systemd::systemd_notify_ready,
     uid_gid::{os_get_gid, os_get_uid},
     unix_sock::UnixSock,
 };
@@ -187,6 +188,8 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     }
 
     let protman = ProtocolManager::new();
+
+    systemd_notify_ready()?;
 
     // Spawn task: Periodic task.
     task::spawn({

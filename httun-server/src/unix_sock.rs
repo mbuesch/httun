@@ -2,10 +2,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::{
-    WEBSERVER_GID, WEBSERVER_UID,
-    systemd::{SystemdSocket, systemd_notify_ready},
-};
+use crate::{WEBSERVER_GID, WEBSERVER_UID, systemd::SystemdSocket};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
 use std::{sync::atomic, time::Duration};
@@ -143,8 +140,6 @@ impl UnixSock {
                 .context("Set socket non-blocking")?;
             let listener = UnixListener::from_std(socket)
                 .context("Convert std UnixListener to tokio UnixListener")?;
-
-            systemd_notify_ready()?;
 
             Ok(Self { listener })
         } else {
