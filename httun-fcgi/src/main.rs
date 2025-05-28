@@ -119,13 +119,13 @@ async fn fcgi_response(
     status: &str,
     body: Option<(&[u8], &str)>,
 ) -> FcgiRequestResult {
-    let mut hdrs = String::with_capacity(4096);
+    let mut hdrs = String::with_capacity(256);
     if let Some((_, mime)) = body {
-        writeln!(&mut hdrs, "Content-type: {mime}").unwrap();
+        writeln!(&mut hdrs, "Content-type: {mime}").expect("hdrs write");
     }
-    writeln!(&mut hdrs, "Cache-Control: no-store").unwrap();
-    writeln!(&mut hdrs, "Status: {status}").unwrap();
-    writeln!(&mut hdrs).unwrap();
+    writeln!(&mut hdrs, "Cache-Control: no-store").expect("hdrs write");
+    writeln!(&mut hdrs, "Status: {status}").expect("hdrs write");
+    writeln!(&mut hdrs).expect("hdrs write");
 
     let mut f = req.get_stdout();
 
@@ -164,13 +164,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
         return FcgiRequestResult::UnknownRole;
     }
 
-    let Some(_remote_addr) = req.get_str_param("remote_addr") else {
-        return fcgi_response_error(&req, "400 Bad Request", "FCGI: No remote_addr.").await;
-    };
-    let Some(_remote_port) = req.get_str_param("remote_port") else {
-        return fcgi_response_error(&req, "400 Bad Request", "FCGI: No remote_port.").await;
-    };
-    let Some(method) = req.get_str_param("request_method") else {
+    let Some(method) = req.get_param("request_method") else {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: No request_method.").await;
     };
     let Some(query) = req.get_str_param("query_string") else {
@@ -239,8 +233,8 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: Invalid query string.").await;
     };
 
-    let req_payload = match method {
-        "GET" => {
+    let req_payload = match &method[..] {
+        b"GET" => {
             if let Some(msg) = query.get("m") {
                 let Ok(msg) = &BASE64_URL_SAFE_NO_PAD.decode(msg.as_bytes()) else {
                     return fcgi_response_error(
@@ -255,7 +249,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
                 vec![]
             }
         }
-        "POST" => {
+        b"POST" => {
             let mut buf = vec![];
             let Ok(count) = req.get_stdin().read_to_end(&mut buf) else {
                 return fcgi_response_error(
@@ -319,11 +313,13 @@ async fn async_main() -> ah::Result<()> {
     let exit_sock_tx = Arc::new(exit_sock_tx);
 
     // Register unix signal handlers.
-    let mut sigterm = signal(SignalKind::terminate()).unwrap();
-    let mut sigint = signal(SignalKind::interrupt()).unwrap();
-    let mut sighup = signal(SignalKind::hangup()).unwrap();
+    let mut sigterm = signal(SignalKind::terminate())?;
+    let mut sigint = signal(SignalKind::interrupt())?;
+    let mut sighup = signal(SignalKind::hangup())?;
 
-    CONNECTIONS.set(Mutex::new(HashMap::new())).unwrap();
+    CONNECTIONS
+        .set(Mutex::new(HashMap::new()))
+        .expect("Connections init failed");
 
     let fcgi = Fcgi::new(std::io::stdin().as_raw_fd()).context("Create FCGI")?;
 
@@ -388,7 +384,7 @@ async fn async_main() -> ah::Result<()> {
 fn main() -> ah::Result<()> {
     runtime::Builder::new_current_thread()
         .thread_keep_alive(Duration::from_millis(5000))
-        .max_blocking_threads(1)
+        .max_blocking_threads(2)
         .enable_all()
         .build()
         .context("Tokio runtime builder")?
