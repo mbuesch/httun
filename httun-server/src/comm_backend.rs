@@ -61,7 +61,7 @@ impl CommBackend {
                 let umsg = UnMessage::new_from_srv(chan_name.to_string(), payload);
                 conn.send(&umsg).await.context("Unix socket send")
             }
-            Self::Http(conn) => conn.send_reply_ok(payload).await,
+            Self::Http(conn) => conn.send_reply_ok(&payload).await,
         }
     }
 

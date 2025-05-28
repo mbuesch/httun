@@ -142,32 +142,43 @@ async fn send_all(stream: &TcpStream, data: &[u8]) -> ah::Result<()> {
     }
 }
 
-async fn send_http_reply(stream: &TcpStream, payload: Vec<u8>, status: &str) -> ah::Result<()> {
+async fn send_http_reply(
+    stream: &TcpStream,
+    payload: &[u8],
+    status: &str,
+    mime: &str,
+) -> ah::Result<()> {
     let mut headers = String::with_capacity(256);
     write!(&mut headers, "HTTP/1.1 {status}\r\n")?;
     write!(&mut headers, "Cache-Control: no-store\r\n")?;
     if !payload.is_empty() {
         write!(&mut headers, "Content-Length: {}\r\n", payload.len())?;
-        write!(&mut headers, "Content-Type: application/octet-stream\r\n")?;
+        write!(&mut headers, "Content-Type: {}\r\n", mime)?;
     }
     write!(&mut headers, "\r\n")?;
     send_all(stream, headers.as_bytes()).await?;
     if !payload.is_empty() {
-        send_all(stream, &payload).await?;
+        send_all(stream, payload).await?;
     }
     Ok(())
 }
 
-async fn send_http_reply_ok(stream: &TcpStream, payload: Vec<u8>) -> ah::Result<()> {
-    send_http_reply(stream, payload, "200 Ok").await
+async fn send_http_reply_ok(stream: &TcpStream, payload: &[u8]) -> ah::Result<()> {
+    send_http_reply(stream, payload, "200 Ok", "application/octet-stream").await
 }
 
-async fn send_http_reply_timeout(stream: &TcpStream) -> ah::Result<()> {
-    send_http_reply(stream, vec![], "408 Request Timeout").await
+async fn send_http_reply_timeout(stream: &TcpStream, message: &str) -> ah::Result<()> {
+    send_http_reply(
+        stream,
+        message.as_bytes(),
+        "408 Request Timeout",
+        "text/plain",
+    )
+    .await
 }
 
-async fn send_http_reply_badrequest(stream: &TcpStream) -> ah::Result<()> {
-    send_http_reply(stream, vec![], "400 Bad Request").await
+async fn send_http_reply_badrequest(stream: &TcpStream, message: &str) -> ah::Result<()> {
+    send_http_reply(stream, message.as_bytes(), "400 Bad Request", "text/plain").await
 }
 
 fn next_hdr(buf: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -349,7 +360,7 @@ async fn rx_task(
                 return Ok(());
             }
             Err(e) => {
-                let _ = send_http_reply_badrequest(stream).await;
+                let _ = send_http_reply_badrequest(stream, "Invalid request").await;
                 return Err(e);
             }
             Ok(r) => r,
@@ -500,7 +511,7 @@ impl HttpConn {
 
                 if let Some(req) = req {
                     self.pin_channel(&req)?;
-                    self.send_reply_ok(vec![]).await.context("Send POST reply")?;
+                    self.send_reply_ok(&[]).await.context("Send POST reply")?;
                     Ok(CommRxMsg::ToSrv(req.body))
                 } else {
                     Err(err!("RX channel closed"))
@@ -535,12 +546,12 @@ impl HttpConn {
         Ok(())
     }
 
-    pub async fn send_reply_ok(&self, payload: Vec<u8>) -> ah::Result<()> {
+    pub async fn send_reply_ok(&self, payload: &[u8]) -> ah::Result<()> {
         send_http_reply_ok(&self.stream, payload).await
     }
 
     pub async fn send_reply_timeout(&self) -> ah::Result<()> {
-        send_http_reply_timeout(&self.stream).await
+        send_http_reply_timeout(&self.stream, "Timeout").await
     }
 }
 
