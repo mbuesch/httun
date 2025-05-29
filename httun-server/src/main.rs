@@ -74,7 +74,7 @@ struct Opts {
     /// Path to the configuration file.
     #[arg(
         long,
-        short = 'c',
+        short = 'C',
         id = "PATH",
         default_value = "/opt/httun/etc/httun/server.conf"
     )]

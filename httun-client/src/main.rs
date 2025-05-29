@@ -7,12 +7,14 @@
 mod client;
 mod local_listener;
 mod mode;
+mod resolver;
 
 use crate::{
     client::HttunClient,
     mode::{
         genkey::run_mode_genkey, socket::run_mode_socket, test::run_mode_test, tun::run_mode_tun,
     },
+    resolver::ResMode,
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::{Parser, Subcommand};
@@ -38,15 +40,30 @@ struct Opts {
     server_url: Option<String>,
 
     /// The httun channel to use for communication.
-    #[arg(default_value = "a")]
+    #[arg(long, short = 'c', default_value = "a")]
     channel: String,
 
     /// The User-Agent header to use for the HTTP connection.
     #[arg(long, default_value = "")]
     user_agent: String,
 
+    /// Resolve host names to IPv4 addresses.
+    #[arg(short = '4')]
+    resolve_ipv4: bool,
+
+    /// Resolve host names to IPv6 addresses.
+    ///
+    /// This option takes precedence over -4, if both are specified.
+    #[arg(short = '6')]
+    resolve_ipv6: bool,
+
     /// Path to the configuration file.
-    #[arg(long, short = 'c', default_value = "/opt/httun/etc/httun/client.conf")]
+    #[arg(
+        long,
+        short = 'C',
+        id = "PATH",
+        default_value = "/opt/httun/etc/httun/client.conf"
+    )]
     config: String,
 
     /// Show version information and exit.
@@ -64,17 +81,20 @@ enum Mode {
     /// This requires root privileges.
     Tun {
         /// Name of the tun interface to create.
-        #[arg(long, short = 't', default_value = "httun-c-0")]
+        #[arg(long, short = 't', id = "INTERFACE-NAME", default_value = "httun-c-0")]
         tun: String,
     },
 
     /// Create a local IP socket listener as tunnel entry/exit point.
     Socket {
-        /// Tunnel target socket address in the format IPADDR:PORT
+        /// Tunnel target socket address.
+        ///
+        /// This can either be in the format IPADDR:PORT or HOSTNAME:PORT.
+        #[arg(id = "TARGETHOSTNAME:PORT")]
         target: String,
 
         /// The port that httun-client listens on localhost.
-        #[arg(long, short = 'p', default_value = "8080")]
+        #[arg(long, short = 'p', id = "PORT", default_value = "8080")]
         local_port: u16,
     },
 
@@ -167,6 +187,13 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let mut sigint = register_signal!(interrupt);
     let mut sighup = register_signal!(hangup);
 
+    let res_mode = match (opts.resolve_ipv6, opts.resolve_ipv4) {
+        (false, false) | (true, false) | (true, true) => ResMode::Ipv6,
+        (false, true) => ResMode::Ipv4,
+    };
+
+    //TODO resolve server_url host name.
+
     let mut client = HttunClient::connect(
         opts.server_url.as_ref().unwrap(),
         &opts.channel,
@@ -205,6 +232,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 Arc::clone(&to_httun_tx),
                 Arc::clone(&from_httun_rx),
                 target,
+                res_mode,
                 *local_port,
             )
             .await?;

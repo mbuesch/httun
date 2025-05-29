@@ -4,8 +4,9 @@
 
 use crate::client::{FromHttun, ToHttun};
 use anyhow::{self as ah, Context as _, format_err as err};
+use etherparse::PacketBuilder;
 use httun_protocol::{Message, MsgType, Operation};
-use std::sync::Arc;
+use std::{net::IpAddr, sync::Arc};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{
@@ -17,7 +18,12 @@ use tokio::{
 
 const RX_BUF_SIZE: usize = 1024 * 64;
 
-async fn local_rx(stream: Arc<TcpStream>, tun: Arc<Sender<ToHttun>>) -> ah::Result<()> {
+async fn local_rx(
+    stream: Arc<TcpStream>,
+    to_httun: Arc<Sender<ToHttun>>,
+    target_addr: IpAddr,
+    target_port: u16,
+) -> ah::Result<()> {
     loop {
         stream.readable().await?;
 
@@ -29,14 +35,45 @@ async fn local_rx(stream: Arc<TcpStream>, tun: Arc<Sender<ToHttun>>) -> ah::Resu
                 }
                 buf.truncate(n);
 
-                log::trace!("Local rx: {buf:?}");
+                log::trace!("Local rx: {}", String::from_utf8_lossy(&buf));
 
-                //TODO: We have to add TCP/IP headers.
+                let builder = match target_addr {
+                    IpAddr::V4(target_addr) => {
+                        PacketBuilder::ipv4(
+                            //TODO
+                            [192, 168, 1, 1],     // source
+                            target_addr.octets(), // dest
+                            255,                  // ttl
+                        )
+                    }
+                    IpAddr::V6(target_addr) => {
+                        PacketBuilder::ipv6(
+                            //TODO
+                            [0; 16],              // source
+                            target_addr.octets(), // dest
+                            255,                  // hop limit
+                        )
+                    }
+                };
+                let builder = builder.tcp(
+                    //TODO
+                    3000,        // source
+                    target_port, // dest
+                    //TODO
+                    123, // sequence
+                    //TODO
+                    4000, // window
+                );
 
-                let msg = Message::new(MsgType::Data, Operation::ToSrv, buf)
+                let mut packet = Vec::with_capacity(builder.size(buf.len()));
+                builder
+                    .write(&mut packet, &buf)
+                    .context("Build IP packet")?;
+
+                let msg = Message::new(MsgType::Data, Operation::ToSrv, packet)
                     .context("Make httun packet")?;
 
-                tun.send(msg).await?;
+                to_httun.send(msg).await?;
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 continue;
@@ -48,22 +85,26 @@ async fn local_rx(stream: Arc<TcpStream>, tun: Arc<Sender<ToHttun>>) -> ah::Resu
     }
 }
 
-async fn local_tx(stream: Arc<TcpStream>, tun: Arc<Mutex<Receiver<FromHttun>>>) -> ah::Result<()> {
+async fn local_tx(
+    stream: Arc<TcpStream>,
+    from_httun: Arc<Mutex<Receiver<FromHttun>>>,
+    _target_addr: IpAddr,
+    _target_port: u16,
+) -> ah::Result<()> {
     loop {
-        let Some(msg) = tun.lock().await.recv().await else {
+        let Some(msg) = from_httun.lock().await.recv().await else {
             return Err(err!("FromHttun IPC closed"));
         };
 
-        log::trace!("Local tx: {msg:?}");
-
         let payload = msg.payload();
+
+        log::trace!("Local tx: {}", String::from_utf8_lossy(payload));
 
         //TODO: The payload is an IP packet. We have to strip TCP/IP headers.
 
         let mut count = 0;
         loop {
             stream.writable().await?;
-
             match stream.try_write(&payload[count..]) {
                 Ok(n) => {
                     count += n;
@@ -96,15 +137,17 @@ impl LocalConn {
         &self,
         to_httun: Arc<Sender<ToHttun>>,
         from_httun: Arc<Mutex<Receiver<FromHttun>>>,
+        target_addr: IpAddr,
+        target_port: u16,
     ) -> ah::Result<()> {
         let rx_task = task::spawn({
             let stream = Arc::clone(&self.stream);
-            local_rx(stream, to_httun)
+            local_rx(stream, to_httun, target_addr, target_port)
         });
 
         let tx_task = task::spawn({
             let stream = Arc::clone(&self.stream);
-            local_tx(stream, from_httun)
+            local_tx(stream, from_httun, target_addr, target_port)
         });
 
         tokio::select! {
