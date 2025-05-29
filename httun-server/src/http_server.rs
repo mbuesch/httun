@@ -53,9 +53,9 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
                     return Err(DisconnectedError.into());
                 }
                 buf.count = buf.count.saturating_add(n);
-                if buf.count > buf.buf.len() {
-                    return Err(err!("Received too many bytes. (>{})", buf.buf.len()));
-                }
+                debug_assert!(buf.count <= buf.buf.len());
+
+                // End of headers?
                 if let Some(p) = find(&buf.buf[..buf.count], b"\r\n\r\n") {
                     buf.hdr_len = p + 4;
                     buf.cont_len = match find_hdr(&buf.buf[..buf.count], b"Content-Length") {
@@ -68,6 +68,13 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
                         None => 0,
                     };
                     return Ok(buf);
+                }
+
+                if buf.count >= buf.buf.len() {
+                    return Err(err!(
+                        "Received HTTP packet is too large. (>={})",
+                        buf.buf.len()
+                    ));
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -101,7 +108,7 @@ async fn recv_rest(stream: &TcpStream, mut buf: RecvBuf) -> ah::Result<RecvBuf> 
                     }
                     buf.count = buf.count.saturating_add(n);
                     debug_assert!(buf.count <= full_len);
-                    if buf.count == full_len {
+                    if buf.count >= full_len {
                         break;
                     }
                 }
@@ -129,8 +136,8 @@ async fn send_all(stream: &TcpStream, data: &[u8]) -> ah::Result<()> {
         match stream.try_write(&data[count..]) {
             Ok(n) => {
                 count += n;
-                assert!(count <= data.len());
-                if count == data.len() {
+                debug_assert!(count <= data.len());
+                if count >= data.len() {
                     return Ok(());
                 }
             }
@@ -156,6 +163,7 @@ async fn send_http_reply(
         write!(&mut headers, "Content-Type: {}\r\n", mime)?;
     }
     write!(&mut headers, "\r\n")?;
+
     send_all(stream, headers.as_bytes()).await?;
     if !payload.is_empty() {
         send_all(stream, payload).await?;
@@ -164,34 +172,31 @@ async fn send_http_reply(
 }
 
 async fn send_http_reply_ok(stream: &TcpStream, payload: &[u8]) -> ah::Result<()> {
-    send_http_reply(stream, payload, "200 Ok", "application/octet-stream").await
+    let status = "200 Ok";
+    let mime = "application/octet-stream";
+    send_http_reply(stream, payload, status, mime).await
 }
 
 async fn send_http_reply_timeout(stream: &TcpStream, message: &str) -> ah::Result<()> {
-    send_http_reply(
-        stream,
-        message.as_bytes(),
-        "408 Request Timeout",
-        "text/plain",
-    )
-    .await
+    let status = "408 Request Timeout";
+    let mime = "text/plain";
+    send_http_reply(stream, message.as_bytes(), status, mime).await
 }
 
 async fn send_http_reply_badrequest(stream: &TcpStream, message: &str) -> ah::Result<()> {
-    send_http_reply(stream, message.as_bytes(), "400 Bad Request", "text/plain").await
+    let status = "400 Bad Request";
+    let mime = "text/plain";
+    send_http_reply(stream, message.as_bytes(), status, mime).await
 }
 
 fn next_hdr(buf: &[u8]) -> Option<(&[u8], &[u8])> {
-    if let Some(p) = memchr(b'\n', buf) {
-        let (mut l, mut r) = buf.split_at(p);
+    split_delim(buf, b'\n').map(|(l, r)| {
         if !l.is_empty() && l[l.len() - 1] == b'\r' {
-            l = &l[..l.len() - 1];
+            (&l[..l.len() - 1], r)
+        } else {
+            (l, r)
         }
-        r = &r[1..];
-        Some((l, r))
-    } else {
-        None
-    }
+    })
 }
 
 fn find_hdr<'a>(buf: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
@@ -199,7 +204,7 @@ fn find_hdr<'a>(buf: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
     while let Some((h, t)) = next_hdr(tail) {
         tail = t;
         if let Some((n, v)) = split_hdr(h) {
-            if n.trim_ascii().eq_ignore_ascii_case(name) {
+            if n.eq_ignore_ascii_case(name) {
                 return Some(v);
             }
         }
@@ -208,7 +213,11 @@ fn find_hdr<'a>(buf: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
 }
 
 fn split_hdr(h: &[u8]) -> Option<(&[u8], &[u8])> {
-    memchr(b':', h).map(|p| (&h[..p], &h[p + 1..]))
+    split_delim(h, b':').map(|(n, v)| (n.trim_ascii(), v))
+}
+
+fn split_delim(buf: &[u8], delim: u8) -> Option<(&[u8], &[u8])> {
+    memchr(delim, buf).map(|pos| (&buf[..pos], &buf[pos + 1..]))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -217,12 +226,14 @@ pub enum HttpRequest {
     Post,
 }
 
-fn parse_request_header(h: &[u8]) -> ah::Result<(HttpRequest, String, Direction, Query)> {
-    let mut h = h.split(|c| *c == b' ');
-
-    let Some(request) = h.next() else {
+fn parse_request_header(line: &[u8]) -> ah::Result<(HttpRequest, String, Direction, Query)> {
+    let Some((request, tail)) = split_delim(line, b' ') else {
         return Err(err!("No GET/POST request found."));
     };
+    let Some((path_info, _tail)) = split_delim(tail, b' ') else {
+        return Err(err!("Did not receive path info."));
+    };
+
     let request = match request {
         b"GET" => HttpRequest::Get,
         b"POST" => HttpRequest::Post,
@@ -231,19 +242,11 @@ fn parse_request_header(h: &[u8]) -> ah::Result<(HttpRequest, String, Direction,
         }
     };
 
-    let Some(path_info) = h.next() else {
-        return Err(err!("Did not receive path info."));
-    };
-    let path;
-    let query;
-    if let Some(qpos) = memchr(b'?', path_info) {
-        let (p, q) = path_info.split_at(qpos);
-        path = p;
-        query = &q[1..];
+    let (path, query) = if let Some((p, q)) = split_delim(path_info, b'?') {
+        (p, q)
     } else {
-        path = path_info;
-        query = b"";
-    }
+        (path_info, b"".as_slice())
+    };
 
     let (chan_name, direction) = parse_path(path)?;
 
@@ -256,15 +259,14 @@ fn parse_request_header(h: &[u8]) -> ah::Result<(HttpRequest, String, Direction,
 }
 
 fn decode_auth_header(value: &[u8]) -> Option<HttpAuth> {
-    let value = value.trim_ascii_start();
-    let p = memchr(b' ', value)?;
-    if !value[..p].trim_ascii().eq_ignore_ascii_case(b"Basic") {
+    let (mode, encoded) = split_delim(value.trim_ascii_start(), b' ')?;
+    if !mode.trim_ascii().eq_ignore_ascii_case(b"Basic") {
         return None;
     }
-    let cred = BASE64_STANDARD.decode(value[p + 1..].trim_ascii()).ok()?;
-    let p = memchr(b':', &cred)?;
-    let user = String::from_utf8(cred[..p].to_vec()).ok()?;
-    let password = String::from_utf8(cred[p + 1..].to_vec()).ok()?;
+    let cred = BASE64_STANDARD.decode(encoded.trim_ascii()).ok()?;
+    let (user, password) = split_delim(&cred, b':')?;
+    let user = String::from_utf8(user.to_vec()).ok()?;
+    let password = String::from_utf8(password.to_vec()).ok()?;
     let password = if password.is_empty() {
         None
     } else {
@@ -316,7 +318,7 @@ impl HttunHttpReq {
             }
 
             if let Some((n, v)) = split_hdr(h) {
-                if n.trim_ascii().eq_ignore_ascii_case(b"Authorization") {
+                if n.eq_ignore_ascii_case(b"Authorization") {
                     authorization = decode_auth_header(v);
                 }
             }
