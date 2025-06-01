@@ -132,7 +132,7 @@ async fn direction_r(
         let oper = if chan.test_mode {
             Operation::TestFromSrv
         } else {
-            Operation::FromSrv
+            Operation::L4FromSrv
         };
         let mut resp;
 
@@ -288,7 +288,7 @@ async fn get_session(
     for i in 0..SESSION_INIT_RETRIES {
         let last_try = i == SESSION_INIT_RETRIES - 1;
 
-        let msg = Message::new(MsgType::Init, Operation::FromSrv, vec![])?;
+        let msg = Message::new(MsgType::Init, Operation::Init, vec![])?;
         let msg = msg.serialize_b64u(key, None);
 
         let url = format_url_serial(
@@ -328,7 +328,7 @@ async fn get_session(
         if msg.type_() != MsgType::Init {
             return Err(err!("Received invalid message type"));
         }
-        if msg.oper() != Operation::FromSrv {
+        if msg.oper() != Operation::Init {
             return Err(err!("Received invalid message operation"));
         }
         let Ok(session_secret) = msg.into_payload().try_into() else {

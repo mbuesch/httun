@@ -4,9 +4,11 @@
 
 use crate::client::{FromHttun, ToHttun};
 use anyhow::{self as ah, Context as _, format_err as err};
-use etherparse::PacketBuilder;
-use httun_protocol::{Message, MsgType, Operation};
-use std::{net::IpAddr, sync::Arc};
+use httun_protocol::{Message, MsgType, Operation, SockMessage};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{
@@ -37,40 +39,9 @@ async fn local_rx(
 
                 log::trace!("Local rx: {}", String::from_utf8_lossy(&buf));
 
-                let builder = match target_addr {
-                    IpAddr::V4(target_addr) => {
-                        PacketBuilder::ipv4(
-                            //TODO
-                            [192, 168, 1, 1],     // source
-                            target_addr.octets(), // dest
-                            255,                  // ttl
-                        )
-                    }
-                    IpAddr::V6(target_addr) => {
-                        PacketBuilder::ipv6(
-                            //TODO
-                            [0; 16],              // source
-                            target_addr.octets(), // dest
-                            255,                  // hop limit
-                        )
-                    }
-                };
-                let builder = builder.tcp(
-                    //TODO
-                    3000,        // source
-                    target_port, // dest
-                    //TODO
-                    123, // sequence
-                    //TODO
-                    4000, // window
-                );
+                let smsg = SockMessage::new(SocketAddr::new(target_addr, target_port), buf);
 
-                let mut packet = Vec::with_capacity(builder.size(buf.len()));
-                builder
-                    .write(&mut packet, &buf)
-                    .context("Build IP packet")?;
-
-                let msg = Message::new(MsgType::Data, Operation::ToSrv, packet)
+                let msg = Message::new(MsgType::Data, Operation::L7ToSrv, smsg.serialize())
                     .context("Make httun packet")?;
 
                 to_httun.send(msg).await?;
@@ -100,7 +71,7 @@ async fn local_tx(
 
         log::trace!("Local tx: {}", String::from_utf8_lossy(payload));
 
-        //TODO: The payload is an IP packet. We have to strip TCP/IP headers.
+        //TODO
 
         let mut count = 0;
         loop {

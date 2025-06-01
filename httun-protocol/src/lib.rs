@@ -3,18 +3,6 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
 //! # httun on-wire protocol
-//!
-//! ## Physical message layout
-//!
-//! | Byte offset | Name                 | Byte size | Area  |
-//! | ----------- | -------------------- | --------- | ----- |
-//! | 0           | Type                 | 1         | assoc |
-//! | 1           | Nonce                | 16        | nonce |
-//! | 17          | Operation            | 1         | crypt |
-//! | 18          | Sequence counter     | 8 (be)    | crypt |
-//! | 26          | Payload length       | 2 (be)    | crypt |
-//! | 28          | Payload              | var       | crypt |
-//! | var         | Authentication tag   | 16        | tag   |
 
 #![forbid(unsafe_code)]
 
@@ -23,15 +11,15 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
 use std::{
     collections::BTreeSet,
-    fmt::{Display, Formatter},
+    net::SocketAddr,
     num::NonZeroUsize,
     sync::atomic::{self, AtomicU64},
 };
 
 //TODO: Currently we only have a symmetric common secret.
-//      Add a way to derive a symmetric key from some sort of asymmetric key handshake.
-//      We should be able to have both, a symmetric user key and an asymmetric user key
-//      and use them both at the same time.
+// Add a way to derive a symmetric key from some sort of asymmetric key handshake.
+// We should be able to have both, a symmetric user key and an asymmetric user key
+// and use them both at the same time.
 
 type Aes256GcmN16 = aes_gcm::AesGcm<aes_gcm::aes::Aes256, aes_gcm::aes::cipher::consts::U16>;
 pub type Key = [u8; 32];
@@ -104,8 +92,11 @@ impl From<MsgType> for u8 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
-    ToSrv,
-    FromSrv,
+    Init,
+    L4ToSrv,
+    L4FromSrv,
+    L7ToSrv,
+    L7FromSrv,
     TestToSrv,
     TestFromSrv,
 }
@@ -114,13 +105,19 @@ impl TryFrom<u8> for Operation {
     type Error = ah::Error;
 
     fn try_from(op: u8) -> ah::Result<Self> {
-        const TOSRV: u8 = Operation::ToSrv as _;
-        const FROMSRV: u8 = Operation::FromSrv as _;
+        const INIT: u8 = Operation::Init as _;
+        const L4TOSRV: u8 = Operation::L4ToSrv as _;
+        const L4FROMSRV: u8 = Operation::L4FromSrv as _;
+        const L7TOSRV: u8 = Operation::L7ToSrv as _;
+        const L7FROMSRV: u8 = Operation::L7FromSrv as _;
         const TESTTOSRV: u8 = Operation::TestToSrv as _;
         const TESTFROMSRV: u8 = Operation::TestFromSrv as _;
         match op {
-            TOSRV => Ok(Operation::ToSrv),
-            FROMSRV => Ok(Operation::FromSrv),
+            INIT => Ok(Operation::Init),
+            L4TOSRV => Ok(Operation::L4ToSrv),
+            L4FROMSRV => Ok(Operation::L4FromSrv),
+            L7TOSRV => Ok(Operation::L7ToSrv),
+            L7FROMSRV => Ok(Operation::L7FromSrv),
             TESTTOSRV => Ok(Operation::TestToSrv),
             TESTFROMSRV => Ok(Operation::TestFromSrv),
             _ => Err(err!("Invalid Message Operation: {op}")),
@@ -134,6 +131,32 @@ impl From<Operation> for u8 {
     }
 }
 
+/// # Main HTTUN message.
+///
+/// This is the payload/body of the HTTP GET/POST requests.
+///
+/// In case of POST this is the POST content as application/octet-stream.
+/// In case of GET this is base64-urlsafe encoded in the `m` query field.
+/// (Because GET should not have content)
+///
+/// ## Physical message layout
+///
+/// | Byte offset | Name                 | Byte size | Area  |
+/// | ----------- | -------------------- | --------- | ----- |
+/// | 0           | Type                 | 1         | assoc |
+/// | 1           | Nonce                | 16        | nonce |
+/// | 17          | Operation            | 1         | crypt |
+/// | 18          | Sequence counter     | 8 (be)    | crypt |
+/// | 26          | Payload length       | 2 (be)    | crypt |
+/// | 28          | Payload              | var       | crypt |
+/// | var         | Authentication tag   | 16        | tag   |
+///
+/// ## Payload
+///
+/// The payload of this `Message` depends on the `Operation`.
+/// It is either a OSI/ISO L4 packet, a L7 packet or other HTTUN control data.
+///
+/// In case of a L7 the payload must be a `SockMessage`.
 #[derive(Debug, Clone)]
 pub struct Message {
     type_: MsgType,
@@ -299,10 +322,30 @@ impl Message {
     }
 }
 
-impl Display for Message {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        let payload = &self.payload[..self.payload.len().min(16)];
-        write!(f, "Message {{ payload: {:?} }}", payload)
+/// # Message container for L7 payload.
+///
+/// See `Message` for more information.
+///
+/// The `SockMessage` contains all additional addressing information to
+/// successfully deliver the L7 payload to the destination.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct SockMessage {
+    addr: SocketAddr,
+    payload: Vec<u8>,
+}
+
+impl SockMessage {
+    pub fn new(addr: SocketAddr, payload: Vec<u8>) -> Self {
+        Self { addr, payload }
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        todo!() //TODO
+    }
+
+    pub fn deserialize(_buf: &[u8]) -> Self {
+        todo!() //TODO
     }
 }
 
@@ -351,7 +394,7 @@ impl SequenceValidator {
                 self.rx_seq.remove(&oldest_seq);
             }
         }
-        assert!(self.rx_seq.len() <= self.win_len.into());
+        debug_assert!(self.rx_seq.len() <= self.win_len.into());
 
         Ok(())
     }

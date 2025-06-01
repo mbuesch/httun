@@ -109,7 +109,7 @@ impl ProtocolHandler {
             .context("rx sequence validation SequenceType::B")?;
 
         match oper {
-            Operation::ToSrv => {
+            Operation::L4ToSrv => {
                 chan.tun().send(msg.payload()).await.context("TUN send")?;
             }
             Operation::TestToSrv if chan.test_enabled() => {
@@ -145,18 +145,20 @@ impl ProtocolHandler {
         // Deserialize the received message, even though we don't use it.
         // This checks the authenticity of the message.
         let msg = Message::deserialize(&payload, chan.key(), None)?;
+        let oper = msg.oper();
+
+        if oper != Operation::Init {
+            return Err(err!("Received {oper:?} in init context"));
+        }
+
         log::trace!("Session init message: {msg:?}");
 
         let new_session_secret = self.create_new_session(&chan).await;
 
         session.secret = None; // Don't use it for *this* message.
 
-        let msg = Message::new(
-            MsgType::Init,
-            Operation::FromSrv,
-            new_session_secret.to_vec(),
-        )
-        .context("Make httun packet")?;
+        let msg = Message::new(MsgType::Init, Operation::Init, new_session_secret.to_vec())
+            .context("Make httun packet")?;
 
         self.send_reply_msg(&chan, msg, session).await?;
 
@@ -177,8 +179,8 @@ impl ProtocolHandler {
             .context("rx sequence validation SequenceType::C")?;
 
         let (reply_oper, payload) = match oper {
-            Operation::FromSrv => (
-                Operation::FromSrv,
+            Operation::L4FromSrv => (
+                Operation::L4FromSrv,
                 chan.tun().recv().await.context("TUN receive")?,
             ),
             Operation::TestFromSrv if chan.test_enabled() => {
