@@ -147,6 +147,11 @@ async fn fcgi_response(
         }
     }
 
+    if f.flush().await.is_err() {
+        eprintln!("FCGI: Failed to flush fcgi socket.");
+        return FcgiRequestResult::Complete(1);
+    }
+
     FcgiRequestResult::Complete(0)
 }
 
