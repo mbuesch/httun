@@ -11,10 +11,13 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
 use std::{
     collections::BTreeSet,
-    net::SocketAddr,
     num::NonZeroUsize,
     sync::atomic::{self, AtomicU64},
 };
+
+mod l7container;
+
+pub use crate::l7container::L7Container;
 
 //TODO: Currently we only have a symmetric common secret.
 // Add a way to derive a symmetric key from some sort of asymmetric key handshake.
@@ -319,33 +322,6 @@ impl Message {
             return Err(err!("Message size is too big."));
         }
         Ok(())
-    }
-}
-
-/// # Message container for L7 payload.
-///
-/// See `Message` for more information.
-///
-/// The `SockMessage` contains all additional addressing information to
-/// successfully deliver the L7 payload to the destination.
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct SockMessage {
-    addr: SocketAddr,
-    payload: Vec<u8>,
-}
-
-impl SockMessage {
-    pub fn new(addr: SocketAddr, payload: Vec<u8>) -> Self {
-        Self { addr, payload }
-    }
-
-    pub fn serialize(&self) -> Vec<u8> {
-        todo!() //TODO
-    }
-
-    pub fn deserialize(_buf: &[u8]) -> Self {
-        todo!() //TODO
     }
 }
 

@@ -4,7 +4,7 @@
 
 use crate::client::{FromHttun, ToHttun};
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::{Message, MsgType, Operation, SockMessage};
+use httun_protocol::{L7Container, Message, MsgType, Operation};
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -39,7 +39,7 @@ async fn local_rx(
 
                 log::trace!("Local rx: {}", String::from_utf8_lossy(&buf));
 
-                let smsg = SockMessage::new(SocketAddr::new(target_addr, target_port), buf);
+                let smsg = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
 
                 let msg = Message::new(MsgType::Data, Operation::L7ToSrv, smsg.serialize())
                     .context("Make httun packet")?;
