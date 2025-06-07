@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use crate::MAX_PAYLOAD_LEN;
 use anyhow::{self as ah, format_err as err};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
@@ -11,7 +10,7 @@ const L7C_OFFS_PORT: usize = 16;
 const L7C_OFFS_PAYLOAD: usize = 18;
 
 const L7C_OVERHEAD_LEN: usize = 16 + 2;
-const L7C_MAX_PAYLOAD_LEN: usize = MAX_PAYLOAD_LEN - L7C_OVERHEAD_LEN;
+const L7C_MAX_PAYLOAD_LEN: usize = crate::message::MAX_PAYLOAD_LEN - L7C_OVERHEAD_LEN;
 
 /// # Message container for L7 payload.
 ///
