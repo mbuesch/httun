@@ -11,10 +11,12 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
 
 mod l7container;
+mod random;
 mod sequence;
 
 pub use crate::{
     l7container::L7Container,
+    random::secure_random,
     sequence::{SequenceGenerator, SequenceType, SequenceValidator},
 };
 
@@ -43,28 +45,6 @@ const OFFS_PAYLOAD: usize = 28;
 const AREA_ASSOC_LEN: usize = 1;
 const AREA_CRYPT_LEN: usize = 1 + 8 + 2;
 pub const OVERHEAD_LEN: usize = AREA_ASSOC_LEN + NONCE_LEN + AREA_CRYPT_LEN + AUTHTAG_LEN;
-
-/// Generate a cryptographically secure random token.
-pub fn secure_random<const SZ: usize>() -> [u8; SZ] {
-    // Get secure random bytes from the operating system.
-    let mut buf: [u8; SZ] = [0; SZ];
-    if getrandom::fill(&mut buf).is_err() {
-        panic!("Failed to read secure random bytes from the operating system. (getrandom failed)");
-    }
-
-    // For lengths bigger than 11 bytes the likelyhood of the sanity checks below
-    // triggering on good generator is low enough.
-    if SZ >= 12 {
-        // Sanity check if getrandom implementation
-        // is a no-op or otherwise trivially broken.
-        assert_ne!(buf, [0; SZ]);
-        assert_ne!(buf, [0xFF; SZ]);
-        let first = buf[0];
-        assert!(!buf.iter().all(|x| *x == first));
-    }
-
-    buf
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MsgType {
