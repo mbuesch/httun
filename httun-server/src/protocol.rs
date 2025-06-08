@@ -110,7 +110,14 @@ impl ProtocolHandler {
 
         match oper {
             Operation::L4ToSrv => {
-                chan.tun().send(msg.payload()).await.context("TUN send")?;
+                chan.l4send(msg.payload())
+                    .await
+                    .context("Channel L4 send")?;
+            }
+            Operation::L7ToSrv => {
+                chan.l7send(msg.payload())
+                    .await
+                    .context("Channel L7 send")?;
             }
             Operation::TestToSrv if chan.test_enabled() => {
                 log::debug!(
@@ -181,7 +188,11 @@ impl ProtocolHandler {
         let (reply_oper, payload) = match oper {
             Operation::L4FromSrv => (
                 Operation::L4FromSrv,
-                chan.tun().recv().await.context("TUN receive")?,
+                chan.l4recv().await.context("Channel L4 receive")?,
+            ),
+            Operation::L7FromSrv => (
+                Operation::L7FromSrv,
+                chan.l7recv().await.context("Channel L7 receive")?,
             ),
             Operation::TestFromSrv if chan.test_enabled() => {
                 (Operation::TestFromSrv, chan.get_pong().await)

@@ -39,9 +39,8 @@ async fn local_rx(
 
                 log::trace!("Local rx: {}", String::from_utf8_lossy(&buf));
 
-                let smsg = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
-
-                let msg = Message::new(MsgType::Data, Operation::L7ToSrv, smsg.serialize())
+                let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
+                let msg = Message::new(MsgType::Data, Operation::L7ToSrv, l7.serialize())
                     .context("Make httun packet")?;
 
                 to_httun.send(msg).await?;
@@ -67,11 +66,10 @@ async fn local_tx(
             return Err(err!("FromHttun IPC closed"));
         };
 
-        let payload = msg.payload();
+        log::trace!("Local tx: {}", String::from_utf8_lossy(msg.payload()));
 
-        log::trace!("Local tx: {}", String::from_utf8_lossy(payload));
-
-        //TODO
+        let l7 = L7Container::deserialize(msg.payload()).context("Deserialize L7 container")?;
+        let payload = l7.into_payload();
 
         let mut count = 0;
         loop {

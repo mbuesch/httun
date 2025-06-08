@@ -81,10 +81,6 @@ impl Channel {
         &self.name
     }
 
-    pub fn tun(&self) -> &TunHandler {
-        &self.tun
-    }
-
     pub fn key(&self) -> &Key {
         &self.key
     }
@@ -155,6 +151,22 @@ impl Channel {
                 return payload;
             }
         }
+    }
+
+    pub async fn l4send(&self, data: &[u8]) -> ah::Result<()> {
+        self.tun.send(data).await.context("TUN send")
+    }
+
+    pub async fn l4recv(&self) -> ah::Result<Vec<u8>> {
+        self.tun.recv().await.context("TUN receive")
+    }
+
+    pub async fn l7send(&self, _data: &[u8]) -> ah::Result<()> {
+        todo!()
+    }
+
+    pub async fn l7recv(&self) -> ah::Result<Vec<u8>> {
+        todo!()
     }
 }
 

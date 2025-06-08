@@ -18,3 +18,4 @@ httun-protocol = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true, features = [ "sync", "net", "time", "macros" ] }
 tokio-tun = { workspace = true }
+socket2 = { workspace = true }

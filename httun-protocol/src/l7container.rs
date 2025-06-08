@@ -29,6 +29,14 @@ impl L7Container {
         Self { addr, payload }
     }
 
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    pub fn into_payload(self) -> Vec<u8> {
+        self.payload
+    }
+
     pub fn serialize(&self) -> Vec<u8> {
         let addr = match self.addr.ip() {
             IpAddr::V4(addr) => addr.to_ipv6_mapped().octets(),

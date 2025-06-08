@@ -5,8 +5,12 @@
 #![forbid(unsafe_code)]
 
 use anyhow::{self as ah, Context as _};
+use socket2::{Domain, Protocol, Socket, Type};
+use std::net::{IpAddr, SocketAddr, TcpStream as StdTcpStream};
+use tokio::net::TcpStream;
 use tokio_tun::Tun;
 
+const MTU: i32 = 1024 * 62;
 const RX_BUF_SIZE: usize = 1024 * 64;
 
 pub struct TunHandler {
@@ -17,7 +21,7 @@ impl TunHandler {
     pub async fn new(name: &str) -> ah::Result<Self> {
         let tun: Tun = Tun::builder()
             .name(name)
-            .mtu(1024 * 62)
+            .mtu(MTU)
             .owner(0)
             .group(0)
             .up()
@@ -40,6 +44,27 @@ impl TunHandler {
         let count = self.tun.recv(&mut data).await?;
         data.truncate(count);
         Ok(data)
+    }
+
+    pub async fn bind_and_connect_socket(&self, remote_addr: &SocketAddr) -> ah::Result<TcpStream> {
+        let local_addr = self.tun.address().context("Get TUN address")?;
+
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
+            .context("Create socket")?;
+        socket
+            .bind(&SocketAddr::new(IpAddr::V4(local_addr), 0).into())
+            .context("Bind socket to TUN address")?;
+        socket
+            .connect(&(*remote_addr).into())
+            .context("Connect TUN socket to remote")?;
+
+        let stream: StdTcpStream = socket.into();
+        stream
+            .set_nonblocking(true)
+            .context("Set socket non-blocking")?;
+        let stream = TcpStream::from_std(stream).context("Create TcpStream")?;
+
+        Ok(stream)
     }
 }
 
