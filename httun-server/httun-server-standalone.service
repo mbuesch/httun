@@ -15,6 +15,9 @@ Restart=on-failure
 RestartSec=10
 Nice=0
 
+Environment=RUST_BACKTRACE=1 RUST_LIB_BACKTRACE=0
+Environment=HTTUN_LOG=info HTTUN_LOG_STYLE=never
+
 # Start with root privileges.
 # httun-server will drop privileges to httun:httun during startup.
 User=root
