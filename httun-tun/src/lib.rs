@@ -4,7 +4,7 @@
 
 #![forbid(unsafe_code)]
 
-use anyhow::{self as ah, Context as _};
+use anyhow::{self as ah, Context as _, format_err as err};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::{IpAddr, SocketAddr, TcpStream as StdTcpStream};
 use tokio::net::TcpStream;
@@ -47,6 +47,10 @@ impl TunHandler {
     }
 
     pub async fn bind_and_connect_socket(&self, remote_addr: &SocketAddr) -> ah::Result<TcpStream> {
+        if !remote_addr.is_ipv4() {
+            return Err(err!("Only IPv4 supported."));
+        }
+
         let local_addr = self.tun.address().context("Get TUN address")?;
 
         let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
@@ -65,6 +69,12 @@ impl TunHandler {
         let stream = TcpStream::from_std(stream).context("Create TcpStream")?;
 
         Ok(stream)
+    }
+}
+
+impl std::fmt::Debug for TunHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "TunHandler")
     }
 }
 

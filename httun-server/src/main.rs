@@ -199,7 +199,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             let mut interval = tokio::time::interval(Duration::from_secs(3));
             loop {
                 interval.tick().await;
-                protman.check_dead_instances().await;
+                protman.periodic_work().await;
             }
         }
     });

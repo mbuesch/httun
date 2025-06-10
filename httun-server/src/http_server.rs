@@ -31,6 +31,7 @@ use tokio::{
 const RX_BUF_SIZE: usize = 1024 * (64 + 8);
 static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(0);
 
+#[derive(Debug)]
 struct RecvBuf {
     buf: Vec<u8>,
     count: usize,
@@ -380,6 +381,7 @@ async fn rx_task(
 // But this should only happen, if a http proxy routes two different httun
 // connections at the same time and it reuses the server side connection.
 
+#[derive(Debug)]
 pub struct HttpConn {
     id: u32,
     stream: Arc<TcpStream>,
@@ -567,6 +569,7 @@ impl Drop for HttpConn {
     }
 }
 
+#[derive(Debug)]
 pub struct HttpServer {
     listener: TcpListener,
     conf: Arc<Config>,

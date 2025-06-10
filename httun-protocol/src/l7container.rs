@@ -29,6 +29,10 @@ impl L7Container {
         Self { addr, payload }
     }
 
+    pub fn addr(&self) -> &SocketAddr {
+        &self.addr
+    }
+
     pub fn payload(&self) -> &[u8] {
         &self.payload
     }

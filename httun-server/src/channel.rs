@@ -6,23 +6,43 @@ use crate::time::{now, tdiff};
 use anyhow::{self as ah, Context as _};
 use httun_conf::Config;
 use httun_protocol::{
-    Key, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret, secure_random,
+    Key, L7Container, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret,
+    secure_random,
 };
 use httun_tun::TunHandler;
 use std::{
     collections::HashMap,
+    net::SocketAddr,
     sync::{
         Arc, Mutex as StdMutex,
         atomic::{self, AtomicU64},
     },
 };
-use tokio::sync::{Mutex, Notify};
+use tokio::{
+    net::TcpStream,
+    sync::{Mutex, Notify},
+};
 
 const ACTIVITY_TIMEOUT_S: i64 = 30;
+const L7_TIMEOUT_S: i64 = 30;
 
+#[derive(Debug)]
+struct L7State {
+    pub remote: SocketAddr,
+    pub stream: TcpStream,
+    pub last_activity: u64,
+}
+
+impl L7State {
+    pub fn new(remote: SocketAddr, stream: TcpStream) -> Self {
+        Self { remote, stream, last_activity: now() }
+    }
+}
+
+#[derive(Debug)]
 struct PingState {
-    notify: Notify,
-    buf: Mutex<Vec<u8>>,
+    pub notify: Notify,
+    pub buf: Mutex<Vec<u8>>,
 }
 
 impl PingState {
@@ -40,6 +60,7 @@ pub struct Session {
     pub sequence: u64,
 }
 
+#[derive(Debug)]
 struct SessionState {
     session: Session,
     tx_sequence_a: SequenceGenerator,
@@ -47,11 +68,13 @@ struct SessionState {
     rx_validator_c: SequenceValidator,
 }
 
+#[derive(Debug)]
 pub struct Channel {
     name: String,
     tun: TunHandler,
     key: Key,
     test_enabled: bool,
+    l7state: Mutex<Option<L7State>>,
     ping: PingState,
     session: StdMutex<SessionState>,
     last_activity: AtomicU64,
@@ -71,6 +94,7 @@ impl Channel {
             tun,
             key,
             test_enabled,
+            l7state: Mutex::new(None),
             ping: PingState::new(),
             session: StdMutex::new(session),
             last_activity: AtomicU64::new(now()),
@@ -161,18 +185,76 @@ impl Channel {
         self.tun.recv().await.context("TUN receive")
     }
 
-    pub async fn l7send(&self, _data: &[u8]) -> ah::Result<()> {
-        todo!()
+    pub async fn l7send(&self, data: &[u8]) -> ah::Result<()> {
+        let cont = L7Container::deserialize(data).context("Unpack L7 control data")?;
+
+        let mut l7state = self.l7state.lock().await;
+
+        fn disconnect(l7state: &mut Option<L7State>) {
+            if let Some(l7state) = l7state.as_ref() {
+                log::trace!("L7 disconnect from {}", l7state.remote);
+            }
+            *l7state = None;
+        }
+
+        if cont.payload().is_empty() {
+            // Disconnect.
+            disconnect(&mut l7state);
+        } else {
+            let mut connect = l7state.is_none();
+            if let Some(l7state) = l7state.as_ref() {
+                if l7state.remote != *cont.addr() {
+                    connect = true;
+                }
+            }
+            if connect {
+                disconnect(&mut l7state);
+                *l7state = Some(L7State::new(
+                    *cont.addr(),
+                    self.tun
+                        .bind_and_connect_socket(cont.addr())
+                        .await
+                        .context("Connect L7 socket")?,
+                ));
+            }
+
+            if let Some(l7state) = l7state.as_mut() {
+                let _ = &l7state.stream; //TODO
+
+                l7state.last_activity = now();
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn l7recv(&self) -> ah::Result<Vec<u8>> {
+        //TODO
+
+        //l7state.last_activity = now();
         todo!()
+    }
+
+    async fn check_l7_timeout(&self) {
+        let mut timeout = false;
+        let mut l7state = self.l7state.lock().await;
+        if let Some(l7state) = l7state.as_mut() {
+            timeout = tdiff(now(), l7state.last_activity) > L7_TIMEOUT_S;
+        }
+        if timeout {
+            log::debug!("L7 socket timeout");
+            *l7state = None;
+        }
+    }
+
+    pub async fn periodic_work(&self) {
+        self.check_l7_timeout().await;
     }
 }
 
+#[derive(Debug)]
 pub struct Channels {
     channels: StdMutex<HashMap<String, Arc<Channel>>>,
-    _conf: Arc<Config>,
 }
 
 impl Channels {
@@ -197,7 +279,6 @@ impl Channels {
 
         Ok(Self {
             channels: StdMutex::new(channels),
-            _conf: conf,
         })
     }
 

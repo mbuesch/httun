@@ -10,6 +10,7 @@ use std::{
     sync::atomic::{self, AtomicU64},
 };
 
+#[derive(Debug)]
 pub struct SequenceValidator {
     win_len: NonZeroUsize,
     rx_seq: BTreeSet<u64>,
@@ -80,6 +81,7 @@ impl SequenceType {
     }
 }
 
+#[derive(Debug)]
 pub struct SequenceGenerator {
     seq: AtomicU64,
 }

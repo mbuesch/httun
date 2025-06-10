@@ -15,6 +15,7 @@ use std::sync::{
 };
 use tokio::{sync::Mutex, task, time::timeout};
 
+#[derive(Debug)]
 pub struct ProtocolHandler {
     protman: Arc<ProtocolManager>,
     comm: CommBackend,
@@ -254,8 +255,15 @@ impl ProtocolHandler {
                 .map(|c| c.activity_timed_out())
                 .unwrap_or_default()
     }
+
+    pub async fn periodic_work(&self) {
+        if let Ok(chan) = self.chan() {
+            chan.periodic_work().await;
+        }
+    }
 }
 
+#[derive(Debug)]
 struct ProtocolInstance {
     handle: task::JoinHandle<()>,
     prot: Arc<ProtocolHandler>,
@@ -273,6 +281,7 @@ impl Drop for ProtocolInstance {
     }
 }
 
+#[derive(Debug)]
 pub struct ProtocolManager {
     insts: Mutex<Vec<ProtocolInstance>>,
 }
@@ -304,7 +313,7 @@ impl ProtocolManager {
                     }
                 }
                 prot.set_dead();
-                this.check_dead_instances().await;
+                this.periodic_work().await;
             }
         });
 
@@ -333,8 +342,14 @@ impl ProtocolManager {
         });
     }
 
-    pub async fn check_dead_instances(self: &Arc<Self>) {
-        self.insts.lock().await.retain(|inst| !inst.prot.is_dead());
+    pub async fn periodic_work(self: &Arc<Self>) {
+        let mut insts = self.insts.lock().await;
+
+        insts.retain(|inst| !inst.prot.is_dead());
+
+        for inst in &*insts {
+            inst.prot.periodic_work().await;
+        }
     }
 }
 

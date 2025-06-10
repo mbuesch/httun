@@ -32,18 +32,23 @@ async fn local_rx(
         let mut buf = vec![0_u8; RX_BUF_SIZE];
         match stream.try_read(&mut buf) {
             Ok(n) => {
-                if n == 0 {
-                    return Err(err!("Disconnected."));
-                }
                 buf.truncate(n);
 
-                log::trace!("Local rx: {}", String::from_utf8_lossy(&buf));
+                if n == 0 {
+                    log::trace!("Local rx: Disconnected.");
+                } else {
+                    log::trace!("Local rx: {}", String::from_utf8_lossy(&buf));
+                }
 
                 let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
                 let msg = Message::new(MsgType::Data, Operation::L7ToSrv, l7.serialize())
                     .context("Make httun packet")?;
 
                 to_httun.send(msg).await?;
+
+                if n == 0 {
+                    return Err(err!("Disconnected."));
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 continue;
@@ -70,6 +75,10 @@ async fn local_tx(
 
         let l7 = L7Container::deserialize(msg.payload()).context("Deserialize L7 container")?;
         let payload = l7.into_payload();
+
+        if payload.is_empty() {
+            return Err(err!("Disconnected."));
+        }
 
         let mut count = 0;
         loop {

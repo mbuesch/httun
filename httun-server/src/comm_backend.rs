@@ -8,11 +8,13 @@ use httun_unix_protocol::{UnMessage, UnOperation};
 use httun_util::CHAN_R_TIMEOUT;
 use std::time::Duration;
 
+#[derive(Debug)]
 pub enum CommRxMsg {
     ToSrv(Vec<u8>),
     ReqFromSrv(Vec<u8>),
 }
 
+#[derive(Debug)]
 pub enum CommBackend {
     Unix(UnixConn),
     Http(HttpConn),
