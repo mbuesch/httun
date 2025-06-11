@@ -28,6 +28,7 @@ use tokio::{
 
 const HTTP_R_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S + 3);
 const HTTP_W_TIMEOUT: Duration = Duration::from_secs(3);
+const TCP_USER_TIMEOUT: Duration = Duration::from_secs(2);
 const SESSION_INIT_RETRIES: usize = 5;
 
 pub type ToHttun = Message;
@@ -45,6 +46,7 @@ fn make_client(
     }
     c = c.referer(false);
     c = c.timeout(timeout);
+    c = c.tcp_user_timeout(TCP_USER_TIMEOUT);
     c = c.tcp_nodelay(true);
 
     c = c.gzip(chan_conf.http_allow_compression());
