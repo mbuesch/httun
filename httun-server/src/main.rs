@@ -5,6 +5,8 @@
 mod channel;
 mod comm_backend;
 mod http_server;
+mod l7;
+mod ping;
 mod protocol;
 mod systemd;
 mod time;

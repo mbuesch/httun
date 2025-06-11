@@ -2,57 +2,26 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::time::{now, tdiff};
+use crate::{
+    l7::L7State,
+    ping::PingState,
+    time::{now, tdiff},
+};
 use anyhow::{self as ah, Context as _};
 use httun_conf::Config;
 use httun_protocol::{
-    Key, L7Container, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret,
-    secure_random,
+    Key, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret, secure_random,
 };
 use httun_tun::TunHandler;
 use std::{
     collections::HashMap,
-    net::SocketAddr,
     sync::{
         Arc, Mutex as StdMutex,
         atomic::{self, AtomicU64},
     },
 };
-use tokio::{
-    net::TcpStream,
-    sync::{Mutex, Notify},
-};
 
 const ACTIVITY_TIMEOUT_S: i64 = 30;
-const L7_TIMEOUT_S: i64 = 30;
-
-#[derive(Debug)]
-struct L7State {
-    pub remote: SocketAddr,
-    pub stream: TcpStream,
-    pub last_activity: u64,
-}
-
-impl L7State {
-    pub fn new(remote: SocketAddr, stream: TcpStream) -> Self {
-        Self { remote, stream, last_activity: now() }
-    }
-}
-
-#[derive(Debug)]
-struct PingState {
-    pub notify: Notify,
-    pub buf: Mutex<Vec<u8>>,
-}
-
-impl PingState {
-    fn new() -> Self {
-        Self {
-            notify: Notify::new(),
-            buf: Mutex::new(vec![]),
-        }
-    }
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct Session {
@@ -74,7 +43,7 @@ pub struct Channel {
     tun: TunHandler,
     key: Key,
     test_enabled: bool,
-    l7state: Mutex<Option<L7State>>,
+    l7: L7State,
     ping: PingState,
     session: StdMutex<SessionState>,
     last_activity: AtomicU64,
@@ -94,7 +63,7 @@ impl Channel {
             tun,
             key,
             test_enabled,
-            l7state: Mutex::new(None),
+            l7: L7State::new(),
             ping: PingState::new(),
             session: StdMutex::new(session),
             last_activity: AtomicU64::new(now()),
@@ -160,21 +129,11 @@ impl Channel {
     }
 
     pub async fn put_ping(&self, payload: Vec<u8>) {
-        *self.ping.buf.lock().await = payload;
-        self.ping.notify.notify_one();
+        self.ping.put(payload).await;
     }
 
     pub async fn get_pong(&self) -> Vec<u8> {
-        loop {
-            self.ping.notify.notified().await;
-
-            let mut ping_buf = self.ping.buf.lock().await;
-            if !ping_buf.is_empty() {
-                let mut payload: Vec<u8> = "Reply to: ".to_string().into();
-                payload.append(&mut *ping_buf);
-                return payload;
-            }
-        }
+        self.ping.get().await
     }
 
     pub async fn l4send(&self, data: &[u8]) -> ah::Result<()> {
@@ -186,69 +145,15 @@ impl Channel {
     }
 
     pub async fn l7send(&self, data: &[u8]) -> ah::Result<()> {
-        let cont = L7Container::deserialize(data).context("Unpack L7 control data")?;
-
-        let mut l7state = self.l7state.lock().await;
-
-        fn disconnect(l7state: &mut Option<L7State>) {
-            if let Some(l7state) = l7state.as_ref() {
-                log::trace!("L7 disconnect from {}", l7state.remote);
-            }
-            *l7state = None;
-        }
-
-        if cont.payload().is_empty() {
-            // Disconnect.
-            disconnect(&mut l7state);
-        } else {
-            let mut connect = l7state.is_none();
-            if let Some(l7state) = l7state.as_ref() {
-                if l7state.remote != *cont.addr() {
-                    connect = true;
-                }
-            }
-            if connect {
-                disconnect(&mut l7state);
-                *l7state = Some(L7State::new(
-                    *cont.addr(),
-                    self.tun
-                        .bind_and_connect_socket(cont.addr())
-                        .await
-                        .context("Connect L7 socket")?,
-                ));
-            }
-
-            if let Some(l7state) = l7state.as_mut() {
-                let _ = &l7state.stream; //TODO
-
-                l7state.last_activity = now();
-            }
-        }
-
-        Ok(())
+        self.l7.send(&self.tun, data).await
     }
 
     pub async fn l7recv(&self) -> ah::Result<Vec<u8>> {
-        //TODO
-
-        //l7state.last_activity = now();
-        todo!()
-    }
-
-    async fn check_l7_timeout(&self) {
-        let mut timeout = false;
-        let mut l7state = self.l7state.lock().await;
-        if let Some(l7state) = l7state.as_mut() {
-            timeout = tdiff(now(), l7state.last_activity) > L7_TIMEOUT_S;
-        }
-        if timeout {
-            log::debug!("L7 socket timeout");
-            *l7state = None;
-        }
+        self.l7.recv().await
     }
 
     pub async fn periodic_work(&self) {
-        self.check_l7_timeout().await;
+        self.l7.check_timeout().await;
     }
 }
 
