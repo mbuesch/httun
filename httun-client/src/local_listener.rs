@@ -6,7 +6,7 @@ use crate::client::{FromHttun, ToHttun};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::{L7Container, Message, MsgType, Operation};
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::Arc,
 };
 use tokio::{
@@ -141,7 +141,7 @@ pub struct LocalListener {
 
 impl LocalListener {
     pub async fn bind(port: u16) -> ah::Result<Self> {
-        let listener = TcpListener::bind(("localhost", port)).await?;
+        let listener = TcpListener::bind((Ipv6Addr::UNSPECIFIED, port)).await?;
         Ok(Self { listener })
     }
 

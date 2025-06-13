@@ -88,18 +88,18 @@ macro_rules! define_direction {
             name: String,
             url: String,
             #[allow(dead_code)]
-            test_mode: bool,
+            mode: HttunClientMode,
             serial: AtomicU64,
         }
 
         impl $struct {
-            fn new(conf: Arc<Config>, base_url: &str, name: &str, test_mode: bool) -> Self {
+            fn new(conf: Arc<Config>, base_url: &str, name: &str, mode: HttunClientMode) -> Self {
                 Self {
                     conf,
                     name: name.to_string(),
                     base_url: base_url.to_string(),
                     url: format_url(base_url, name, $urlpath),
-                    test_mode,
+                    mode,
                     serial: AtomicU64::new(0),
                 }
             }
@@ -135,10 +135,10 @@ async fn direction_r(
     let http_auth = chan_conf.http_basic_auth().clone();
 
     loop {
-        let oper = if chan.test_mode {
-            Operation::TestFromSrv
-        } else {
-            Operation::L4FromSrv
+        let oper = match chan.mode {
+            HttunClientMode::L4 => Operation::L4FromSrv,
+            HttunClientMode::L7 => Operation::L7FromSrv,
+            HttunClientMode::Test => Operation::TestFromSrv,
         };
         let mut resp;
 
@@ -347,6 +347,13 @@ async fn get_session(
     Err(err!("Failed to get session ID from server."))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttunClientMode {
+    L4,
+    L7,
+    Test,
+}
+
 pub struct HttunClient {
     conf: Arc<Config>,
     base_url: String,
@@ -361,7 +368,7 @@ impl HttunClient {
     pub async fn connect(
         base_url: &str,
         chan_name: &str,
-        test_mode: bool,
+        mode: HttunClientMode,
         user_agent: &str,
         conf: Arc<Config>,
     ) -> ah::Result<Self> {
@@ -382,13 +389,13 @@ impl HttunClient {
                 Arc::clone(&conf),
                 base_url,
                 chan_name,
-                test_mode,
+                mode,
             )),
             w: Arc::new(DirectionW::new(
                 Arc::clone(&conf),
                 base_url,
                 chan_name,
-                test_mode,
+                mode,
             )),
             user_agent: user_agent.to_string(),
             key: Arc::new(key),

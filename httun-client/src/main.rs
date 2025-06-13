@@ -10,7 +10,7 @@ mod mode;
 mod resolver;
 
 use crate::{
-    client::HttunClient,
+    client::{HttunClient, HttunClientMode},
     mode::{
         genkey::run_mode_genkey, socket::run_mode_socket, test::run_mode_test, tun::run_mode_tun,
     },
@@ -188,16 +188,23 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let mut sighup = register_signal!(hangup);
 
     let res_mode = match (opts.resolve_ipv6, opts.resolve_ipv4) {
-        (false, false) | (true, false) | (true, true) => ResMode::Ipv6,
-        (false, true) => ResMode::Ipv4,
+        (true, false) | (true, true) => ResMode::Ipv6,
+        (false, false) | (false, true) => ResMode::Ipv4,
     };
 
     //TODO resolve server_url host name.
 
+    let client_mode = match &opts.mode {
+        Some(Mode::Tun { .. }) => HttunClientMode::L4,
+        Some(Mode::Socket { .. }) => HttunClientMode::L7,
+        Some(Mode::Test {}) => HttunClientMode::Test,
+        None | Some(Mode::Genkey {}) => unreachable!(),
+    };
+
     let mut client = HttunClient::connect(
         opts.server_url.as_ref().unwrap(),
         &opts.channel,
-        matches!(opts.mode, Some(Mode::Test {})),
+        client_mode,
         &opts.user_agent,
         Arc::clone(&conf),
     )
