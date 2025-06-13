@@ -3,7 +3,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
 use crate::time::{now, tdiff};
-use anyhow::{self as ah, Context as _};
+use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::L7Container;
 use httun_tun::TunHandler;
 use std::{
@@ -11,11 +11,13 @@ use std::{
     sync::atomic::{self, AtomicU64},
 };
 use tokio::{
+    io::{AsyncReadExt as _, AsyncWriteExt as _},
     net::TcpStream,
     sync::{Mutex, Notify},
 };
 
 const L7_TIMEOUT_S: i64 = 30;
+const RX_BUF_SIZE: usize = 1024 * 64;
 
 #[derive(Debug)]
 struct L7Stream {
@@ -32,8 +34,8 @@ impl L7Stream {
         &self.remote
     }
 
-    pub fn stream(&self) -> &TcpStream {
-        &self.stream
+    pub fn stream_mut(&mut self) -> &mut TcpStream {
+        &mut self.stream
     }
 }
 
@@ -85,7 +87,11 @@ impl L7State {
             }
 
             if let Some(stream) = stream.as_mut() {
-                let _ = stream.stream(); //TODO
+                stream
+                    .stream_mut()
+                    .write_all(cont.payload())
+                    .await
+                    .context("L7 stream write")?;
 
                 self.last_activity.store(now(), atomic::Ordering::Relaxed);
                 if connect {
@@ -109,17 +115,28 @@ impl L7State {
         };
 
         if let Some(stream) = stream.as_mut() {
-            let _ = stream.stream(); //TODO
+            let mut buf = vec![0; RX_BUF_SIZE];
+            let count = stream
+                .stream_mut()
+                .read(&mut buf[..])
+                .await
+                .context("L7 stream read")?;
+            buf.truncate(count);
 
             self.last_activity.store(now(), atomic::Ordering::Relaxed);
+
+            Ok(buf)
+        } else {
+            Err(err!("L7 recv: Stream is not connected"))
         }
-        todo!()
     }
 
     pub async fn check_timeout(&self) {
         if tdiff(now(), self.last_activity.load(atomic::Ordering::Relaxed)) > L7_TIMEOUT_S {
             log::debug!("L7 socket timeout");
             Self::disconnect(&mut *self.stream.lock().await);
+            self.last_activity
+                .store(i64::MAX as u64, atomic::Ordering::Relaxed);
         }
     }
 }
