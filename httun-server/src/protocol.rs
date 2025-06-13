@@ -111,16 +111,19 @@ impl ProtocolHandler {
 
         match oper {
             Operation::L4ToSrv => {
+                log::trace!("Received Operation::L4ToSrv");
                 chan.l4send(msg.payload())
                     .await
                     .context("Channel L4 send")?;
             }
             Operation::L7ToSrv => {
+                log::trace!("Received Operation::L7ToSrv");
                 chan.l7send(msg.payload())
                     .await
                     .context("Channel L7 send")?;
             }
             Operation::TestToSrv if chan.test_enabled() => {
+                log::trace!("Received Operation::TestToSrv");
                 log::debug!(
                     "Received test mode ping: '{}'",
                     String::from_utf8_lossy(msg.payload())
@@ -187,15 +190,22 @@ impl ProtocolHandler {
             .context("rx sequence validation SequenceType::C")?;
 
         let (reply_oper, payload) = match oper {
-            Operation::L4FromSrv => (
-                Operation::L4FromSrv,
-                chan.l4recv().await.context("Channel L4 receive")?,
-            ),
-            Operation::L7FromSrv => (
-                Operation::L7FromSrv,
-                chan.l7recv().await.context("Channel L7 receive")?,
-            ),
+            Operation::L4FromSrv => {
+                log::trace!("Received Operation::L4FromSrv");
+                (
+                    Operation::L4FromSrv,
+                    chan.l4recv().await.context("Channel L4 receive")?,
+                )
+            }
+            Operation::L7FromSrv => {
+                log::trace!("Received Operation::L7FromSrv");
+                (
+                    Operation::L7FromSrv,
+                    chan.l7recv().await.context("Channel L7 receive")?,
+                )
+            }
             Operation::TestFromSrv if chan.test_enabled() => {
+                log::trace!("Received Operation::TestFromSrv");
                 (Operation::TestFromSrv, chan.get_pong().await)
             }
             _ => {
