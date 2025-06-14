@@ -90,7 +90,6 @@ impl UnixConn {
             return Ok(None);
         };
         let msg = UnMessage::deserialize(&msg)?;
-        log::trace!("RX Unix msg: {msg:?}");
         Ok(Some(msg))
     }
 
@@ -116,7 +115,6 @@ impl UnixConn {
     }
 
     pub async fn send(&self, msg: &UnMessage) -> ah::Result<()> {
-        log::trace!("TX Unix msg: {msg:?}");
         let msg = msg.serialize();
         let hdr = UnMessageHeader::new(msg.len()).serialize();
         self.do_send(&hdr).await?;
