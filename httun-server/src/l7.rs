@@ -125,7 +125,10 @@ impl L7State {
 
             self.last_activity.store(now(), atomic::Ordering::Relaxed);
 
-            Ok(buf)
+            let cont = L7Container::new(*stream.remote(), buf);
+            let data = cont.serialize();
+
+            Ok(data)
         } else {
             Err(err!("L7 recv: Stream is not connected"))
         }
