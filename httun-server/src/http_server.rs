@@ -161,7 +161,7 @@ async fn send_http_reply(
     write!(&mut headers, "Cache-Control: no-store\r\n")?;
     if !payload.is_empty() {
         write!(&mut headers, "Content-Length: {}\r\n", payload.len())?;
-        write!(&mut headers, "Content-Type: {}\r\n", mime)?;
+        write!(&mut headers, "Content-Type: {mime}\r\n")?;
     }
     write!(&mut headers, "\r\n")?;
 
