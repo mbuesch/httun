@@ -56,7 +56,7 @@ httun-unix-protocol = { path = "./httun-unix-protocol", version = "0.1" }
 httun-util = { path = "./httun-util", version = "0.1" }
 
 [profile.release]
-lto = "fat"
+#lto = "fat"
 panic = "abort"
 overflow-checks = true
 
