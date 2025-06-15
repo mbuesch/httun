@@ -11,6 +11,7 @@ use crate::{
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Message;
+use httun_unix_protocol::UNIX_SOCK;
 use httun_util::{CHAN_R_TIMEOUT, Direction, Query, parse_path};
 use std::{
     collections::HashMap,
@@ -30,8 +31,6 @@ use tokio::{
 };
 
 const MAX_NUM_CONNECTIONS: usize = 16;
-const SERVER_SOCK: &str = "/run/httun-server/httun-server.sock";
-
 const UNIX_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]
@@ -75,7 +74,7 @@ async fn get_connection(name: &str, send: bool) -> ah::Result<Arc<ServerUnixConn
         conn.log_activity();
         Ok(Arc::clone(&conn.conn))
     } else {
-        let conn = Arc::new(ServerUnixConn::new(Path::new(SERVER_SOCK), name).await?);
+        let conn = Arc::new(ServerUnixConn::new(Path::new(UNIX_SOCK), name).await?);
         connections.insert(key, Connection::new(Arc::clone(&conn)));
         Ok(conn)
     }
