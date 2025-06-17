@@ -47,17 +47,26 @@ impl TunHandler {
     }
 
     pub async fn bind_and_connect_socket(&self, remote_addr: &SocketAddr) -> ah::Result<TcpStream> {
+        log::debug!(
+            "Creating L7 socket and binding to address of TUN interface: {}",
+            self.tun.name()
+        );
+
         if !remote_addr.is_ipv4() {
             return Err(err!("Only IPv4 supported."));
         }
 
-        let local_addr = self.tun.address().context("Get TUN address")?;
+        let local_addr = self.tun.address().context("Get TUN IP address")?;
 
         let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
             .context("Create socket")?;
+
+        log::trace!("Binding L7 socket to TUN address: {local_addr}");
         socket
             .bind(&SocketAddr::new(IpAddr::V4(local_addr), 0).into())
             .context("Bind socket to TUN address")?;
+
+        log::trace!("Connecting L7 socket to remote: {remote_addr}");
         socket
             .connect(&(*remote_addr).into())
             .context("Connect TUN socket to remote")?;
