@@ -125,12 +125,22 @@ impl From<Operation> for u8 {
 /// It is either a OSI/ISO L4 packet, a L7 packet or other HTTUN control data.
 ///
 /// In case of a L7 the payload must be a `SockMessage`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Message {
     type_: MsgType,
     oper: Operation,
     sequence: u64,
     payload: Vec<u8>,
+}
+
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "Message {{ type: {:?}, oper: {:?}, sequence: 0x{:X} }}",
+            self.type_, self.oper, self.sequence
+        )
+    }
 }
 
 impl Message {

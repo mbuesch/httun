@@ -18,10 +18,16 @@ const L7C_MAX_PAYLOAD_LEN: usize = crate::message::MAX_PAYLOAD_LEN - L7C_OVERHEA
 ///
 /// The `L7Container` contains all additional addressing information to
 /// successfully deliver the L7 payload to the destination.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct L7Container {
     addr: SocketAddr,
     payload: Vec<u8>,
+}
+
+impl std::fmt::Debug for L7Container {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "L7Container {{ addr: {:?} }}", self.addr)
+    }
 }
 
 impl L7Container {

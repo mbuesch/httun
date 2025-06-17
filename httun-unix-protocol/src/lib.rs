@@ -71,11 +71,21 @@ pub enum UnOperation {
     Close,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct UnMessage {
     op: UnOperation,
     chan_name: String,
     payload: Vec<u8>,
+}
+
+impl std::fmt::Debug for UnMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "UnMessage {{ op: {:?}, chan_name: {} }}",
+            self.op, self.chan_name,
+        )
+    }
 }
 
 impl UnMessage {
