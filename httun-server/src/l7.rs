@@ -132,7 +132,11 @@ impl L7State {
                 .await
                 .context("L7 stream read")?;
             buf.truncate(count);
-            log::trace!("L7: Received {} bytes from {}", buf.len(), stream.remote());
+            if buf.len() == 0 {
+                log::trace!("L7: Remote {} disconnected.", stream.remote());
+            } else {
+                log::trace!("L7: Received {} bytes from {}.", buf.len(), stream.remote());
+            }
 
             self.last_activity.store(now(), atomic::Ordering::Relaxed);
 
