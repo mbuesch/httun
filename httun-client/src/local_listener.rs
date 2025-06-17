@@ -5,6 +5,7 @@
 use crate::client::{FromHttun, ToHttun};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::{L7Container, Message, MsgType, Operation};
+use httun_util::DisconnectedError;
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::Arc,
@@ -35,9 +36,12 @@ async fn local_rx(
                 buf.truncate(n);
 
                 if n == 0 {
-                    log::trace!("Local rx: Disconnected.");
+                    log::trace!("Local socket: Disconnected.");
                 } else {
-                    log::trace!("Local rx: {}", String::from_utf8_lossy(&buf));
+                    log::trace!(
+                        "Sending {} bytes from local socket to httun-server.",
+                        buf.len()
+                    );
                 }
 
                 let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
@@ -47,7 +51,7 @@ async fn local_rx(
                 to_httun.send(msg).await?;
 
                 if n == 0 {
-                    return Err(err!("Disconnected."));
+                    return Err(DisconnectedError.into());
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -71,14 +75,18 @@ async fn local_tx(
             return Err(err!("FromHttun IPC closed"));
         };
 
-        log::trace!("Local tx: {}", String::from_utf8_lossy(msg.payload()));
-
         let l7 = L7Container::deserialize(msg.payload()).context("Deserialize L7 container")?;
         let payload = l7.into_payload();
 
         if payload.is_empty() {
-            return Err(err!("Disconnected."));
+            log::trace!("Local socket: Httun disconnected.");
+            return Err(DisconnectedError.into());
         }
+
+        log::trace!(
+            "Sending {} bytes from httun-server to local socket.",
+            payload.len()
+        );
 
         let mut count = 0;
         loop {

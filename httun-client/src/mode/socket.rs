@@ -8,6 +8,7 @@ use crate::{
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Message;
+use httun_util::DisconnectedError;
 use std::sync::Arc;
 use tokio::{
     sync::{
@@ -62,7 +63,7 @@ pub async fn run_mode_socket(
                         // Socket connection handler.
                         if let Ok(_permit) = conn_semaphore.acquire().await {
                             task::spawn(async move {
-                                if let Err(e) = conn
+                                match conn
                                     .handle_packets(
                                         to_httun_tx,
                                         from_httun_rx,
@@ -71,7 +72,13 @@ pub async fn run_mode_socket(
                                     )
                                     .await
                                 {
-                                    log::error!("Local client: {e:?}");
+                                    Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
+                                        log::debug!("Local client disconnected.");
+                                    }
+                                    Err(e) => {
+                                        log::error!("Local client: {e:?}");
+                                    }
+                                    Ok(()) => (),
                                 }
                             });
                         }
