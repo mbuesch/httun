@@ -39,6 +39,8 @@ impl L7Stream {
     }
 }
 
+const NO_ACTIVITY: u64 = i64::MAX as u64;
+
 #[derive(Debug)]
 pub struct L7State {
     stream: Mutex<Option<L7Stream>>,
@@ -50,7 +52,7 @@ impl L7State {
     pub fn new() -> Self {
         Self {
             stream: Mutex::new(None),
-            last_activity: AtomicU64::new(0),
+            last_activity: AtomicU64::new(NO_ACTIVITY),
             connect_notify: Notify::new(),
         }
     }
@@ -78,15 +80,22 @@ impl L7State {
             }
             if connect {
                 Self::disconnect(&mut stream);
+                log::trace!("L7: Connecting to {}", cont.addr());
                 *stream = Some(L7Stream::new(
                     *cont.addr(),
                     tun.bind_and_connect_socket(cont.addr())
                         .await
                         .context("Connect L7 socket")?,
                 ));
+                log::trace!("L7: Connected to {}", cont.addr());
             }
 
             if let Some(stream) = stream.as_mut() {
+                log::trace!(
+                    "L7: Sending {} bytes to {}",
+                    cont.payload().len(),
+                    cont.addr()
+                );
                 stream
                     .stream_mut()
                     .write_all(cont.payload())
@@ -115,6 +124,7 @@ impl L7State {
         };
 
         if let Some(stream) = stream.as_mut() {
+            log::trace!("L7: Receiving from {} ...", stream.remote());
             let mut buf = vec![0; RX_BUF_SIZE];
             let count = stream
                 .stream_mut()
@@ -122,6 +132,7 @@ impl L7State {
                 .await
                 .context("L7 stream read")?;
             buf.truncate(count);
+            log::trace!("L7: Received {} bytes from {}", buf.len(), stream.remote());
 
             self.last_activity.store(now(), atomic::Ordering::Relaxed);
 
@@ -136,10 +147,10 @@ impl L7State {
 
     pub async fn check_timeout(&self) {
         if tdiff(now(), self.last_activity.load(atomic::Ordering::Relaxed)) > L7_TIMEOUT_S {
-            log::debug!("L7 socket timeout");
-            Self::disconnect(&mut *self.stream.lock().await);
             self.last_activity
-                .store(i64::MAX as u64, atomic::Ordering::Relaxed);
+                .store(NO_ACTIVITY, atomic::Ordering::Relaxed);
+            log::debug!("L7: Socket timeout.");
+            Self::disconnect(&mut *self.stream.lock().await);
         }
     }
 }
