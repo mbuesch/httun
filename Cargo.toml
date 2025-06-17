@@ -55,6 +55,10 @@ httun-tun = { path = "./httun-tun", version = "0.1" }
 httun-unix-protocol = { path = "./httun-unix-protocol", version = "0.1" }
 httun-util = { path = "./httun-util", version = "0.1" }
 
+[profile.dev]
+#debug = "limited"
+debug = "line-tables-only"
+
 [profile.release]
 #lto = "fat"
 panic = "abort"
