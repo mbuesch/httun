@@ -4,10 +4,7 @@
 
 #![forbid(unsafe_code)]
 
-use anyhow::{self as ah, Context as _, format_err as err};
-use socket2::{Domain, Protocol, Socket, Type};
-use std::net::{IpAddr, SocketAddr, TcpStream as StdTcpStream};
-use tokio::net::TcpStream;
+use anyhow::{self as ah, Context as _};
 use tokio_tun::Tun;
 
 const MTU: i32 = 1024 * 62;
@@ -44,40 +41,6 @@ impl TunHandler {
         let count = self.tun.recv(&mut data).await?;
         data.truncate(count);
         Ok(data)
-    }
-
-    pub async fn bind_and_connect_socket(&self, remote_addr: &SocketAddr) -> ah::Result<TcpStream> {
-        log::debug!(
-            "Creating L7 socket and binding to address of TUN interface: {}",
-            self.tun.name()
-        );
-
-        if !remote_addr.is_ipv4() {
-            return Err(err!("Only IPv4 supported."));
-        }
-
-        let local_addr = self.tun.address().context("Get TUN IP address")?;
-
-        let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
-            .context("Create socket")?;
-
-        log::trace!("Binding L7 socket to TUN address: {local_addr}");
-        socket
-            .bind(&SocketAddr::new(IpAddr::V4(local_addr), 0).into())
-            .context("Bind socket to TUN address")?;
-
-        log::trace!("Connecting L7 socket to remote: {remote_addr}");
-        socket
-            .connect(&(*remote_addr).into())
-            .context("Connect TUN socket to remote")?;
-
-        let stream: StdTcpStream = socket.into();
-        stream
-            .set_nonblocking(true)
-            .context("Set socket non-blocking")?;
-        let stream = TcpStream::from_std(stream).context("Create TcpStream")?;
-
-        Ok(stream)
     }
 }
 

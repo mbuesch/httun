@@ -63,7 +63,7 @@ impl Channel {
             tun,
             key,
             test_enabled,
-            l7: L7State::new(),
+            l7: L7State::new(conf),
             ping: PingState::new(),
             session: StdMutex::new(session),
             last_activity: AtomicU64::new(now()),
@@ -145,7 +145,7 @@ impl Channel {
     }
 
     pub async fn l7send(&self, data: &[u8]) -> ah::Result<()> {
-        self.l7.send(&self.tun, data).await
+        self.l7.send(data).await
     }
 
     pub async fn l7recv(&self) -> ah::Result<Vec<u8>> {

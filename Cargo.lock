@@ -872,6 +872,7 @@ dependencies = [
  "memchr",
  "nix 0.30.1",
  "sd-notify",
+ "socket2",
  "tokio",
 ]
 
@@ -882,8 +883,6 @@ dependencies = [
  "anyhow",
  "httun-protocol",
  "log",
- "socket2",
- "tokio",
  "tokio-tun",
 ]
 
