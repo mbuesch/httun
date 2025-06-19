@@ -4,7 +4,7 @@
 
 use crate::time::{now, tdiff};
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_conf::Config;
+use httun_conf::ConfigL7Tunnel;
 use httun_protocol::L7Container;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
@@ -100,7 +100,7 @@ pub struct L7State {
 }
 
 impl L7State {
-    pub fn new(_conf: &Config) -> Self {
+    pub fn new(_conf: &ConfigL7Tunnel) -> Self {
         Self {
             stream: Mutex::new(None),
             last_activity: AtomicU64::new(NO_ACTIVITY),

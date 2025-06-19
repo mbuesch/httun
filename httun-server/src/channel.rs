@@ -7,7 +7,7 @@ use crate::{
     ping::PingState,
     time::{now, tdiff},
 };
-use anyhow::{self as ah, Context as _};
+use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::Config;
 use httun_protocol::{
     Key, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret, secure_random,
@@ -40,17 +40,24 @@ struct SessionState {
 #[derive(Debug)]
 pub struct Channel {
     name: String,
-    tun: TunHandler,
+    tun: Option<TunHandler>,
     key: Key,
     test_enabled: bool,
-    l7: L7State,
+    l7: Option<L7State>,
     ping: PingState,
     session: StdMutex<SessionState>,
     last_activity: AtomicU64,
 }
 
 impl Channel {
-    fn new(conf: &Config, name: &str, tun: TunHandler, key: Key, test_enabled: bool) -> Self {
+    fn new(
+        conf: &Config,
+        name: &str,
+        tun: Option<TunHandler>,
+        l7: Option<L7State>,
+        key: Key,
+        test_enabled: bool,
+    ) -> Self {
         let window_length = conf.parameters().receive().window_length();
         let session = SessionState {
             session: Default::default(),
@@ -63,7 +70,7 @@ impl Channel {
             tun,
             key,
             test_enabled,
-            l7: L7State::new(conf),
+            l7,
             ping: PingState::new(),
             session: StdMutex::new(session),
             last_activity: AtomicU64::new(now()),
@@ -137,23 +144,57 @@ impl Channel {
     }
 
     pub async fn l4send(&self, data: &[u8]) -> ah::Result<()> {
-        self.tun.send(data).await.context("TUN send")
+        if let Some(tun) = &self.tun {
+            tun.send(data).await.context("TUN send")
+        } else {
+            Err(err!(
+                "Can't send data to TUN interface. \
+                 Channel '{}' has no configured tun=... entry.",
+                self.name
+            ))
+        }
     }
 
     pub async fn l4recv(&self) -> ah::Result<Vec<u8>> {
-        self.tun.recv().await.context("TUN receive")
+        if let Some(tun) = &self.tun {
+            tun.recv().await.context("TUN receive")
+        } else {
+            Err(err!(
+                "Can't receive data from TUN interface. \
+                 Channel '{}' has no configured tun=... entry.",
+                self.name
+            ))
+        }
     }
 
     pub async fn l7send(&self, data: &[u8]) -> ah::Result<()> {
-        self.l7.send(data).await
+        if let Some(l7) = &self.l7 {
+            l7.send(data).await
+        } else {
+            Err(err!(
+                "Can't send data to L7 socket. \
+                 Channel '{}' has no configured l7-tunnel... entries.",
+                self.name
+            ))
+        }
     }
 
     pub async fn l7recv(&self) -> ah::Result<Vec<u8>> {
-        self.l7.recv().await
+        if let Some(l7) = &self.l7 {
+            l7.recv().await
+        } else {
+            Err(err!(
+                "Can't receive data from L7 socket. \
+                 Channel '{}' has no configured l7-tunnel... entries.",
+                self.name
+            ))
+        }
     }
 
     pub async fn periodic_work(&self) {
-        self.l7.check_timeout().await;
+        if let Some(l7) = &self.l7 {
+            l7.check_timeout().await;
+        }
     }
 }
 
@@ -166,17 +207,25 @@ impl Channels {
     pub async fn new(conf: Arc<Config>) -> ah::Result<Self> {
         let mut channels = HashMap::new();
 
-        for chan in conf.channels_iter() {
-            log::info!("Active channel: {}", chan.name());
-            let tun = TunHandler::new(chan.tun().unwrap_or("httun"))
-                .await
-                .context("Tun interface init")?;
-            let key = chan.shared_secret();
-            let test_enabled = chan.enable_test();
-            channels.insert(
-                chan.name().to_string(),
-                Arc::new(Channel::new(&conf, chan.name(), tun, key, test_enabled)),
-            );
+        for chan_conf in conf.channels_iter() {
+            let name = chan_conf.name();
+            log::info!("Active channel: {}", name);
+
+            let tun = if let Some(tun_name) = chan_conf.tun() {
+                Some(
+                    TunHandler::new(tun_name)
+                        .await
+                        .context("Tun interface init")?,
+                )
+            } else {
+                None
+            };
+            let l7 = chan_conf.l7_tunnel().map(L7State::new);
+            let key = chan_conf.shared_secret();
+            let test_enabled = chan_conf.enable_test();
+
+            let chan = Channel::new(&conf, name, tun, l7, key, test_enabled);
+            channels.insert(name.to_string(), Arc::new(chan));
         }
         if channels.is_empty() {
             log::warn!("There are no [[channels]] configured in the configuration file!");

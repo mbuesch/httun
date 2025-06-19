@@ -8,6 +8,8 @@ use serde::Deserialize;
 use std::{num::NonZeroUsize, path::Path};
 use subtle::ConstantTimeEq as _;
 
+//TODO rewrite this. This is a mess.
+
 #[derive(Debug, Clone, Eq, Deserialize)]
 pub struct HttpAuth {
     user: String,
@@ -66,24 +68,71 @@ impl ConfigParameters {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct ConfigL7Tunnel {
+    disabled: Option<bool>,
+
+    #[serde(alias = "bind-to-interface")]
+    bind_to_interface: Option<String>,
+
+    #[serde(alias = "address-allowlist")]
+    address_allowlist: Option<Vec<String>>,
+
+    #[serde(alias = "address-denylist")]
+    address_denylist: Option<Vec<String>>,
+}
+
+impl ConfigL7Tunnel {
+    fn disabled(&self) -> bool {
+        self.disabled.unwrap_or(false)
+    }
+
+    pub fn bind_to_interface(&self) -> Option<&str> {
+        self.bind_to_interface.as_deref()
+    }
+
+    pub fn address_allowlist(&self) -> Option<&Vec<String>> {
+        self.address_allowlist.as_ref()
+    }
+
+    pub fn address_denylist(&self) -> Option<&Vec<String>> {
+        self.address_denylist.as_ref()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ConfigChannel {
     disabled: Option<bool>,
+
     #[serde(alias = "enable-test")]
     enable_test: Option<bool>,
+
     urls: Option<Vec<String>>,
+
     name: String,
+
     #[serde(alias = "shared-secret")]
     shared_secret: String,
+
     tun: Option<String>,
+
+    #[serde(alias = "l7-tunnel")]
+    l7_tunnel: Option<ConfigL7Tunnel>,
+
     #[serde(alias = "http-basic-auth")]
     http_basic_auth: Option<HttpAuth>,
+
     #[serde(alias = "http-allow-compression")]
     http_allow_compression: Option<bool>,
+
     #[serde(alias = "https-ignore-tls-errors")]
     https_ignore_tls_errors: Option<bool>,
 }
 
 impl ConfigChannel {
+    fn disabled(&self) -> bool {
+        self.disabled.unwrap_or(false)
+    }
+
     pub fn enable_test(&self) -> bool {
         self.enable_test.unwrap_or(false)
     }
@@ -116,6 +165,12 @@ impl ConfigChannel {
 
     pub fn tun(&self) -> Option<&str> {
         self.tun.as_deref()
+    }
+
+    pub fn l7_tunnel(&self) -> Option<&ConfigL7Tunnel> {
+        self.l7_tunnel
+            .as_ref()
+            .and_then(|l| if l.disabled() { None } else { Some(l) })
     }
 
     pub fn http_basic_auth(&self) -> &Option<HttpAuth> {
@@ -219,7 +274,7 @@ impl<'a> Iterator for ChanIter<'a> {
                 let index = self.index;
                 self.index += 1;
                 let chan = &self.config.channels[index];
-                if !chan.disabled.unwrap_or(false) {
+                if !chan.disabled() {
                     return Some(chan);
                 }
             }
