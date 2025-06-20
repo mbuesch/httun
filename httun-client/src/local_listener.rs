@@ -5,7 +5,10 @@
 use crate::client::{FromHttun, ToHttun};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::{L7Container, Message, MsgType, Operation};
-use httun_util::DisconnectedError;
+use httun_util::{
+    DisconnectedError,
+    net::{tcp_recv_one, tcp_send_all},
+};
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::Arc,
@@ -28,38 +31,26 @@ async fn local_rx(
     target_port: u16,
 ) -> ah::Result<()> {
     loop {
-        stream.readable().await?;
+        let buf = tcp_recv_one(&stream, RX_BUF_SIZE).await?;
 
-        let mut buf = vec![0_u8; RX_BUF_SIZE];
-        match stream.try_read(&mut buf) {
-            Ok(n) => {
-                buf.truncate(n);
+        let disconnected = buf.is_empty();
+        if disconnected {
+            log::trace!("Local socket: Disconnected.");
+        } else {
+            log::trace!(
+                "Sending {} bytes from local socket to httun-server.",
+                buf.len()
+            );
+        }
 
-                if n == 0 {
-                    log::trace!("Local socket: Disconnected.");
-                } else {
-                    log::trace!(
-                        "Sending {} bytes from local socket to httun-server.",
-                        buf.len()
-                    );
-                }
+        let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
+        let msg = Message::new(MsgType::Data, Operation::L7ToSrv, l7.serialize())
+            .context("Make httun packet")?;
 
-                let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
-                let msg = Message::new(MsgType::Data, Operation::L7ToSrv, l7.serialize())
-                    .context("Make httun packet")?;
+        to_httun.send(msg).await?;
 
-                to_httun.send(msg).await?;
-
-                if n == 0 {
-                    return Err(DisconnectedError.into());
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                continue;
-            }
-            Err(e) => {
-                return Err(e.into());
-            }
+        if disconnected {
+            return Err(DisconnectedError.into());
         }
     }
 }
@@ -87,24 +78,7 @@ async fn local_tx(
             "Sending {} bytes from httun-server to local socket.",
             payload.len()
         );
-
-        let mut count = 0;
-        loop {
-            stream.writable().await?;
-            match stream.try_write(&payload[count..]) {
-                Ok(n) => {
-                    count += n;
-                    assert!(count <= payload.len());
-                    if count == payload.len() {
-                        break;
-                    }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
-                Err(e) => {
-                    return Err(e.into());
-                }
-            }
-        }
+        tcp_send_all(&stream, &payload).await?;
     }
 }
 

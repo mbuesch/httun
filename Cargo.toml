@@ -28,6 +28,7 @@ keywords = [ "http", "tun", "network", "tunnel", "encrypted" ]
 [workspace.dependencies]
 aes-gcm = "0.10"
 anyhow = "1"
+arc-swap = "1"
 atoi = "2"
 base64 = "0.22"
 bincode = "2"

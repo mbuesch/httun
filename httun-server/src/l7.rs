@@ -4,22 +4,26 @@
 
 use crate::time::{now, tdiff};
 use anyhow::{self as ah, Context as _, format_err as err};
+use arc_swap::ArcSwapOption;
 use httun_conf::ConfigL7Tunnel;
 use httun_protocol::L7Container;
+use httun_util::net::{tcp_recv_one, tcp_send_all};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     ffi::CString,
     net::{SocketAddr, TcpStream as StdTcpStream},
-    sync::atomic::{self, AtomicU64},
+    sync::{
+        Arc,
+        atomic::{self, AtomicU64},
+    },
+    time::Duration,
 };
-use tokio::{
-    io::{AsyncReadExt as _, AsyncWriteExt as _},
-    net::TcpStream,
-    sync::{Mutex, Notify},
-};
+use tokio::{net::TcpStream, sync::Notify, time::timeout};
 
 const L7_TIMEOUT_S: i64 = 30;
 const RX_BUF_SIZE: usize = 1024 * 64;
+const TX_TIMEOUT: Duration = Duration::from_secs(10);
+const RX_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug)]
 struct L7Socket {
@@ -85,8 +89,12 @@ impl L7Stream {
         &self.remote
     }
 
-    pub fn stream_mut(&mut self) -> &mut TcpStream {
-        &mut self.stream
+    pub async fn send_all(&self, data: &[u8]) -> ah::Result<()> {
+        tcp_send_all(&self.stream, data).await
+    }
+
+    pub async fn recv(&self) -> ah::Result<Vec<u8>> {
+        tcp_recv_one(&self.stream, RX_BUF_SIZE).await
     }
 }
 
@@ -94,36 +102,40 @@ const NO_ACTIVITY: u64 = i64::MAX as u64;
 
 #[derive(Debug)]
 pub struct L7State {
-    stream: Mutex<Option<L7Stream>>,
+    stream: ArcSwapOption<L7Stream>,
     last_activity: AtomicU64,
     connect_notify: Notify,
+    disconnect_notify: Notify,
 }
 
 impl L7State {
     pub fn new(_conf: &ConfigL7Tunnel) -> Self {
         Self {
-            stream: Mutex::new(None),
+            stream: ArcSwapOption::new(None),
             last_activity: AtomicU64::new(NO_ACTIVITY),
             connect_notify: Notify::new(),
+            disconnect_notify: Notify::new(),
         }
     }
 
-    fn disconnect(stream: &mut Option<L7Stream>) {
-        if let Some(stream) = stream.as_ref() {
-            log::trace!("L7 disconnect from {}", stream.remote());
+    fn disconnect(&self) {
+        {
+            let stream = self.stream.load();
+            if let Some(stream) = stream.as_ref() {
+                log::trace!("L7 disconnect from {}", stream.remote());
+            }
         }
-        *stream = None;
+        self.stream.store(None);
+        self.disconnect_notify.notify_one();
     }
 
     pub async fn send(&self, data: &[u8]) -> ah::Result<()> {
-        //TODO we need a timeout.
         let cont = L7Container::deserialize(data).context("Unpack L7 control data")?;
 
-        let mut stream = self.stream.lock().await;
-
         if cont.payload().is_empty() {
-            Self::disconnect(&mut stream);
+            self.disconnect();
         } else {
+            let mut stream = self.stream.load();
             let mut connect = stream.is_none();
             if let Some(stream) = stream.as_ref() {
                 if stream.remote() != cont.addr() {
@@ -131,69 +143,91 @@ impl L7State {
                 }
             }
             if connect {
-                Self::disconnect(&mut stream);
-                log::trace!("L7: Connecting to {}", cont.addr());
-                *stream = Some(L7Stream::connect(*cont.addr())?);
-                log::trace!("L7: Connected to {}", cont.addr());
+                self.disconnect();
+                log::trace!("Connecting to {}", cont.addr());
+                self.stream
+                    .store(Some(Arc::new(L7Stream::connect(*cont.addr())?)));
+                log::trace!("Connected to {}", cont.addr());
+                stream = self.stream.load();
             }
 
-            if let Some(stream) = stream.as_mut() {
-                log::trace!(
-                    "L7: Sending {} bytes to {}",
-                    cont.payload().len(),
-                    cont.addr()
-                );
-                stream
-                    .stream_mut()
-                    .write_all(cont.payload())
-                    .await
-                    .context("L7 stream write")?;
+            if let Some(stream) = stream.as_ref() {
+                log::trace!("Sending {} bytes to {}", cont.payload().len(), cont.addr());
+
+                match timeout(TX_TIMEOUT, stream.send_all(cont.payload())).await {
+                    Err(_) => {
+                        // timeout
+                        return Err(err!("L7 transmit timeout."));
+                    }
+                    Ok(Err(e)) => {
+                        return Err(e.context("L7 stream send_all"));
+                    }
+                    Ok(Ok(_)) => (),
+                }
 
                 self.last_activity.store(now(), atomic::Ordering::Relaxed);
                 if connect {
                     self.connect_notify.notify_one();
                 }
+            } else {
+                return Err(err!("Stream disconnected."));
             }
         }
-
         Ok(())
     }
 
     pub async fn recv(&self) -> ah::Result<Vec<u8>> {
-        //TODO we need a timeout.
-        let mut stream = loop {
-            {
-                let stream = self.stream.lock().await;
-                if stream.is_some() {
-                    break stream;
-                }
+        'a: loop {
+            let stream = self.stream.load();
+            if stream.is_none() {
+                self.connect_notify.notified().await;
+                continue 'a;
             }
-            self.connect_notify.notified().await;
-        };
 
-        if let Some(stream) = stream.as_mut() {
-            log::trace!("L7: Receiving from {} ...", stream.remote());
-            let mut buf = vec![0; RX_BUF_SIZE];
-            let count = stream
-                .stream_mut()
-                .read(&mut buf[..])
-                .await
-                .context("L7 stream read")?;
-            buf.truncate(count);
-            if buf.is_empty() {
-                log::trace!("L7: Remote {} disconnected.", stream.remote());
+            let buf;
+            let remote_addr;
+            if let Some(stream) = stream.as_ref() {
+                remote_addr = *stream.remote();
+                log::trace!("Receiving from {remote_addr} ...");
+
+                buf = tokio::select! {
+                    biased;
+                    _ = self.disconnect_notify.notified() => {
+                        // disconnected
+                        continue 'a;
+                    }
+                    res = timeout(RX_TIMEOUT, stream.recv()) => {
+                        match res {
+                            Err(_) => {
+                                // timeout
+                                continue 'a;
+                            }
+                            Ok(Ok(buf)) => {
+                                // received a buffer
+                                buf
+                            }
+                            Ok(Err(e)) => {
+                                return Err(e.context("L7 stream recv"));
+                            }
+                        }
+                    }
+                }
             } else {
-                log::trace!("L7: Received {} bytes from {}.", buf.len(), stream.remote());
+                return Err(err!("L7 recv: Stream is not connected"));
+            };
+
+            if buf.is_empty() {
+                log::trace!("Remote {remote_addr} disconnected.");
+            } else {
+                log::trace!("Received {} bytes from {}.", buf.len(), remote_addr);
             }
 
             self.last_activity.store(now(), atomic::Ordering::Relaxed);
 
-            let cont = L7Container::new(*stream.remote(), buf);
+            let cont = L7Container::new(remote_addr, buf);
             let data = cont.serialize();
 
-            Ok(data)
-        } else {
-            Err(err!("L7 recv: Stream is not connected"))
+            break Ok(data);
         }
     }
 
@@ -201,8 +235,8 @@ impl L7State {
         if tdiff(now(), self.last_activity.load(atomic::Ordering::Relaxed)) > L7_TIMEOUT_S {
             self.last_activity
                 .store(NO_ACTIVITY, atomic::Ordering::Relaxed);
-            log::debug!("L7: Socket timeout.");
-            Self::disconnect(&mut *self.stream.lock().await);
+            log::debug!("Socket timeout.");
+            self.disconnect();
         }
     }
 }

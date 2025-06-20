@@ -12,7 +12,7 @@ use atoi::atoi;
 use base64::prelude::*;
 use httun_conf::{Config, HttpAuth};
 use httun_protocol::Message;
-use httun_util::{Direction, DisconnectedError, Query, parse_path};
+use httun_util::{Direction, DisconnectedError, Query, net::tcp_send_all, parse_path};
 use memchr::{memchr, memmem::find};
 use std::{
     fmt::Write as _,
@@ -130,26 +130,6 @@ async fn recv_http(stream: &TcpStream) -> ah::Result<RecvBuf> {
     recv_rest(stream, recv_headers(stream).await?).await
 }
 
-async fn send_all(stream: &TcpStream, data: &[u8]) -> ah::Result<()> {
-    let mut count = 0;
-    loop {
-        stream.writable().await?;
-        match stream.try_write(&data[count..]) {
-            Ok(n) => {
-                count += n;
-                debug_assert!(count <= data.len());
-                if count >= data.len() {
-                    return Ok(());
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
-            Err(e) => {
-                return Err(e.into());
-            }
-        }
-    }
-}
-
 async fn send_http_reply(
     stream: &TcpStream,
     payload: &[u8],
@@ -165,9 +145,9 @@ async fn send_http_reply(
     }
     write!(&mut headers, "\r\n")?;
 
-    send_all(stream, headers.as_bytes()).await?;
+    tcp_send_all(stream, headers.as_bytes()).await?;
     if !payload.is_empty() {
-        send_all(stream, payload).await?;
+        tcp_send_all(stream, payload).await?;
     }
     Ok(())
 }
