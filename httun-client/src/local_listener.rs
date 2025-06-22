@@ -87,10 +87,13 @@ pub struct LocalConn {
 }
 
 impl LocalConn {
-    fn new(stream: TcpStream) -> Self {
-        Self {
+    fn new(stream: TcpStream) -> ah::Result<Self> {
+        stream.set_nodelay(true)?;
+        stream.set_linger(None)?;
+        stream.set_ttl(255)?;
+        Ok(Self {
             stream: Arc::new(stream),
-        }
+        })
     }
 
     pub async fn handle_packets(
@@ -129,7 +132,7 @@ impl LocalListener {
 
     pub async fn accept(&self) -> ah::Result<LocalConn> {
         let (stream, _addr) = self.listener.accept().await?;
-        Ok(LocalConn::new(stream))
+        LocalConn::new(stream)
     }
 }
 
