@@ -118,10 +118,9 @@ impl L7State {
         }
     }
 
-    fn disconnect(&self) {
-        {
-            let stream = self.stream.load();
-            if let Some(stream) = stream.as_ref() {
+    fn disconnect(&self, quiet: bool) {
+        if !quiet && log::log_enabled!(log::Level::Trace) {
+            if let Some(stream) = self.stream.load().as_ref() {
                 log::trace!("L7 disconnect from {}", stream.remote());
             }
         }
@@ -133,7 +132,7 @@ impl L7State {
         let cont = L7Container::deserialize(data).context("Unpack L7 control data")?;
 
         if cont.payload().is_empty() {
-            self.disconnect();
+            self.disconnect(false);
         } else {
             let mut stream = self.stream.load();
             let mut connect = stream.is_none();
@@ -143,7 +142,8 @@ impl L7State {
                 }
             }
             if connect {
-                self.disconnect();
+                drop(stream);
+                self.disconnect(false);
                 log::trace!("Connecting to {}", cont.addr());
                 self.stream
                     .store(Some(Arc::new(L7Stream::connect(*cont.addr())?)));
@@ -164,13 +164,14 @@ impl L7State {
                     }
                     Ok(Ok(_)) => (),
                 }
-
-                self.last_activity.store(now(), atomic::Ordering::Relaxed);
-                if connect {
-                    self.connect_notify.notify_one();
-                }
             } else {
                 return Err(err!("Stream disconnected."));
+            }
+            drop(stream);
+
+            self.last_activity.store(now(), atomic::Ordering::Relaxed);
+            if connect {
+                self.connect_notify.notify_one();
             }
         }
         Ok(())
@@ -180,6 +181,7 @@ impl L7State {
         'a: loop {
             let stream = self.stream.load();
             if stream.is_none() {
+                drop(stream);
                 self.connect_notify.notified().await;
                 continue 'a;
             }
@@ -188,7 +190,7 @@ impl L7State {
             let remote_addr;
             if let Some(stream) = stream.as_ref() {
                 remote_addr = *stream.remote();
-                log::trace!("Receiving from {remote_addr} ...");
+                log::trace!("Trying to receive from {remote_addr} ...");
 
                 buf = tokio::select! {
                     biased;
@@ -215,9 +217,11 @@ impl L7State {
             } else {
                 return Err(err!("L7 recv: Stream is not connected"));
             };
+            drop(stream);
 
             if buf.is_empty() {
                 log::trace!("Remote {remote_addr} disconnected.");
+                self.disconnect(true);
             } else {
                 log::trace!("Received {} bytes from {}.", buf.len(), remote_addr);
             }
@@ -236,7 +240,7 @@ impl L7State {
             self.last_activity
                 .store(NO_ACTIVITY, atomic::Ordering::Relaxed);
             log::debug!("Socket timeout.");
-            self.disconnect();
+            self.disconnect(false);
         }
     }
 }
