@@ -51,17 +51,19 @@ pub async fn run_mode_socket(
     // Spawn task: Local socket handler.
     task::spawn({
         async move {
-            let conn_semaphore = Semaphore::new(1);
+            let conn_semaphore = Arc::new(Semaphore::new(1));
 
             loop {
                 let exit_tx = Arc::clone(&exit_tx);
                 let to_httun_tx = Arc::clone(&to_httun_tx);
                 let from_httun_rx = Arc::clone(&from_httun_rx);
+                let conn_semaphore = Arc::clone(&conn_semaphore);
 
                 match local.accept().await {
                     Ok(conn) => {
+                        log::trace!("New connection on local socket.");
                         // Socket connection handler.
-                        if let Ok(_permit) = conn_semaphore.acquire().await {
+                        if let Ok(permit) = conn_semaphore.acquire_owned().await {
                             task::spawn(async move {
                                 match conn
                                     .handle_packets(
@@ -80,6 +82,7 @@ pub async fn run_mode_socket(
                                     }
                                     Ok(()) => (),
                                 }
+                                drop(permit);
                             });
                         }
                     }

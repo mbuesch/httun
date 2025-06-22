@@ -13,7 +13,11 @@ use std::sync::{
     Arc, RwLock as StdRwLock,
     atomic::{self, AtomicBool},
 };
-use tokio::{sync::Mutex, task, time::timeout};
+use tokio::{
+    sync::{Mutex, OwnedSemaphorePermit},
+    task,
+    time::timeout,
+};
 
 #[derive(Debug)]
 pub struct ProtocolHandler {
@@ -303,7 +307,12 @@ impl ProtocolManager {
         })
     }
 
-    pub async fn spawn(self: &Arc<Self>, comm: CommBackend, channels: Arc<Channels>) {
+    pub async fn spawn(
+        self: &Arc<Self>,
+        comm: CommBackend,
+        channels: Arc<Channels>,
+        permit: OwnedSemaphorePermit,
+    ) {
         let prot = Arc::new(ProtocolHandler::new(Arc::clone(self), comm, channels).await);
 
         let mut insts = self.insts.lock().await;
@@ -324,6 +333,7 @@ impl ProtocolManager {
                 }
                 prot.set_dead();
                 this.periodic_work().await;
+                drop(permit);
             }
         });
 

@@ -297,15 +297,17 @@ async fn async_main() -> ah::Result<()> {
 
     // Spawn task: Socket handler.
     task::spawn(async move {
-        let conn_semaphore = Semaphore::new(MAX_NUM_CONNECTIONS);
+        let conn_semaphore = Arc::new(Semaphore::new(MAX_NUM_CONNECTIONS));
         loop {
+            let conn_semaphore = Arc::clone(&conn_semaphore);
             match fcgi.accept().await {
                 Ok(mut conn) => {
-                    if let Ok(_permit) = conn_semaphore.acquire().await {
+                    if let Ok(permit) = conn_semaphore.acquire_owned().await {
                         task::spawn(async move {
                             if let Err(e) = conn.handle(fcgi_handler).await {
                                 eprintln!("FCGI conn error: {e:?}");
                             }
+                            drop(permit);
                         });
                     }
                 }

@@ -215,16 +215,19 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             let protman = Arc::clone(&protman);
 
             async move {
-                let conn_semaphore = Semaphore::new(opts.num_connections);
+                let conn_semaphore = Arc::new(Semaphore::new(opts.num_connections));
                 loop {
                     let exit_tx = Arc::clone(&exit_tx);
                     let channels = Arc::clone(&channels);
                     let protman = Arc::clone(&protman);
+                    let conn_semaphore = Arc::clone(&conn_semaphore);
 
                     match unix_sock.accept().await {
                         Ok(conn) => {
-                            if let Ok(_permit) = conn_semaphore.acquire().await {
-                                protman.spawn(CommBackend::new_unix(conn), channels).await;
+                            if let Ok(permit) = conn_semaphore.acquire_owned().await {
+                                protman
+                                    .spawn(CommBackend::new_unix(conn), channels, permit)
+                                    .await;
                             }
                         }
                         Err(e) => {
@@ -245,16 +248,19 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             let protman = Arc::clone(&protman);
 
             async move {
-                let conn_semaphore = Semaphore::new(opts.num_connections);
+                let conn_semaphore = Arc::new(Semaphore::new(opts.num_connections));
                 loop {
                     let channels = Arc::clone(&channels);
                     let protman = Arc::clone(&protman);
+                    let conn_semaphore = Arc::clone(&conn_semaphore);
 
                     match http_srv.accept().await {
                         Ok(conn) => {
-                            if let Ok(_permit) = conn_semaphore.acquire().await {
+                            if let Ok(permit) = conn_semaphore.acquire_owned().await {
                                 conn.spawn_rx_task().await;
-                                protman.spawn(CommBackend::new_http(conn), channels).await;
+                                protman
+                                    .spawn(CommBackend::new_http(conn), channels, permit)
+                                    .await;
                             }
                         }
                         Err(e) => {
