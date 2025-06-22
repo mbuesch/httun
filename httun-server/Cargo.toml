@@ -18,6 +18,7 @@ arc-swap = { workspace = true }
 atoi = { workspace = true }
 base64 = { workspace = true }
 clap = { workspace = true }
+console-subscriber = { workspace = true }
 env_logger = { workspace = true }
 httun-conf = { workspace = true }
 httun-protocol = { workspace = true }
@@ -27,7 +28,7 @@ libc = { workspace = true }
 log = { workspace = true }
 memchr = { workspace = true }
 socket2 = { workspace = true }
-tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros" ] }
+tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros", "tracing" ] }
 
 [target.'cfg(any(target_os="linux", target_os="android"))'.dependencies]
 httun-tun = { workspace = true }

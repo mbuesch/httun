@@ -15,6 +15,7 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+console-subscriber = { workspace = true }
 env_logger = { workspace = true }
 hickory-resolver = { workspace = true, features = [ "system-config", "tokio", "tls-ring", "https-ring", "quic-ring", "webpki-roots", "dnssec-ring" ] }
 httun-conf = { workspace = true }
@@ -22,7 +23,7 @@ httun-protocol = { workspace = true }
 httun-util = { workspace = true }
 log = { workspace = true }
 reqwest = { workspace = true, features = [ "http2", "rustls-tls", "gzip", "brotli", "zstd", "deflate", "charset", "hickory-dns" ] }
-tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros" ] }
+tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros", "tracing" ] }
 
 [target.'cfg(any(target_os="linux", target_os="android"))'.dependencies]
 httun-tun = { workspace = true }

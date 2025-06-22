@@ -287,6 +287,10 @@ fn main() -> ah::Result<()> {
             .write_style_or("HTTUN_LOG_STYLE", "auto"),
     );
 
+    if log::log_enabled!(log::Level::Trace) {
+        console_subscriber::init();
+    }
+
     let opts = Arc::new(Opts::parse());
 
     if opts.version {

@@ -16,17 +16,17 @@ pub enum CommRxMsg {
 
 #[derive(Debug)]
 pub enum CommBackend {
-    Unix(UnixConn),
-    Http(HttpConn),
+    Unix(Box<UnixConn>),
+    Http(Box<HttpConn>),
 }
 
 impl CommBackend {
     pub fn new_unix(conn: UnixConn) -> Self {
-        Self::Unix(conn)
+        Self::Unix(Box::new(conn))
     }
 
     pub fn new_http(conn: HttpConn) -> Self {
-        Self::Http(conn)
+        Self::Http(Box::new(conn))
     }
 
     pub fn chan_name(&self) -> Option<String> {
