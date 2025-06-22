@@ -40,10 +40,10 @@ struct SessionState {
 #[derive(Debug)]
 pub struct Channel {
     name: String,
-    tun: Option<TunHandler>,
+    l4: Option<TunHandler>,
+    l7: Option<L7State>,
     key: Key,
     test_enabled: bool,
-    l7: Option<L7State>,
     ping: PingState,
     session: StdMutex<SessionState>,
     last_activity: AtomicU64,
@@ -53,7 +53,7 @@ impl Channel {
     fn new(
         conf: &Config,
         name: &str,
-        tun: Option<TunHandler>,
+        l4: Option<TunHandler>,
         l7: Option<L7State>,
         key: Key,
         test_enabled: bool,
@@ -67,10 +67,10 @@ impl Channel {
         };
         Self {
             name: name.to_string(),
-            tun,
+            l4,
+            l7,
             key,
             test_enabled,
-            l7,
             ping: PingState::new(),
             session: StdMutex::new(session),
             last_activity: AtomicU64::new(now()),
@@ -144,8 +144,8 @@ impl Channel {
     }
 
     pub async fn l4send(&self, data: &[u8]) -> ah::Result<()> {
-        if let Some(tun) = &self.tun {
-            tun.send(data).await.context("TUN send")
+        if let Some(l4) = &self.l4 {
+            l4.send(data).await.context("TUN/L4 send")
         } else {
             Err(err!(
                 "Can't send data to TUN interface. \
@@ -156,8 +156,8 @@ impl Channel {
     }
 
     pub async fn l4recv(&self) -> ah::Result<Vec<u8>> {
-        if let Some(tun) = &self.tun {
-            tun.recv().await.context("TUN receive")
+        if let Some(l4) = &self.l4 {
+            l4.recv().await.context("TUN/L4 receive")
         } else {
             Err(err!(
                 "Can't receive data from TUN interface. \
@@ -169,7 +169,7 @@ impl Channel {
 
     pub async fn l7send(&self, data: &[u8]) -> ah::Result<()> {
         if let Some(l7) = &self.l7 {
-            l7.send(data).await
+            l7.send(data).await.context("L7 socket send")
         } else {
             Err(err!(
                 "Can't send data to L7 socket. \
@@ -181,7 +181,7 @@ impl Channel {
 
     pub async fn l7recv(&self) -> ah::Result<Vec<u8>> {
         if let Some(l7) = &self.l7 {
-            l7.recv().await
+            l7.recv().await.context("L7 socket receive")
         } else {
             Err(err!(
                 "Can't receive data from L7 socket. \
