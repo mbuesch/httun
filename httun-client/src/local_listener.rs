@@ -36,6 +36,7 @@ async fn local_rx(
         let disconnected = buf.is_empty();
         if disconnected {
             log::trace!("Local socket: Disconnected.");
+            return Err(DisconnectedError.into());
         } else {
             log::trace!(
                 "Sending {} bytes from local socket to httun-server.",
@@ -107,16 +108,26 @@ impl LocalConn {
             let stream = Arc::clone(&self.stream);
             local_rx(stream, to_httun, target_addr, target_port)
         });
+        let rx_task_handle = rx_task.abort_handle();
 
         let tx_task = task::spawn({
             let stream = Arc::clone(&self.stream);
             local_tx(stream, from_httun, target_addr, target_port)
         });
+        let tx_task_handle = tx_task.abort_handle();
 
         tokio::select! {
-            ret = rx_task => ret.context("Local TCP RX")?,
-            ret = tx_task => ret.context("Local TCP TX")?,
+            biased;
+            ret = rx_task => {
+                tx_task_handle.abort();
+                ret.context("Local TCP RX")??;
+            }
+            ret = tx_task => {
+                rx_task_handle.abort();
+                ret.context("Local TCP TX")??;
+            }
         }
+        Ok(())
     }
 }
 

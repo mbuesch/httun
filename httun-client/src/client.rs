@@ -423,6 +423,7 @@ impl HttunClient {
             let key = Arc::clone(&self.key);
             async move { direction_r(r, from_httun, &user_agent, &key, session_secret).await }
         });
+        let r_task_handle = r_task.abort_handle();
 
         let w_task = task::spawn({
             let w = Arc::clone(&self.w);
@@ -430,11 +431,20 @@ impl HttunClient {
             let key = Arc::clone(&self.key);
             async move { direction_w(w, to_httun, &user_agent, &key, session_secret).await }
         });
+        let w_task_handle = r_task.abort_handle();
 
         tokio::select! {
-            ret = r_task => ret.context("httun HTTP-r")?,
-            ret = w_task => ret.context("httun HTTP-w")?,
+            biased;
+            ret = r_task => {
+                w_task_handle.abort();
+                ret.context("httun HTTP-r")??;
+            }
+            ret = w_task => {
+                r_task_handle.abort();
+                ret.context("httun HTTP-w")??;
+            }
         }
+        Ok(())
     }
 }
 
