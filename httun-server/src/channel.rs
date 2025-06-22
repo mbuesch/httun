@@ -209,7 +209,7 @@ impl Channels {
 
         for chan_conf in conf.channels_iter() {
             let name = chan_conf.name();
-            log::info!("Active channel: {}", name);
+            log::info!("Active channel: {name}");
 
             let tun = if let Some(tun_name) = chan_conf.tun() {
                 Some(
