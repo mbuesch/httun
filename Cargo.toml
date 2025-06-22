@@ -57,12 +57,13 @@ httun-unix-protocol = { path = "./httun-unix-protocol", version = "0.1" }
 httun-util = { path = "./httun-util", version = "0.1" }
 
 [profile.dev]
-#debug = "limited"
-debug = "line-tables-only"
+debug = "limited"
+panic = "abort"
 
 [profile.release]
-#lto = "fat"
+lto = "fat"
 panic = "abort"
 overflow-checks = true
+codegen-units = 1
 
 # vim: ts=4 sw=4 expandtab
