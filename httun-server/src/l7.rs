@@ -8,10 +8,11 @@ use arc_swap::ArcSwapOption;
 use httun_conf::ConfigL7Tunnel;
 use httun_protocol::L7Container;
 use httun_util::net::{tcp_recv_one, tcp_send_all};
+use ipnet::IpNet;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     ffi::CString,
-    net::{SocketAddr, TcpStream as StdTcpStream},
+    net::{IpAddr, SocketAddr, TcpStream as StdTcpStream},
     sync::{
         Arc,
         atomic::{self, AtomicU64},
@@ -24,6 +25,66 @@ const L7_TIMEOUT_S: i64 = 30;
 const RX_BUF_SIZE: usize = 1024 * 64;
 const TX_TIMEOUT: Duration = Duration::from_secs(10);
 const RX_TIMEOUT: Duration = Duration::from_secs(3);
+
+#[derive(Debug)]
+struct NetList {
+    list: Option<Vec<IpNet>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NetListCheck {
+    NoList,
+    Contains,
+    Absent,
+}
+
+impl NetList {
+    pub fn new(nets: Option<&[String]>) -> ah::Result<Self> {
+        if let Some(nets) = nets {
+            let mut list = Vec::with_capacity(nets.len());
+            for net in nets {
+                let net = net.trim();
+                match net.parse::<IpAddr>() {
+                    Ok(addr) => {
+                        let prefix_len = match addr {
+                            IpAddr::V4(_) => 32,
+                            IpAddr::V6(_) => 128,
+                        };
+                        list.push(IpNet::new(addr, prefix_len)?);
+                    }
+                    Err(_) => match net.parse::<IpNet>() {
+                        Ok(net) => {
+                            list.push(net);
+                        }
+                        Err(e) => {
+                            return Err(err!(
+                                "Can't parse net address '{net}' from address list: {e}"
+                            ));
+                        }
+                    },
+                }
+            }
+            Ok(Self { list: Some(list) })
+        } else {
+            Ok(Self { list: None })
+        }
+    }
+
+    #[must_use]
+    pub fn check(&self, sock_addr: &SocketAddr) -> NetListCheck {
+        if let Some(list) = &self.list {
+            let addr = sock_addr.ip();
+            for net in list {
+                if net.contains(&addr) {
+                    return NetListCheck::Contains;
+                }
+            }
+            NetListCheck::Absent
+        } else {
+            NetListCheck::NoList
+        }
+    }
+}
 
 #[derive(Debug)]
 struct L7Socket {
@@ -78,10 +139,8 @@ struct L7Stream {
 }
 
 impl L7Stream {
-    pub fn connect(remote: SocketAddr) -> ah::Result<Self> {
-        //TODO apply allowlist/denylist filtering based on address.
-        //TODO bind_device
-        let stream = L7Socket::connect(None, &remote)?.try_into()?;
+    pub fn connect(conf: &ConfigL7Tunnel, remote: SocketAddr) -> ah::Result<Self> {
+        let stream = L7Socket::connect(conf.bind_to_interface(), &remote)?.try_into()?;
         Ok(Self { remote, stream })
     }
 
@@ -102,20 +161,28 @@ const NO_ACTIVITY: u64 = i64::MAX as u64;
 
 #[derive(Debug)]
 pub struct L7State {
+    conf: ConfigL7Tunnel,
     stream: ArcSwapOption<L7Stream>,
     last_activity: AtomicU64,
     connect_notify: Notify,
     disconnect_notify: Notify,
+    allowlist: NetList,
+    denylist: NetList,
 }
 
 impl L7State {
-    pub fn new(_conf: &ConfigL7Tunnel) -> Self {
-        Self {
+    pub fn new(conf: &ConfigL7Tunnel) -> ah::Result<Self> {
+        Ok(Self {
+            conf: conf.clone(),
             stream: ArcSwapOption::new(None),
             last_activity: AtomicU64::new(NO_ACTIVITY),
             connect_notify: Notify::new(),
             disconnect_notify: Notify::new(),
-        }
+            allowlist: NetList::new(conf.address_allowlist())
+                .context("Parse config l7-tunnel.address-allowlist")?,
+            denylist: NetList::new(conf.address_denylist())
+                .context("Parse config l7-tunnel.address-denylist")?,
+        })
     }
 
     fn disconnect(&self, quiet: bool) {
@@ -130,6 +197,31 @@ impl L7State {
 
     pub async fn send(&self, data: &[u8]) -> ah::Result<()> {
         let cont = L7Container::deserialize(data).context("Unpack L7 control data")?;
+        let addr = cont.addr();
+
+        match self.denylist.check(addr) {
+            NetListCheck::NoList => {
+                // No denylist. Allow address.
+            }
+            NetListCheck::Contains => {
+                return Err(err!("l7-tunnel.address-denylist contains {addr}"));
+            }
+            NetListCheck::Absent => {
+                // Address is not in denylist. Allow address.
+            }
+        }
+
+        match self.allowlist.check(addr) {
+            NetListCheck::NoList => {
+                // No allowlist. Allow address.
+            }
+            NetListCheck::Contains => {
+                // Address is in allowlist. Allow address.
+            }
+            NetListCheck::Absent => {
+                return Err(err!("l7-tunnel.address-allowlist does not contain {addr}"));
+            }
+        }
 
         if cont.payload().is_empty() {
             self.disconnect(false);
@@ -137,22 +229,22 @@ impl L7State {
             let mut stream = self.stream.load();
             let mut connect = stream.is_none();
             if let Some(stream) = stream.as_ref() {
-                if stream.remote() != cont.addr() {
+                if stream.remote() != addr {
                     connect = true;
                 }
             }
             if connect {
                 drop(stream);
                 self.disconnect(false);
-                log::trace!("Connecting to {}", cont.addr());
+                log::trace!("Connecting to {}", addr);
                 self.stream
-                    .store(Some(Arc::new(L7Stream::connect(*cont.addr())?)));
-                log::trace!("Connected to {}", cont.addr());
+                    .store(Some(Arc::new(L7Stream::connect(&self.conf, *addr)?)));
+                log::trace!("Connected to {}", addr);
                 stream = self.stream.load();
             }
 
             if let Some(stream) = stream.as_ref() {
-                log::trace!("Sending {} bytes to {}", cont.payload().len(), cont.addr());
+                log::trace!("Sending {} bytes to {}", cont.payload().len(), addr);
 
                 match timeout(TX_TIMEOUT, stream.send_all(cont.payload())).await {
                     Err(_) => {

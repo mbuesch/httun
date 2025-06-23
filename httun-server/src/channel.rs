@@ -220,7 +220,11 @@ impl Channels {
             } else {
                 None
             };
-            let l7 = chan_conf.l7_tunnel().map(L7State::new);
+            let l7 = if let Some(l7_conf) = chan_conf.l7_tunnel() {
+                Some(L7State::new(l7_conf)?)
+            } else {
+                None
+            };
             let key = chan_conf.shared_secret();
             let test_enabled = chan_conf.enable_test();
 

@@ -24,6 +24,7 @@ httun-conf = { workspace = true }
 httun-protocol = { workspace = true }
 httun-unix-protocol = { workspace = true }
 httun-util = { workspace = true }
+ipnet = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
 memchr = { workspace = true }

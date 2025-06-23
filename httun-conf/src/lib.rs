@@ -90,12 +90,12 @@ impl ConfigL7Tunnel {
         self.bind_to_interface.as_deref()
     }
 
-    pub fn address_allowlist(&self) -> Option<&Vec<String>> {
-        self.address_allowlist.as_ref()
+    pub fn address_allowlist(&self) -> Option<&[String]> {
+        self.address_allowlist.as_deref()
     }
 
-    pub fn address_denylist(&self) -> Option<&Vec<String>> {
-        self.address_denylist.as_ref()
+    pub fn address_denylist(&self) -> Option<&[String]> {
+        self.address_denylist.as_deref()
     }
 }
 
