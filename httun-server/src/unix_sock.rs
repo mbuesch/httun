@@ -45,7 +45,7 @@ impl UnixConn {
         }
         this.name = msg.chan_name().to_string();
 
-        log::info!("Connected: {}", this.name);
+        log::debug!("Connected: {}", this.name);
 
         Ok(this)
     }
