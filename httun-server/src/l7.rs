@@ -236,10 +236,10 @@ impl L7State {
             if connect {
                 drop(stream);
                 self.disconnect(false);
-                log::trace!("Connecting to {}", addr);
+                log::trace!("Connecting to {addr}");
                 self.stream
                     .store(Some(Arc::new(L7Stream::connect(&self.conf, *addr)?)));
-                log::trace!("Connected to {}", addr);
+                log::trace!("Connected to {addr}");
                 stream = self.stream.load();
             }
 
