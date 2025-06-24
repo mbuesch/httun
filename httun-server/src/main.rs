@@ -10,22 +10,16 @@ mod ping;
 mod protocol;
 mod systemd;
 mod time;
-mod uid_gid;
 mod unix_sock;
 
 use crate::{
-    channel::Channels,
-    comm_backend::CommBackend,
-    http_server::HttpServer,
-    protocol::ProtocolManager,
-    systemd::systemd_notify_ready,
-    uid_gid::{os_get_gid, os_get_uid},
-    unix_sock::UnixSock,
+    channel::Channels, comm_backend::CommBackend, http_server::HttpServer,
+    protocol::ProtocolManager, systemd::systemd_notify_ready, unix_sock::UnixSock,
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::Parser;
 use httun_conf::Config;
-use nix::unistd::{Gid, Uid, setgid, setuid};
+use nix::unistd::{Group, User, setgid, setuid};
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
     path::Path,
@@ -48,22 +42,37 @@ static WEBSERVER_GID: AtomicU32 = AtomicU32::new(u32::MAX);
 fn drop_privileges() -> ah::Result<()> {
     log::info!("Dropping root privileges.");
 
-    let uid = Uid::from_raw(os_get_uid("httun").context("Get httun uid from /etc/passwd")?);
-    let gid = Gid::from_raw(os_get_gid("httun").context("Get httun gid from /etc/group")?);
+    let user_name = "httun";
+    let group_name = "httun";
 
-    setgid(gid).context("Drop privileges: Set httun group id")?;
-    setuid(uid).context("Drop privileges: Set httun user id")?;
+    let user = User::from_name(user_name)
+        .context("Get httun uid from /etc/passwd")?
+        .ok_or_else(|| err!("User '{user_name}' not found in /etc/passwd"))?;
+    let group = Group::from_name(group_name)
+        .context("Get httun gid from /etc/group")?
+        .ok_or_else(|| err!("Group '{group_name}' not found in /etc/group"))?;
+
+    setgid(group.gid).context("Drop privileges: Set httun group id")?;
+    setuid(user.uid).context("Drop privileges: Set httun user id")?;
 
     Ok(())
 }
 
 /// Get web server UID and GID.
 fn get_webserver_uid_gid(opts: &Opts) -> ah::Result<()> {
-    let user = &opts.webserver_user;
-    let group = &opts.webserver_group;
+    let user_name = &opts.webserver_user;
+    let group_name = &opts.webserver_group;
 
-    let uid = os_get_uid(user).context("Get web server uid from /etc/passwd")?;
-    let gid = os_get_gid(group).context("Get web server gid from /etc/group")?;
+    let uid = User::from_name(user_name)
+        .context("Get web server uid from /etc/passwd")?
+        .ok_or_else(|| err!("User '{user_name}' not found in /etc/passwd"))?
+        .uid
+        .as_raw();
+    let gid = Group::from_name(group_name)
+        .context("Get web server gid from /etc/group")?
+        .ok_or_else(|| err!("Group '{group_name}' not found in /etc/group"))?
+        .gid
+        .as_raw();
 
     WEBSERVER_UID.store(uid, atomic::Ordering::Relaxed);
     WEBSERVER_GID.store(gid, atomic::Ordering::Relaxed);
