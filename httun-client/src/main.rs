@@ -66,6 +66,12 @@ struct Opts {
     )]
     config: String,
 
+    /// Enable `tokio-console` tracing support.
+    ///
+    /// See https://crates.io/crates/tokio-console
+    #[arg(long)]
+    tokio_console: bool,
+
     /// Show version information and exit.
     #[arg(long, short = 'v')]
     version: bool,
@@ -287,11 +293,11 @@ fn main() -> ah::Result<()> {
             .write_style_or("HTTUN_LOG_STYLE", "auto"),
     );
 
-    if log::log_enabled!(log::Level::Trace) {
+    let opts = Arc::new(Opts::parse());
+
+    if opts.tokio_console {
         console_subscriber::init();
     }
-
-    let opts = Arc::new(Opts::parse());
 
     if opts.version {
         println!("httun version {}", env!("CARGO_PKG_VERSION"));
