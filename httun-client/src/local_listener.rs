@@ -72,14 +72,13 @@ async fn local_tx(
 
         if payload.is_empty() {
             log::trace!("Local socket: Httun disconnected.");
-            return Err(DisconnectedError.into());
+        } else {
+            log::trace!(
+                "Sending {} bytes from httun-server to local socket.",
+                payload.len()
+            );
+            tcp_send_all(&stream, &payload).await?;
         }
-
-        log::trace!(
-            "Sending {} bytes from httun-server to local socket.",
-            payload.len()
-        );
-        tcp_send_all(&stream, &payload).await?;
     }
 }
 
