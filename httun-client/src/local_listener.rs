@@ -7,7 +7,7 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::{L7Container, Message, MsgType, Operation};
 use httun_util::{
     DisconnectedError,
-    net::{tcp_recv_one, tcp_send_all},
+    net::{tcp_recv_until_blocking, tcp_send_all},
 };
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
@@ -31,7 +31,7 @@ async fn local_rx(
     target_port: u16,
 ) -> ah::Result<()> {
     loop {
-        let buf = tcp_recv_one(&stream, RX_BUF_SIZE).await?;
+        let buf = tcp_recv_until_blocking(&stream, RX_BUF_SIZE).await?;
 
         let disconnected = buf.is_empty();
         if disconnected {

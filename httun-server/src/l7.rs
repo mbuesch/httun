@@ -7,7 +7,7 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use arc_swap::ArcSwapOption;
 use httun_conf::ConfigL7Tunnel;
 use httun_protocol::L7Container;
-use httun_util::net::{tcp_recv_one, tcp_send_all};
+use httun_util::net::{tcp_recv_until_blocking, tcp_send_all};
 use ipnet::IpNet;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
@@ -153,7 +153,7 @@ impl L7Stream {
     }
 
     pub async fn recv(&self) -> ah::Result<Vec<u8>> {
-        tcp_recv_one(&self.stream, RX_BUF_SIZE).await
+        tcp_recv_until_blocking(&self.stream, RX_BUF_SIZE).await
     }
 }
 

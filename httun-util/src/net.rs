@@ -5,17 +5,21 @@
 use anyhow as ah;
 use tokio::net::TcpStream;
 
-pub async fn tcp_recv_one(stream: &TcpStream, buf_size: usize) -> ah::Result<Vec<u8>> {
+pub async fn tcp_recv_until_blocking(stream: &TcpStream, buf_size: usize) -> ah::Result<Vec<u8>> {
+    stream.readable().await?;
+    let mut count = 0;
+    let mut buf = vec![0_u8; buf_size];
     loop {
-        stream.readable().await?;
-        let mut buf = vec![0_u8; buf_size];
-        match stream.try_read(&mut buf) {
+        match stream.try_read(&mut buf[count..]) {
             Ok(n) => {
-                buf.truncate(n);
-                break Ok(buf);
+                count += n;
+                if count >= buf.len() {
+                    break Ok(buf);
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                continue;
+                buf.truncate(count);
+                break Ok(buf);
             }
             Err(e) => {
                 break Err(e.into());
