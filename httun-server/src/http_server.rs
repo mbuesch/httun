@@ -189,10 +189,10 @@ fn find_hdr<'a>(buf: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
     let mut tail = buf;
     while let Some((h, t)) = next_hdr(tail) {
         tail = t;
-        if let Some((n, v)) = split_hdr(h) {
-            if n.eq_ignore_ascii_case(name) {
-                return Some(v);
-            }
+        if let Some((n, v)) = split_hdr(h)
+            && n.eq_ignore_ascii_case(name)
+        {
+            return Some(v);
         }
     }
     None
@@ -273,12 +273,11 @@ pub struct HttunHttpReq {
 
 impl HttunHttpReq {
     pub fn extract_body(&mut self) {
-        if self.request == HttpRequest::Get {
-            if let Some(qmsg) = self.query.get("m") {
-                if let Ok(qmsg) = Message::decode_b64u(qmsg) {
-                    self.body = qmsg;
-                }
-            }
+        if self.request == HttpRequest::Get
+            && let Some(qmsg) = self.query.get("m")
+            && let Ok(qmsg) = Message::decode_b64u(qmsg)
+        {
+            self.body = qmsg;
         }
     }
 
@@ -303,10 +302,10 @@ impl HttunHttpReq {
                 break tail;
             }
 
-            if let Some((n, v)) = split_hdr(h) {
-                if n.eq_ignore_ascii_case(b"Authorization") {
-                    authorization = decode_auth_header(v);
-                }
+            if let Some((n, v)) = split_hdr(h)
+                && n.eq_ignore_ascii_case(b"Authorization")
+            {
+                authorization = decode_auth_header(v);
             }
         }
         .to_vec();

@@ -146,10 +146,10 @@ pub async fn resolve(host: &str, cfg: &ResConf) -> ah::Result<IpAddr> {
     }
 
     if cfg.srv.system {
-        if let Ok(builder) = TokioResolver::builder_tokio() {
-            if let Ok(lookup) = builder.build().lookup(host, record_type).await {
-                return get_first_result(lookup, host, cfg.mode);
-            }
+        if let Ok(builder) = TokioResolver::builder_tokio()
+            && let Ok(lookup) = builder.build().lookup(host, record_type).await
+        {
+            return get_first_result(lookup, host, cfg.mode);
         }
         #[cfg(not(target_os = "android"))]
         eprintln!(

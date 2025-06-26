@@ -218,20 +218,17 @@ impl Config {
             }
 
             // Compare shared-secret to http-password.
-            if let Some(http_basic_auth) = chan.http_basic_auth() {
-                if let Some(password) = http_basic_auth.password() {
-                    if !password.is_empty()
-                        && password.trim().to_lowercase()
-                            == chan.shared_secret.trim().to_lowercase()
-                    {
-                        return Err(err!(
-                            "The values of shared-secret and http_basic_auth.password \
+            if let Some(http_basic_auth) = chan.http_basic_auth()
+                && let Some(password) = http_basic_auth.password()
+                && !password.is_empty()
+                && password.trim().to_lowercase() == chan.shared_secret.trim().to_lowercase()
+            {
+                return Err(err!(
+                    "The values of shared-secret and http_basic_auth.password \
                             are the same. Don't do that! \
                             This destroys httun's security. \
                             Please choose a unique http password."
-                        ));
-                    }
-                }
+                ));
             }
         }
         Ok(())

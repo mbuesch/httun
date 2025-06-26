@@ -186,10 +186,11 @@ impl L7State {
     }
 
     fn disconnect(&self, quiet: bool) {
-        if !quiet && log::log_enabled!(log::Level::Trace) {
-            if let Some(stream) = self.stream.load().as_ref() {
-                log::trace!("L7 disconnect from {}", stream.remote());
-            }
+        if !quiet
+            && log::log_enabled!(log::Level::Trace)
+            && let Some(stream) = self.stream.load().as_ref()
+        {
+            log::trace!("L7 disconnect from {}", stream.remote());
         }
         self.stream.store(None);
         self.disconnect_notify.notify_one();
@@ -228,10 +229,10 @@ impl L7State {
         } else {
             let mut stream = self.stream.load();
             let mut connect = stream.is_none();
-            if let Some(stream) = stream.as_ref() {
-                if stream.remote() != addr {
-                    connect = true;
-                }
+            if let Some(stream) = stream.as_ref()
+                && stream.remote() != addr
+            {
+                connect = true;
             }
             if connect {
                 drop(stream);

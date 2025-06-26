@@ -40,10 +40,10 @@ impl SequenceValidator {
 
         let oldest_seq = self.rx_seq.first().copied();
 
-        if let Some(oldest_seq) = oldest_seq {
-            if sequence <= oldest_seq {
-                return Err(err!("Message is too old: {sequence} <= {oldest_seq}."));
-            }
+        if let Some(oldest_seq) = oldest_seq
+            && sequence <= oldest_seq
+        {
+            return Err(err!("Message is too old: {sequence} <= {oldest_seq}."));
         }
         if self.rx_seq.contains(&sequence) {
             return Err(err!("Message has already been received."));
@@ -51,10 +51,10 @@ impl SequenceValidator {
 
         self.rx_seq.insert(sequence);
 
-        if let Some(oldest_seq) = oldest_seq {
-            if self.rx_seq.len() > self.win_len.into() {
-                self.rx_seq.remove(&oldest_seq);
-            }
+        if let Some(oldest_seq) = oldest_seq
+            && self.rx_seq.len() > self.win_len.into()
+        {
+            self.rx_seq.remove(&oldest_seq);
         }
         debug_assert!(self.rx_seq.len() <= self.win_len.into());
 
