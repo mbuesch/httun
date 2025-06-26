@@ -12,7 +12,12 @@ use atoi::atoi;
 use base64::prelude::*;
 use httun_conf::{Config, HttpAuth};
 use httun_protocol::Message;
-use httun_util::{Direction, DisconnectedError, Query, net::tcp_send_all, parse_path};
+use httun_util::{
+    errors::DisconnectedError,
+    net::tcp_send_all,
+    query::Query,
+    strings::{Direction, parse_path},
+};
 use memchr::{memchr, memmem::find};
 use std::{
     fmt::Write as _,

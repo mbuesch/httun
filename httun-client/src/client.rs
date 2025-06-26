@@ -8,7 +8,7 @@ use httun_protocol::{
     Key, Message, MsgType, Operation, SequenceGenerator, SequenceType, SequenceValidator,
     SessionSecret, secure_random,
 };
-use httun_util::CHAN_R_TIMEOUT_S;
+use httun_util::consts::CHAN_R_TIMEOUT_S;
 use reqwest::{Client, StatusCode};
 use std::{
     sync::{

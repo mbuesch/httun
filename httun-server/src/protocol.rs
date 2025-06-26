@@ -8,7 +8,7 @@ use crate::{
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::{Message, MsgType, Operation, SequenceType, SessionSecret};
-use httun_util::DisconnectedError;
+use httun_util::errors::DisconnectedError;
 use std::sync::{
     Arc, RwLock as StdRwLock,
     atomic::{self, AtomicBool},

@@ -12,7 +12,11 @@ use crate::{
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Message;
 use httun_unix_protocol::UNIX_SOCK;
-use httun_util::{CHAN_R_TIMEOUT, Direction, Query, parse_path};
+use httun_util::{
+    consts::CHAN_R_TIMEOUT,
+    query::Query,
+    strings::{Direction, parse_path},
+};
 use std::{
     collections::HashMap,
     fmt::Write as _,
