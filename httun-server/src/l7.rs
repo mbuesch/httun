@@ -6,7 +6,7 @@ use crate::time::{now, tdiff};
 use anyhow::{self as ah, Context as _, format_err as err};
 use arc_swap::ArcSwapOption;
 use httun_conf::ConfigL7Tunnel;
-use httun_protocol::L7Container;
+use httun_protocol::{L7C_MAX_PAYLOAD_LEN, L7Container};
 use httun_util::net::{tcp_recv_until_blocking, tcp_send_all};
 use ipnet::IpNet;
 use socket2::{Domain, Protocol, Socket, Type};
@@ -22,7 +22,7 @@ use std::{
 use tokio::{net::TcpStream, sync::Notify, time::timeout};
 
 const L7_TIMEOUT_S: i64 = 30;
-const RX_BUF_SIZE: usize = 1024 * 64;
+const RX_BUF_SIZE: usize = L7C_MAX_PAYLOAD_LEN;
 const TX_TIMEOUT: Duration = Duration::from_secs(10);
 const RX_TIMEOUT: Duration = Duration::from_secs(3);
 
