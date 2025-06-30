@@ -61,7 +61,7 @@ pub async fn run_mode_socket(
 
                 match local.accept().await {
                     Ok(conn) => {
-                        log::trace!("New connection on local socket.");
+                        log::info!("New connection on local socket port {local_port}.");
                         // Socket connection handler.
                         if let Ok(permit) = conn_semaphore.acquire_owned().await {
                             task::spawn(async move {
@@ -75,7 +75,7 @@ pub async fn run_mode_socket(
                                     .await
                                 {
                                     Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
-                                        log::debug!("Local client disconnected.");
+                                        log::info!("Local client disconnected.");
                                     }
                                     Err(e) => {
                                         log::error!("Local client: {e:?}");
