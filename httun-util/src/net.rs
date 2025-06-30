@@ -13,7 +13,7 @@ pub async fn tcp_recv_until_blocking(stream: &TcpStream, buf_size: usize) -> ah:
         match stream.try_read(&mut buf[count..]) {
             Ok(n) => {
                 count += n;
-                if count >= buf.len() {
+                if n == 0 || count >= buf.len() {
                     break Ok(buf);
                 }
             }
