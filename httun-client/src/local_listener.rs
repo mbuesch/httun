@@ -36,7 +36,6 @@ async fn local_rx(
         let disconnected = buf.is_empty();
         if disconnected {
             log::trace!("Local socket: Disconnected.");
-            return Err(DisconnectedError.into());
         } else {
             log::trace!(
                 "Sending {} bytes from local socket to httun-server.",
