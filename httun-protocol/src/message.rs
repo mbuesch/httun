@@ -19,7 +19,7 @@ const AUTHTAG_LEN: usize = 16;
 pub type SessionSecret = [u8; 16];
 const SESSION_SECRET_LEN: usize = std::mem::size_of::<SessionSecret>();
 
-pub(crate) const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
+pub const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
 
 const OFFS_TYPE: usize = 0;
 const OFFS_NONCE: usize = 1;

@@ -12,8 +12,8 @@ mod random;
 mod sequence;
 
 pub use crate::{
-    l7container::L7Container,
-    message::{Key, Message, MsgType, Operation, SessionSecret},
+    l7container::{L7C_MAX_PAYLOAD_LEN, L7Container},
+    message::{Key, MAX_PAYLOAD_LEN, Message, MsgType, Operation, SessionSecret},
     random::secure_random,
     sequence::{SequenceGenerator, SequenceType, SequenceValidator},
 };
