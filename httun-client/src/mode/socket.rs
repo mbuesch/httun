@@ -46,7 +46,9 @@ pub async fn run_mode_socket(
 
     let local = LocalListener::bind(local_port)
         .await
-        .context("Connect to localhost port")?;
+        .context("Bind to port")?;
+
+    log::info!("Listening on port {local_port}");
 
     // Spawn task: Local socket handler.
     task::spawn({
