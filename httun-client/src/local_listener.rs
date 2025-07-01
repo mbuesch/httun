@@ -24,6 +24,19 @@ use tokio::{
 
 const RX_BUF_SIZE: usize = L7C_MAX_PAYLOAD_LEN;
 
+async fn send_close_to_httun(
+    to_httun: &Sender<ToHttun>,
+    target_addr: IpAddr,
+    target_port: u16,
+) -> ah::Result<()> {
+    let buf = vec![]; // Empty buffer signals a closed connection.
+    let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
+    let msg = Message::new(MsgType::Data, Operation::L7ToSrv, l7.serialize())
+        .context("Make httun packet")?;
+    to_httun.send(msg).await?;
+    Ok(())
+}
+
 async fn local_rx(
     stream: Arc<TcpStream>,
     to_httun: Arc<Sender<ToHttun>>,
@@ -33,9 +46,9 @@ async fn local_rx(
     loop {
         let buf = tcp_recv_until_blocking(&stream, RX_BUF_SIZE).await?;
 
-        let disconnected = buf.is_empty();
-        if disconnected {
+        if buf.is_empty() {
             log::trace!("Local socket: Disconnected.");
+            return Err(DisconnectedError.into());
         } else {
             log::trace!(
                 "Sending {} bytes from local socket to httun-server.",
@@ -48,10 +61,6 @@ async fn local_rx(
             .context("Make httun packet")?;
 
         to_httun.send(msg).await?;
-
-        if disconnected {
-            return Err(DisconnectedError.into());
-        }
     }
 }
 
@@ -104,6 +113,7 @@ impl LocalConn {
     ) -> ah::Result<()> {
         let rx_task = task::spawn({
             let stream = Arc::clone(&self.stream);
+            let to_httun = Arc::clone(&to_httun);
             local_rx(stream, to_httun, target_addr, target_port)
         });
         let rx_task_handle = rx_task.abort_handle();
@@ -114,18 +124,29 @@ impl LocalConn {
         });
         let tx_task_handle = tx_task.abort_handle();
 
-        tokio::select! {
+        let res = tokio::select! {
             biased;
             ret = rx_task => {
                 tx_task_handle.abort();
-                ret.context("Local TCP RX")??;
+                ret.context("Local TCP RX")
             }
             ret = tx_task => {
                 rx_task_handle.abort();
-                ret.context("Local TCP TX")??;
+                ret.context("Local TCP TX")
+            }
+        };
+
+        match res {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => {
+                let _ = send_close_to_httun(&to_httun, target_addr, target_port).await;
+                Err(e)
+            }
+            Err(_) => {
+                let _ = send_close_to_httun(&to_httun, target_addr, target_port).await;
+                Err(err!("Task join failed"))
             }
         }
-        Ok(())
     }
 }
 

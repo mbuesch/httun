@@ -225,6 +225,8 @@ impl L7State {
         }
 
         if cont.payload().is_empty() {
+            // Payload is empty.
+            // The httun-clients wants us to disconnect the socket to the target.
             self.disconnect(false);
         } else {
             let mut stream = self.stream.load();
