@@ -83,11 +83,9 @@ pub async fn run_mode_socket(
                                     Ok(()) => unreachable!(),
                                     Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
                                         log::info!("Local client disconnected.");
-                                        httun_restart.notify_one();
                                     }
                                     Err(e) => {
                                         log::error!("Local client: {e:?}");
-                                        httun_restart.notify_one();
                                     }
                                 }
                                 drop(permit);
