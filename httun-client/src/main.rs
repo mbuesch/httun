@@ -22,7 +22,7 @@ use httun_conf::Config;
 use std::{path::Path, sync::Arc, time::Duration};
 use tokio::{
     runtime,
-    sync::{Mutex, mpsc},
+    sync::{Mutex, Notify, mpsc},
     task, time,
 };
 
@@ -187,6 +187,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let from_httun_rx = Arc::new(Mutex::new(from_httun_rx));
     let from_httun_tx = Arc::new(from_httun_tx);
     let to_httun_rx = Arc::new(Mutex::new(to_httun_rx));
+    let httun_restart = Arc::new(Notify::new());
 
     // Register unix signal handlers.
     let mut sigterm = register_signal!(terminate);
@@ -220,16 +221,23 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     // Spawn task: httun client handler.
     task::spawn({
         let exit_tx = Arc::clone(&exit_tx);
+        let httun_restart = Arc::clone(&httun_restart);
 
         async move {
             loop {
                 let _exit_tx = Arc::clone(&exit_tx);
                 let from_httun_tx = Arc::clone(&from_httun_tx);
                 let to_httun_rx = Arc::clone(&to_httun_rx);
+                let httun_restart = Arc::clone(&httun_restart);
 
-                if let Err(e) = client.handle_packets(from_httun_tx, to_httun_rx).await {
+                if let Err(e) = client
+                    .handle_packets(from_httun_tx, to_httun_rx, httun_restart)
+                    .await
+                {
                     log::error!("httun client: {e:?}");
                     error_delay().await;
+                } else {
+                    unreachable!();
                 }
             }
         }
@@ -237,13 +245,20 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 
     match &opts.mode {
         Some(Mode::Tun { tun }) => {
-            run_mode_tun(Arc::clone(&to_httun_tx), Arc::clone(&from_httun_rx), tun).await?;
+            run_mode_tun(
+                Arc::clone(&to_httun_tx),
+                Arc::clone(&from_httun_rx),
+                Arc::clone(&httun_restart),
+                tun,
+            )
+            .await?;
         }
         Some(Mode::Socket { target, local_port }) => {
             run_mode_socket(
                 Arc::clone(&exit_tx),
                 Arc::clone(&to_httun_tx),
                 Arc::clone(&from_httun_rx),
+                Arc::clone(&httun_restart),
                 target,
                 res_mode,
                 *local_port,
@@ -255,6 +270,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 Arc::clone(&exit_tx),
                 Arc::clone(&to_httun_tx),
                 Arc::clone(&from_httun_rx),
+                Arc::clone(&httun_restart),
             )
             .await?;
         }

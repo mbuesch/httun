@@ -19,7 +19,7 @@ use std::{
 };
 use tokio::{
     sync::{
-        Mutex,
+        Mutex, Notify,
         mpsc::{Receiver, Sender},
     },
     task,
@@ -406,45 +406,59 @@ impl HttunClient {
         &mut self,
         from_httun: Arc<Sender<FromHttun>>,
         to_httun: Arc<Mutex<Receiver<ToHttun>>>,
+        restart: Arc<Notify>,
     ) -> ah::Result<()> {
-        let session_secret = get_session(
-            &self.conf,
-            &self.base_url,
-            &self.chan_name,
-            &self.user_agent,
-            &self.key,
-        )
-        .await?;
-        log::debug!("Initialized new session.");
+        // Initially wait for the user side to start us.
+        restart.notified().await;
 
-        let r_task = task::spawn({
-            let r = Arc::clone(&self.r);
-            let user_agent = self.user_agent.clone();
-            let key = Arc::clone(&self.key);
-            async move { direction_r(r, from_httun, &user_agent, &key, session_secret).await }
-        });
-        let r_task_handle = r_task.abort_handle();
+        loop {
+            let session_secret = get_session(
+                &self.conf,
+                &self.base_url,
+                &self.chan_name,
+                &self.user_agent,
+                &self.key,
+            )
+            .await?;
+            log::debug!("Initialized new session.");
 
-        let w_task = task::spawn({
-            let w = Arc::clone(&self.w);
-            let user_agent = self.user_agent.clone();
-            let key = Arc::clone(&self.key);
-            async move { direction_w(w, to_httun, &user_agent, &key, session_secret).await }
-        });
-        let w_task_handle = r_task.abort_handle();
+            let r_task = task::spawn({
+                let r = Arc::clone(&self.r);
+                let from_httun = Arc::clone(&from_httun);
+                let user_agent = self.user_agent.clone();
+                let key = Arc::clone(&self.key);
+                async move { direction_r(r, from_httun, &user_agent, &key, session_secret).await }
+            });
+            let r_task_handle = r_task.abort_handle();
 
-        tokio::select! {
-            biased;
-            ret = r_task => {
-                w_task_handle.abort();
-                ret.context("httun HTTP-r")??;
-            }
-            ret = w_task => {
-                r_task_handle.abort();
-                ret.context("httun HTTP-w")??;
+            let w_task = task::spawn({
+                let w = Arc::clone(&self.w);
+                let to_httun = Arc::clone(&to_httun);
+                let user_agent = self.user_agent.clone();
+                let key = Arc::clone(&self.key);
+                async move { direction_w(w, to_httun, &user_agent, &key, session_secret).await }
+            });
+            let w_task_handle = r_task.abort_handle();
+
+            tokio::select! {
+                biased;
+                _ = restart.notified() => {
+                    log::trace!("Client restart was requested.");
+                    r_task_handle.abort();
+                    w_task_handle.abort();
+                }
+                ret = r_task => {
+                    w_task_handle.abort();
+                    ret.context("httun HTTP-r")??;
+                    unreachable!(); // Task never returns Ok.
+                }
+                ret = w_task => {
+                    r_task_handle.abort();
+                    ret.context("httun HTTP-w")??;
+                    unreachable!(); // Task never returns Ok.
+                }
             }
         }
-        Ok(())
     }
 }
 

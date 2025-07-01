@@ -137,7 +137,7 @@ impl LocalConn {
         };
 
         match res {
-            Ok(Ok(())) => Ok(()),
+            Ok(Ok(())) => unreachable!(), // The tasks never return Ok.
             Ok(Err(e)) => {
                 let _ = send_close_to_httun(&to_httun, target_addr, target_port).await;
                 Err(e)

@@ -12,7 +12,7 @@ use httun_util::errors::DisconnectedError;
 use std::sync::Arc;
 use tokio::{
     sync::{
-        Mutex, Semaphore,
+        Mutex, Notify, Semaphore,
         mpsc::{Receiver, Sender},
     },
     task,
@@ -22,6 +22,7 @@ pub async fn run_mode_socket(
     exit_tx: Arc<Sender<ah::Result<()>>>,
     to_httun_tx: Arc<Sender<Message>>,
     from_httun_rx: Arc<Mutex<Receiver<Message>>>,
+    httun_restart: Arc<Notify>,
     target: &str,
     res_mode: ResMode,
     local_port: u16,
@@ -59,14 +60,17 @@ pub async fn run_mode_socket(
                 let exit_tx = Arc::clone(&exit_tx);
                 let to_httun_tx = Arc::clone(&to_httun_tx);
                 let from_httun_rx = Arc::clone(&from_httun_rx);
+                let httun_restart = Arc::clone(&httun_restart);
                 let conn_semaphore = Arc::clone(&conn_semaphore);
 
                 match local.accept().await {
                     Ok(conn) => {
                         log::info!("New connection on local socket port {local_port}.");
-                        // Socket connection handler.
                         if let Ok(permit) = conn_semaphore.acquire_owned().await {
                             task::spawn(async move {
+                                // Start the tunnel.
+                                httun_restart.notify_one();
+
                                 match conn
                                     .handle_packets(
                                         to_httun_tx,
@@ -76,13 +80,15 @@ pub async fn run_mode_socket(
                                     )
                                     .await
                                 {
+                                    Ok(()) => unreachable!(),
                                     Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
                                         log::info!("Local client disconnected.");
+                                        httun_restart.notify_one();
                                     }
                                     Err(e) => {
                                         log::error!("Local client: {e:?}");
+                                        httun_restart.notify_one();
                                     }
-                                    Ok(()) => (),
                                 }
                                 drop(permit);
                             });

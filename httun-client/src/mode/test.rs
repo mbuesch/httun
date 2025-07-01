@@ -8,7 +8,7 @@ use httun_protocol::{Message, MsgType, Operation};
 use std::{num::Wrapping, sync::Arc};
 use tokio::{
     sync::{
-        Mutex,
+        Mutex, Notify,
         mpsc::{Receiver, Sender},
     },
     task,
@@ -18,12 +18,16 @@ pub async fn run_mode_test(
     exit_tx: Arc<Sender<ah::Result<()>>>,
     to_httun_tx: Arc<Sender<Message>>,
     from_httun_rx: Arc<Mutex<Receiver<Message>>>,
+    httun_restart: Arc<Notify>,
 ) -> ah::Result<()> {
     // Spawn task: Test handler.
     task::spawn({
         let mut count = Wrapping(0_u32);
 
         async move {
+            // Connect to the tunnel.
+            httun_restart.notify_one();
+
             loop {
                 let testdata = format!("TEST {count:08X}");
                 let expected_reply = format!("Reply to: {testdata}");

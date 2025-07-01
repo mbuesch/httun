@@ -6,7 +6,7 @@ use anyhow as ah;
 use httun_protocol::Message;
 use std::sync::Arc;
 use tokio::sync::{
-    Mutex,
+    Mutex, Notify,
     mpsc::{Receiver, Sender},
 };
 
@@ -14,6 +14,7 @@ use tokio::sync::{
 pub async fn run_mode_tun(
     to_httun_tx: Arc<Sender<Message>>,
     from_httun_rx: Arc<Mutex<Receiver<Message>>>,
+    httun_restart: Arc<Notify>,
     tun_name: &str,
 ) -> ah::Result<()> {
     use crate::error_delay;
@@ -27,14 +28,16 @@ pub async fn run_mode_tun(
             .context("Create TUN interface")?,
     );
 
+    // Start the tunnel.
+    httun_restart.notify_one();
+
     // Spawn task: TUN to HTTP.
     task::spawn({
         let tun = Arc::clone(&tun);
+        let httun_restart = Arc::clone(&httun_restart);
 
         async move {
             loop {
-                let tun = Arc::clone(&tun);
-
                 match tun.recv().await {
                     Ok(pkg) => {
                         let msg = match Message::new(MsgType::Data, Operation::L4ToSrv, pkg) {
@@ -42,17 +45,20 @@ pub async fn run_mode_tun(
                             Err(e) => {
                                 log::error!("Make httun packet failed: {e:?}");
                                 error_delay().await;
+                                httun_restart.notify_one();
                                 continue;
                             }
                         };
                         if let Err(e) = to_httun_tx.send(msg).await {
                             log::error!("Send to httun failed: {e:?}");
                             error_delay().await;
+                            httun_restart.notify_one();
                         }
                     }
                     Err(e) => {
                         log::error!("Recv from TUN error: {e:?}");
                         error_delay().await;
+                        httun_restart.notify_one();
                     }
                 }
             }
@@ -62,19 +68,20 @@ pub async fn run_mode_tun(
     // Spawn task: HTTP to TUN.
     task::spawn({
         let tun = Arc::clone(&tun);
+        let httun_restart = Arc::clone(&httun_restart);
 
         async move {
             loop {
-                let tun = Arc::clone(&tun);
-
                 if let Some(pkg) = from_httun_rx.lock().await.recv().await {
                     if let Err(e) = tun.send(&pkg.into_payload()).await {
                         log::error!("Send to TUN error: {e:?}");
                         error_delay().await;
+                        httun_restart.notify_one();
                     }
                 } else {
                     log::error!("Recv from httun failed.");
                     error_delay().await;
+                    httun_restart.notify_one();
                 }
             }
         }
@@ -87,6 +94,7 @@ pub async fn run_mode_tun(
 pub async fn run_mode_tun(
     _to_httun_tx: Arc<Sender<Message>>,
     _from_httun_rx: Arc<Mutex<Receiver<Message>>>,
+    _httun_restart: Arc<Notify>,
     _tun_name: &str,
 ) -> ah::Result<()> {
     Err(ah::format_err!("TUN is only supported on Linux."))
