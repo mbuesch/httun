@@ -2,21 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
+use crate::client::HttunComm;
 use anyhow as ah;
-use httun_protocol::Message;
 use std::sync::Arc;
-use tokio::sync::{
-    Mutex, Notify,
-    mpsc::{Receiver, Sender},
-};
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub async fn run_mode_tun(
-    to_httun_tx: Arc<Sender<Message>>,
-    from_httun_rx: Arc<Mutex<Receiver<Message>>>,
-    httun_restart: Arc<Notify>,
-    tun_name: &str,
-) -> ah::Result<()> {
+pub async fn run_mode_tun(httun_comm: Arc<HttunComm>, tun_name: &str) -> ah::Result<()> {
     use crate::error_delay;
     use anyhow::Context as _;
     use httun_protocol::{Message, MsgType, Operation};
@@ -29,12 +20,12 @@ pub async fn run_mode_tun(
     );
 
     // Start the tunnel.
-    httun_restart.notify_one();
+    httun_comm.request_restart().await?;
 
     // Spawn task: TUN to HTTP.
     task::spawn({
         let tun = Arc::clone(&tun);
-        let httun_restart = Arc::clone(&httun_restart);
+        let httun_comm = Arc::clone(&httun_comm);
 
         async move {
             loop {
@@ -45,20 +36,20 @@ pub async fn run_mode_tun(
                             Err(e) => {
                                 log::error!("Make httun packet failed: {e:?}");
                                 error_delay().await;
-                                httun_restart.notify_one();
+                                let _ = httun_comm.request_restart().await;
                                 continue;
                             }
                         };
-                        if let Err(e) = to_httun_tx.send(msg).await {
+                        if let Err(e) = httun_comm.send_to_httun(msg).await {
                             log::error!("Send to httun failed: {e:?}");
                             error_delay().await;
-                            httun_restart.notify_one();
+                            let _ = httun_comm.request_restart().await;
                         }
                     }
                     Err(e) => {
                         log::error!("Recv from TUN error: {e:?}");
                         error_delay().await;
-                        httun_restart.notify_one();
+                        let _ = httun_comm.request_restart().await;
                     }
                 }
             }
@@ -68,20 +59,20 @@ pub async fn run_mode_tun(
     // Spawn task: HTTP to TUN.
     task::spawn({
         let tun = Arc::clone(&tun);
-        let httun_restart = Arc::clone(&httun_restart);
+        let httun_comm = Arc::clone(&httun_comm);
 
         async move {
             loop {
-                if let Some(pkg) = from_httun_rx.lock().await.recv().await {
+                if let Some(pkg) = httun_comm.recv_from_httun().await {
                     if let Err(e) = tun.send(&pkg.into_payload()).await {
                         log::error!("Send to TUN error: {e:?}");
                         error_delay().await;
-                        httun_restart.notify_one();
+                        let _ = httun_comm.request_restart().await;
                     }
                 } else {
                     log::error!("Recv from httun failed.");
                     error_delay().await;
-                    httun_restart.notify_one();
+                    let _ = httun_comm.request_restart().await;
                 }
             }
         }
@@ -91,12 +82,7 @@ pub async fn run_mode_tun(
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
-pub async fn run_mode_tun(
-    _to_httun_tx: Arc<Sender<Message>>,
-    _from_httun_rx: Arc<Mutex<Receiver<Message>>>,
-    _httun_restart: Arc<Notify>,
-    _tun_name: &str,
-) -> ah::Result<()> {
+pub async fn run_mode_tun(_httun_comm: Arc<HttunComm>, _tun_name: &str) -> ah::Result<()> {
     Err(ah::format_err!("TUN is only supported on Linux."))
 }
 

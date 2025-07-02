@@ -19,8 +19,9 @@ use std::{
 };
 use tokio::{
     sync::{
-        Mutex, Notify,
-        mpsc::{Receiver, Sender},
+        Mutex,
+        mpsc::{Receiver, Sender, channel},
+        watch,
     },
     task,
     time::sleep,
@@ -32,8 +33,59 @@ const HTTP_W_TIMEOUT: Duration = Duration::from_secs(3);
 const TCP_USER_TIMEOUT: Duration = Duration::from_secs(2);
 const SESSION_INIT_RETRIES: usize = 5;
 
-pub type ToHttun = Message;
-pub type FromHttun = Message;
+pub struct HttunComm {
+    from_httun_tx: Sender<Message>,
+    from_httun_rx: Mutex<Receiver<Message>>,
+    to_httun_tx: Sender<Message>,
+    to_httun_rx: Mutex<Receiver<Message>>,
+    restart_watch: watch::Sender<bool>,
+}
+
+impl HttunComm {
+    pub fn new() -> Self {
+        let (from_httun_tx, from_httun_rx) = channel(1);
+        let (to_httun_tx, to_httun_rx) = channel(1);
+        let (restart_watch, _) = watch::channel(false);
+        Self {
+            from_httun_tx,
+            from_httun_rx: Mutex::new(from_httun_rx),
+            to_httun_tx,
+            to_httun_rx: Mutex::new(to_httun_rx),
+            restart_watch,
+        }
+    }
+
+    async fn send_from_httun(&self, msg: Message) -> ah::Result<()> {
+        Ok(self.from_httun_tx.send(msg).await?)
+    }
+
+    pub async fn recv_from_httun(&self) -> Option<Message> {
+        self.from_httun_rx.lock().await.recv().await
+    }
+
+    pub async fn send_to_httun(&self, msg: Message) -> ah::Result<()> {
+        Ok(self.to_httun_tx.send(msg).await?)
+    }
+
+    async fn recv_to_httun(&self) -> Option<Message> {
+        self.to_httun_rx.lock().await.recv().await
+    }
+
+    pub async fn request_restart(&self) -> ah::Result<()> {
+        self.restart_watch.send(true)?;
+        self.restart_watch.subscribe().wait_for(|r| !*r).await?;
+        Ok(())
+    }
+
+    async fn wait_for_restart_request(&self) -> ah::Result<()> {
+        self.restart_watch.subscribe().wait_for(|r| *r).await?;
+        Ok(())
+    }
+
+    fn notify_restart_done(&self) -> ah::Result<()> {
+        Ok(self.restart_watch.send(false)?)
+    }
+}
 
 fn make_client(
     user_agent: &str,
@@ -112,7 +164,7 @@ define_direction!(DirectionW, "w");
 
 async fn direction_r(
     chan: Arc<DirectionR>,
-    loc: Arc<Sender<FromHttun>>,
+    comm: Arc<HttunComm>,
     user_agent: &str,
     key: &Key,
     session_secret: SessionSecret,
@@ -199,14 +251,14 @@ async fn direction_r(
                 .check_recv_seq(&msg)
                 .context("rx sequence validation SequenceType::A")?;
 
-            loc.send(msg).await?;
+            comm.send_from_httun(msg).await?;
         }
     }
 }
 
 async fn direction_w(
     chan: Arc<DirectionW>,
-    loc: Arc<Mutex<Receiver<ToHttun>>>,
+    comm: Arc<HttunComm>,
     user_agent: &str,
     key: &Key,
     session_secret: SessionSecret,
@@ -227,7 +279,7 @@ async fn direction_w(
     let http_auth = chan_conf.http_basic_auth().clone();
 
     loop {
-        let Some(mut msg) = loc.lock().await.recv().await else {
+        let Some(mut msg) = comm.recv_to_httun().await else {
             return Err(err!("ToHttun IPC closed"));
         };
 
@@ -402,14 +454,9 @@ impl HttunClient {
         })
     }
 
-    pub async fn handle_packets(
-        &mut self,
-        from_httun: Arc<Sender<FromHttun>>,
-        to_httun: Arc<Mutex<Receiver<ToHttun>>>,
-        restart: Arc<Notify>,
-    ) -> ah::Result<()> {
+    pub async fn handle_packets(&mut self, comm: Arc<HttunComm>) -> ah::Result<()> {
         // Initially wait for the user side to start us.
-        restart.notified().await;
+        comm.wait_for_restart_request().await?;
 
         loop {
             let session_secret = get_session(
@@ -424,25 +471,27 @@ impl HttunClient {
 
             let r_task = task::spawn({
                 let r = Arc::clone(&self.r);
-                let from_httun = Arc::clone(&from_httun);
+                let comm = Arc::clone(&comm);
                 let user_agent = self.user_agent.clone();
                 let key = Arc::clone(&self.key);
-                async move { direction_r(r, from_httun, &user_agent, &key, session_secret).await }
+                async move { direction_r(r, comm, &user_agent, &key, session_secret).await }
             });
             let r_task_handle = r_task.abort_handle();
 
             let w_task = task::spawn({
                 let w = Arc::clone(&self.w);
-                let to_httun = Arc::clone(&to_httun);
+                let comm = Arc::clone(&comm);
                 let user_agent = self.user_agent.clone();
                 let key = Arc::clone(&self.key);
-                async move { direction_w(w, to_httun, &user_agent, &key, session_secret).await }
+                async move { direction_w(w, comm, &user_agent, &key, session_secret).await }
             });
             let w_task_handle = r_task.abort_handle();
 
+            comm.notify_restart_done()?;
+
             tokio::select! {
                 biased;
-                _ = restart.notified() => {
+                _ = comm.wait_for_restart_request() => {
                     log::trace!("Client restart was requested.");
                     r_task_handle.abort();
                     w_task_handle.abort();

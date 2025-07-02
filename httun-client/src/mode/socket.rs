@@ -3,26 +3,21 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
 use crate::{
+    client::HttunComm,
     local_listener::LocalListener,
     resolver::{ResConf, ResMode, resolve},
 };
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::Message;
 use httun_util::errors::DisconnectedError;
 use std::sync::Arc;
 use tokio::{
-    sync::{
-        Mutex, Notify, Semaphore,
-        mpsc::{Receiver, Sender},
-    },
+    sync::{Semaphore, mpsc::Sender},
     task,
 };
 
 pub async fn run_mode_socket(
     exit_tx: Arc<Sender<ah::Result<()>>>,
-    to_httun_tx: Arc<Sender<Message>>,
-    from_httun_rx: Arc<Mutex<Receiver<Message>>>,
-    httun_restart: Arc<Notify>,
+    httun_comm: Arc<HttunComm>,
     target: &str,
     res_mode: ResMode,
     local_port: u16,
@@ -58,9 +53,7 @@ pub async fn run_mode_socket(
 
             loop {
                 let exit_tx = Arc::clone(&exit_tx);
-                let to_httun_tx = Arc::clone(&to_httun_tx);
-                let from_httun_rx = Arc::clone(&from_httun_rx);
-                let httun_restart = Arc::clone(&httun_restart);
+                let httun_comm = Arc::clone(&httun_comm);
                 let conn_semaphore = Arc::clone(&conn_semaphore);
 
                 match local.accept().await {
@@ -69,23 +62,22 @@ pub async fn run_mode_socket(
                         if let Ok(permit) = conn_semaphore.acquire_owned().await {
                             task::spawn(async move {
                                 // Start the tunnel.
-                                httun_restart.notify_one();
-
-                                match conn
-                                    .handle_packets(
-                                        to_httun_tx,
-                                        from_httun_rx,
-                                        target_addr,
-                                        target_port,
-                                    )
-                                    .await
-                                {
-                                    Ok(()) => unreachable!(),
-                                    Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
-                                        log::info!("Local client disconnected.");
-                                    }
-                                    Err(e) => {
-                                        log::error!("Local client: {e:?}");
+                                if let Err(e) = httun_comm.request_restart().await {
+                                    log::error!("{e:?}");
+                                } else {
+                                    match conn
+                                        .handle_packets(httun_comm, target_addr, target_port)
+                                        .await
+                                    {
+                                        Ok(()) => unreachable!(),
+                                        Err(e)
+                                            if e.downcast_ref::<DisconnectedError>().is_some() =>
+                                        {
+                                            log::info!("Local client disconnected.");
+                                        }
+                                        Err(e) => {
+                                            log::error!("Local client: {e:?}");
+                                        }
                                     }
                                 }
                                 drop(permit);
