@@ -106,6 +106,9 @@ impl Channel {
             s.tx_sequence_a.reset();
             s.rx_validator_b.reset();
             s.rx_validator_c.reset();
+            if let Some(l7) = &self.l7 {
+                l7.create_new_session();
+            }
         }
 
         session_secret

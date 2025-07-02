@@ -185,6 +185,10 @@ impl L7State {
         })
     }
 
+    pub fn create_new_session(&self) {
+        self.disconnect(false);
+    }
+
     fn disconnect(&self, quiet: bool) {
         if !quiet
             && log::log_enabled!(log::Level::Trace)
