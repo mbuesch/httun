@@ -20,7 +20,7 @@ pub async fn run_mode_tun(httun_comm: Arc<HttunComm>, tun_name: &str) -> ah::Res
     );
 
     // Start the tunnel.
-    httun_comm.request_restart().await?;
+    httun_comm.request_restart().await;
 
     // Spawn task: TUN to HTTP.
     task::spawn({
@@ -36,20 +36,16 @@ pub async fn run_mode_tun(httun_comm: Arc<HttunComm>, tun_name: &str) -> ah::Res
                             Err(e) => {
                                 log::error!("Make httun packet failed: {e:?}");
                                 error_delay().await;
-                                let _ = httun_comm.request_restart().await;
+                                httun_comm.request_restart().await;
                                 continue;
                             }
                         };
-                        if let Err(e) = httun_comm.send_to_httun(msg).await {
-                            log::error!("Send to httun failed: {e:?}");
-                            error_delay().await;
-                            let _ = httun_comm.request_restart().await;
-                        }
+                        httun_comm.send_to_httun(msg).await;
                     }
                     Err(e) => {
                         log::error!("Recv from TUN error: {e:?}");
                         error_delay().await;
-                        let _ = httun_comm.request_restart().await;
+                        httun_comm.request_restart().await;
                     }
                 }
             }
@@ -63,16 +59,11 @@ pub async fn run_mode_tun(httun_comm: Arc<HttunComm>, tun_name: &str) -> ah::Res
 
         async move {
             loop {
-                if let Some(pkg) = httun_comm.recv_from_httun().await {
-                    if let Err(e) = tun.send(&pkg.into_payload()).await {
-                        log::error!("Send to TUN error: {e:?}");
-                        error_delay().await;
-                        let _ = httun_comm.request_restart().await;
-                    }
-                } else {
-                    log::error!("Recv from httun failed.");
+                let pkg = httun_comm.recv_from_httun().await;
+                if let Err(e) = tun.send(&pkg.into_payload()).await {
+                    log::error!("Send to TUN error: {e:?}");
                     error_delay().await;
-                    let _ = httun_comm.request_restart().await;
+                    httun_comm.request_restart().await;
                 }
             }
         }

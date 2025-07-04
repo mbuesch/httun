@@ -13,77 +13,119 @@ use reqwest::{Client, StatusCode};
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering::Relaxed},
+        atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
     },
     time::Duration,
 };
 use tokio::{
-    sync::{
-        Mutex,
-        mpsc::{Receiver, Sender, channel},
-        watch,
-    },
+    pin,
+    sync::{Mutex, Notify, watch},
     task,
     time::sleep,
 };
 
+const COMM_DEQUE_SIZE: usize = 16;
 const HTTP_R_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S + 3);
 const HTTP_W_TIMEOUT: Duration = Duration::from_secs(3);
 #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
 const TCP_USER_TIMEOUT: Duration = Duration::from_secs(2);
 const SESSION_INIT_RETRIES: usize = 5;
 
+struct CommDeque<T, const SIZE: usize> {
+    deque: Mutex<heapless::Deque<T, SIZE>>,
+    notify: Notify,
+    overflow: AtomicBool,
+}
+
+impl<T, const SIZE: usize> CommDeque<T, SIZE> {
+    pub fn new() -> Self {
+        Self {
+            deque: Mutex::new(heapless::Deque::new()),
+            notify: Notify::new(),
+            overflow: AtomicBool::new(false),
+        }
+    }
+
+    fn clear_notification(&self) {
+        let notified = self.notify.notified();
+        pin!(notified);
+        notified.enable(); // consume the notification.
+    }
+
+    pub async fn clear(&self) {
+        self.deque.lock().await.clear();
+        self.clear_notification();
+    }
+
+    pub async fn put(&self, mut value: T) {
+        while let Err(v) = self.deque.lock().await.push_back(value) {
+            value = v;
+            if !self.overflow.swap(true, Relaxed) {
+                log::warn!("Httun communication queue overflow.");
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+        self.notify.notify_one();
+    }
+
+    pub async fn get(&self) -> T {
+        loop {
+            self.notify.notified().await;
+            if let Some(value) = self.deque.lock().await.pop_front() {
+                break value;
+            }
+        }
+    }
+}
+
 pub struct HttunComm {
-    from_httun_tx: Sender<Message>,
-    from_httun_rx: Mutex<Receiver<Message>>,
-    to_httun_tx: Sender<Message>,
-    to_httun_rx: Mutex<Receiver<Message>>,
+    from_httun: CommDeque<Message, COMM_DEQUE_SIZE>,
+    to_httun: CommDeque<Message, COMM_DEQUE_SIZE>,
     restart_watch: watch::Sender<bool>,
 }
 
 impl HttunComm {
     pub fn new() -> Self {
-        let (from_httun_tx, from_httun_rx) = channel(1);
-        let (to_httun_tx, to_httun_rx) = channel(1);
         let (restart_watch, _) = watch::channel(false);
         Self {
-            from_httun_tx,
-            from_httun_rx: Mutex::new(from_httun_rx),
-            to_httun_tx,
-            to_httun_rx: Mutex::new(to_httun_rx),
+            from_httun: CommDeque::new(),
+            to_httun: CommDeque::new(),
             restart_watch,
         }
     }
 
-    async fn send_from_httun(&self, msg: Message) -> ah::Result<()> {
-        Ok(self.from_httun_tx.send(msg).await?)
+    async fn clear(&self) {
+        self.from_httun.clear().await;
+        self.to_httun.clear().await;
     }
 
-    pub async fn recv_from_httun(&self) -> Option<Message> {
-        self.from_httun_rx.lock().await.recv().await
+    async fn send_from_httun(&self, msg: Message) {
+        self.from_httun.put(msg).await;
     }
 
-    pub async fn send_to_httun(&self, msg: Message) -> ah::Result<()> {
-        Ok(self.to_httun_tx.send(msg).await?)
+    pub async fn recv_from_httun(&self) -> Message {
+        self.from_httun.get().await
     }
 
-    async fn recv_to_httun(&self) -> Option<Message> {
-        self.to_httun_rx.lock().await.recv().await
+    pub async fn send_to_httun(&self, msg: Message) {
+        self.to_httun.put(msg).await;
     }
 
-    pub async fn request_restart(&self) -> ah::Result<()> {
-        self.restart_watch.send(true)?;
-        self.restart_watch.subscribe().wait_for(|r| !*r).await?;
-        Ok(())
+    async fn recv_to_httun(&self) -> Message {
+        self.to_httun.get().await
     }
 
-    async fn wait_for_restart_request(&self) -> ah::Result<()> {
-        self.restart_watch.subscribe().wait_for(|r| *r).await?;
-        Ok(())
+    pub async fn request_restart(&self) {
+        let _ = self.restart_watch.send(true);
+        let _ = self.restart_watch.subscribe().wait_for(|r| !*r).await;
     }
 
-    fn notify_restart_done(&self) -> ah::Result<()> {
-        Ok(self.restart_watch.send(false)?)
+    async fn wait_for_restart_request(&self) {
+        let _ = self.restart_watch.subscribe().wait_for(|r| *r).await;
+    }
+
+    fn notify_restart_done(&self) {
+        let _ = self.restart_watch.send(false);
     }
 }
 
@@ -251,7 +293,7 @@ async fn direction_r(
                 .check_recv_seq(&msg)
                 .context("rx sequence validation SequenceType::A")?;
 
-            comm.send_from_httun(msg).await?;
+            comm.send_from_httun(msg).await;
         }
     }
 }
@@ -279,10 +321,7 @@ async fn direction_w(
     let http_auth = chan_conf.http_basic_auth().clone();
 
     loop {
-        let Some(mut msg) = comm.recv_to_httun().await else {
-            return Err(err!("ToHttun IPC closed"));
-        };
-
+        let mut msg = comm.recv_to_httun().await;
         msg.set_sequence(tx_sequence_b.next());
 
         let msg = msg.serialize(key, Some(session_secret));
@@ -456,7 +495,7 @@ impl HttunClient {
 
     pub async fn handle_packets(&mut self, comm: Arc<HttunComm>) -> ah::Result<()> {
         // Initially wait for the user side to start us.
-        comm.wait_for_restart_request().await?;
+        comm.wait_for_restart_request().await;
 
         loop {
             let session_secret = get_session(
@@ -469,6 +508,9 @@ impl HttunClient {
             .await?;
             log::debug!("Initialized new session.");
 
+            comm.clear().await;
+
+            log::trace!("Starting tasks.");
             let r_task = task::spawn({
                 let r = Arc::clone(&self.r);
                 let comm = Arc::clone(&comm);
@@ -487,7 +529,7 @@ impl HttunClient {
             });
             let w_task_handle = r_task.abort_handle();
 
-            comm.notify_restart_done()?;
+            comm.notify_restart_done();
 
             tokio::select! {
                 biased;

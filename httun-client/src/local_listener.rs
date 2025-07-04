@@ -29,7 +29,8 @@ async fn send_close_to_httun(
     let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
     let msg = Message::new(MsgType::Data, Operation::L7ToSrv, l7.serialize())
         .context("Make httun packet")?;
-    comm.send_to_httun(msg).await
+    comm.send_to_httun(msg).await;
+    Ok(())
 }
 
 async fn local_rx(
@@ -55,7 +56,7 @@ async fn local_rx(
         let msg = Message::new(MsgType::Data, Operation::L7ToSrv, l7.serialize())
             .context("Make httun packet")?;
 
-        comm.send_to_httun(msg).await?;
+        comm.send_to_httun(msg).await;
     }
 }
 
@@ -66,9 +67,7 @@ async fn local_tx(
     _target_port: u16,
 ) -> ah::Result<()> {
     loop {
-        let Some(msg) = comm.recv_from_httun().await else {
-            return Err(err!("FromHttun IPC closed"));
-        };
+        let msg = comm.recv_from_httun().await;
 
         let l7 = L7Container::deserialize(msg.payload()).context("Deserialize L7 container")?;
         let payload = l7.into_payload();

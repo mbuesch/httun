@@ -18,42 +18,36 @@ pub async fn run_mode_test(
 
         async move {
             // Connect to the tunnel.
-            if let Err(e) = httun_comm.request_restart().await {
-                log::error!("{e:?}");
-            } else {
-                loop {
-                    let testdata = format!("TEST {count:08X}");
-                    let expected_reply = format!("Reply to: {testdata}");
-                    log::info!("Sending test mode ping: '{testdata}'");
+            httun_comm.request_restart().await;
 
-                    let msg = match Message::new(
-                        MsgType::Data,
-                        Operation::TestToSrv,
-                        testdata.into_bytes(),
-                    ) {
-                        Ok(msg) => msg,
-                        Err(e) => {
-                            log::error!("Make httun packet failed: {e:?}");
-                            error_delay().await;
-                            continue;
-                        }
-                    };
-                    httun_comm.send_to_httun(msg).await.unwrap();
+            loop {
+                let testdata = format!("TEST {count:08X}");
+                let expected_reply = format!("Reply to: {testdata}");
+                log::info!("Sending test mode ping: '{testdata}'");
 
-                    if let Some(msg) = httun_comm.recv_from_httun().await {
-                        let replydata = String::from_utf8_lossy(msg.payload());
-                        log::info!("Received test mode pong: '{replydata}'");
-                        if replydata != expected_reply {
-                            let _ = exit_tx.send(Err(err!("Test RX: Invalid reply."))).await;
-                            break;
-                        }
-                    } else {
-                        let _ = exit_tx.send(Err(err!("Test RX: No message."))).await;
-                        break;
+                let msg = match Message::new(
+                    MsgType::Data,
+                    Operation::TestToSrv,
+                    testdata.into_bytes(),
+                ) {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        log::error!("Make httun packet failed: {e:?}");
+                        error_delay().await;
+                        continue;
                     }
+                };
+                httun_comm.send_to_httun(msg).await;
 
-                    count += 1;
+                let msg = httun_comm.recv_from_httun().await;
+                let replydata = String::from_utf8_lossy(msg.payload());
+                log::info!("Received test mode pong: '{replydata}'");
+                if replydata != expected_reply {
+                    let _ = exit_tx.send(Err(err!("Test RX: Invalid reply."))).await;
+                    break;
                 }
+
+                count += 1;
             }
         }
     });

@@ -62,22 +62,18 @@ pub async fn run_mode_socket(
                         if let Ok(permit) = conn_semaphore.acquire_owned().await {
                             task::spawn(async move {
                                 // Start the tunnel.
-                                if let Err(e) = httun_comm.request_restart().await {
-                                    log::error!("{e:?}");
-                                } else {
-                                    match conn
-                                        .handle_packets(httun_comm, target_addr, target_port)
-                                        .await
-                                    {
-                                        Ok(()) => unreachable!(),
-                                        Err(e)
-                                            if e.downcast_ref::<DisconnectedError>().is_some() =>
-                                        {
-                                            log::info!("Local client disconnected.");
-                                        }
-                                        Err(e) => {
-                                            log::error!("Local client: {e:?}");
-                                        }
+                                httun_comm.request_restart().await;
+
+                                match conn
+                                    .handle_packets(httun_comm, target_addr, target_port)
+                                    .await
+                                {
+                                    Ok(()) => unreachable!(),
+                                    Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
+                                        log::info!("Local client disconnected.");
+                                    }
+                                    Err(e) => {
+                                        log::error!("Local client: {e:?}");
                                     }
                                 }
                                 drop(permit);
