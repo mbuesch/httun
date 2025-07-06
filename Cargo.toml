@@ -50,7 +50,7 @@ socket2 = "0.5"
 subtle = "2"
 tokio = "1"
 tokio-fastcgi = "1"
-tokio-tun = "0.13"
+tokio-tun = { version = "0.13", git = "https://github.com/mbuesch/tokio-tun.git", branch = "android" }
 toml = "0.8"
 
 httun-conf = { path = "./httun-conf", version = "0.1" }

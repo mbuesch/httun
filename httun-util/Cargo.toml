@@ -14,5 +14,6 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+log = { workspace = true }
 memchr = { workspace = true }
 tokio = { workspace = true, features = [ "net" ] }
