@@ -14,15 +14,20 @@ pub async fn tcp_recv_until_blocking(stream: &TcpStream, buf_size: usize) -> ah:
             Ok(n) => {
                 count += n;
                 if n == 0 || count >= buf.len() {
-                    break Ok(buf);
+                    buf.truncate(count);
+                    return Ok(buf);
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 buf.truncate(count);
-                break Ok(buf);
+                return Ok(buf);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+                buf.truncate(0);
+                return Ok(buf);
             }
             Err(e) => {
-                break Err(e.into());
+                return Err(e.into());
             }
         }
     }
