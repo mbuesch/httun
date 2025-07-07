@@ -510,45 +510,44 @@ impl HttunClient {
 
             comm.clear().await;
 
-            log::trace!("Starting tasks.");
-            let r_task = task::spawn({
+            let mut r_task = task::spawn({
                 let r = Arc::clone(&self.r);
                 let comm = Arc::clone(&comm);
                 let user_agent = self.user_agent.clone();
                 let key = Arc::clone(&self.key);
                 async move { direction_r(r, comm, &user_agent, &key, session_secret).await }
             });
-            let r_task_handle = r_task.abort_handle();
 
-            let w_task = task::spawn({
+            let mut w_task = task::spawn({
                 let w = Arc::clone(&self.w);
                 let comm = Arc::clone(&comm);
                 let user_agent = self.user_agent.clone();
                 let key = Arc::clone(&self.key);
                 async move { direction_w(w, comm, &user_agent, &key, session_secret).await }
             });
-            let w_task_handle = r_task.abort_handle();
 
             comm.notify_restart_done();
 
             tokio::select! {
                 biased;
-                _ = comm.wait_for_restart_request() => {
-                    log::trace!("Client restart was requested.");
-                    r_task_handle.abort();
-                    w_task_handle.abort();
-                }
-                ret = r_task => {
-                    w_task_handle.abort();
+                _ = comm.wait_for_restart_request() => (),
+                ret = &mut r_task => {
+                    w_task.abort();
                     ret.context("httun HTTP-r")??;
                     unreachable!(); // Task never returns Ok.
                 }
-                ret = w_task => {
-                    r_task_handle.abort();
+                ret = &mut w_task => {
+                    r_task.abort();
                     ret.context("httun HTTP-w")??;
                     unreachable!(); // Task never returns Ok.
                 }
             }
+
+            log::trace!("Client restart was requested.");
+            r_task.abort();
+            w_task.abort();
+            let _ = r_task.await;
+            let _ = w_task.await;
         }
     }
 }
