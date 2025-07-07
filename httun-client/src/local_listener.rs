@@ -104,28 +104,28 @@ impl LocalConn {
         target_addr: IpAddr,
         target_port: u16,
     ) -> ah::Result<()> {
-        let rx_task = task::spawn({
+        let mut rx_task = task::spawn({
             let stream = Arc::clone(&self.stream);
             let comm = Arc::clone(&comm);
             local_rx(stream, comm, target_addr, target_port)
         });
-        let rx_task_handle = rx_task.abort_handle();
 
-        let tx_task = task::spawn({
+        let mut tx_task = task::spawn({
             let stream = Arc::clone(&self.stream);
             let comm = Arc::clone(&comm);
             local_tx(stream, comm, target_addr, target_port)
         });
-        let tx_task_handle = tx_task.abort_handle();
 
         let res = tokio::select! {
             biased;
-            ret = rx_task => {
-                tx_task_handle.abort();
+            ret = &mut rx_task => {
+                tx_task.abort();
+                let _ = tx_task.await;
                 ret.context("Local TCP RX")
             }
-            ret = tx_task => {
-                rx_task_handle.abort();
+            ret = &mut tx_task => {
+                rx_task.abort();
+                let _ = rx_task.await;
                 ret.context("Local TCP TX")
             }
         };

@@ -533,11 +533,13 @@ impl HttunClient {
                 _ = comm.wait_for_restart_request() => (),
                 ret = &mut r_task => {
                     w_task.abort();
+                    let _ = w_task.await;
                     ret.context("httun HTTP-r")??;
                     unreachable!(); // Task never returns Ok.
                 }
                 ret = &mut w_task => {
                     r_task.abort();
+                    let _ = r_task.await;
                     ret.context("httun HTTP-w")??;
                     unreachable!(); // Task never returns Ok.
                 }
