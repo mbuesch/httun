@@ -24,7 +24,7 @@ use tokio::{
     time::sleep,
 };
 
-const COMM_DEQUE_SIZE: usize = 16;
+const COMM_DEQUE_SIZE: usize = 1;
 const HTTP_R_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S + 3);
 const HTTP_W_TIMEOUT: Duration = Duration::from_secs(3);
 #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
@@ -60,10 +60,10 @@ impl<T, const SIZE: usize> CommDeque<T, SIZE> {
     pub async fn put(&self, mut value: T) {
         while let Err(v) = self.deque.lock().await.push_back(value) {
             value = v;
-            if !self.overflow.swap(true, Relaxed) {
+            if !self.overflow.swap(true, Relaxed) && SIZE > 1 {
                 log::warn!("Httun communication queue overflow.");
             }
-            sleep(Duration::from_millis(50)).await;
+            sleep(Duration::from_millis(10)).await;
         }
         self.notify.notify_one();
     }
