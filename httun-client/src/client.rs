@@ -24,7 +24,8 @@ use tokio::{
     time::sleep,
 };
 
-const COMM_DEQUE_SIZE: usize = 1;
+const COMM_DEQUE_SIZE_TO_HTTUN: usize = 1;
+const COMM_DEQUE_SIZE_FROM_HTTUN: usize = 16;
 const HTTP_R_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S + 3);
 const HTTP_W_TIMEOUT: Duration = Duration::from_secs(3);
 #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
@@ -33,7 +34,7 @@ const SESSION_INIT_RETRIES: usize = 5;
 
 struct CommDeque<T, const SIZE: usize> {
     deque: Mutex<heapless::Deque<T, SIZE>>,
-    notify: Notify,
+    put_notify: Notify,
     overflow: AtomicBool,
 }
 
@@ -41,13 +42,13 @@ impl<T, const SIZE: usize> CommDeque<T, SIZE> {
     pub fn new() -> Self {
         Self {
             deque: Mutex::new(heapless::Deque::new()),
-            notify: Notify::new(),
+            put_notify: Notify::new(),
             overflow: AtomicBool::new(false),
         }
     }
 
     fn clear_notification(&self) {
-        let notified = self.notify.notified();
+        let notified = self.put_notify.notified();
         pin!(notified);
         notified.enable(); // consume the notification.
     }
@@ -65,12 +66,12 @@ impl<T, const SIZE: usize> CommDeque<T, SIZE> {
             }
             sleep(Duration::from_millis(10)).await;
         }
-        self.notify.notify_one();
+        self.put_notify.notify_one();
     }
 
     pub async fn get(&self) -> T {
         loop {
-            self.notify.notified().await;
+            self.put_notify.notified().await;
             if let Some(value) = self.deque.lock().await.pop_front() {
                 break value;
             }
@@ -79,8 +80,8 @@ impl<T, const SIZE: usize> CommDeque<T, SIZE> {
 }
 
 pub struct HttunComm {
-    from_httun: CommDeque<Message, COMM_DEQUE_SIZE>,
-    to_httun: CommDeque<Message, COMM_DEQUE_SIZE>,
+    from_httun: CommDeque<Message, COMM_DEQUE_SIZE_FROM_HTTUN>,
+    to_httun: CommDeque<Message, COMM_DEQUE_SIZE_TO_HTTUN>,
     restart_watch: watch::Sender<bool>,
 }
 
