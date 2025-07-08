@@ -274,8 +274,8 @@ async fn async_main() -> ah::Result<()> {
     println!("Spawning new httun-fcgi: {}", std::process::id());
 
     // Create async IPC channels.
-    let (exit_sock_tx, mut exit_sock_rx) = sync::mpsc::channel(1);
-    let exit_sock_tx = Arc::new(exit_sock_tx);
+    let (exit_tx, mut exit_rx) = sync::mpsc::channel(1);
+    let exit_tx = Arc::new(exit_tx);
 
     // Register unix signal handlers.
     let mut sigterm = signal(SignalKind::terminate())?;
@@ -316,7 +316,7 @@ async fn async_main() -> ah::Result<()> {
                     }
                 }
                 Err(e) => {
-                    let _ = exit_sock_tx.send(Err(e)).await;
+                    let _ = exit_tx.send(Err(e)).await;
                     break;
                 }
             }
@@ -339,7 +339,7 @@ async fn async_main() -> ah::Result<()> {
             _ = sighup.recv() => {
                 println!("SIGHUP: Ignoring.");
             }
-            code = exit_sock_rx.recv() => {
+            code = exit_rx.recv() => {
                 exitcode = code.unwrap_or_else(|| Err(err!("Unknown error code.")));
                 break;
             }
