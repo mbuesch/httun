@@ -1,4 +1,69 @@
-# IP4/6 network traffic over encrypted HTTP tunnel
+# IP4/6 or layer-7 network traffic over encrypted HTTP tunnel
+
+httun is a network tunneling tool for tunneling arbitrary network traffic over HTTP(s).
+
+The tunnel is always strongly encrypted and authenticated.
+
+## What kind of traffic can be tunnelled?
+
+1. IP v4 and IP v6 traffic can be tunneled.
+   In this case the endpoints are Linux TUN endpoints on both the client machine and the server machine.
+   Normal Linux configuration, routing and filtering tools are used to integrate the TUN endpoints into your network structure.
+2. Simple socket traffic (ISO/OSI layer 7) can be also tunnelled.
+   In this case a local socket is opened by the client software.
+   It listens on one given port locally for incoming traffic.
+   This traffic and a target machine address/port tuple is then tunnelled to the server machine where a socket is opened to the target machine.
+
+The tunnelling option 1. is preferred, because it's much more flexible.
+But it's also much harder to set up due to the need to configure and route the traffic to and from the Linux TUN endpoints.
+
+## Maturity
+
+This project is not stable, yet.
+Breaking protocol and API changes can happen at any time.
+
+This project is usable as-is, but it is work in progress.
+I try to keep breakages minimal, but I currently can't guarantee longterm stability, yet.
+
+## Security
+
+Strong AES-GCM AEAD encryption and authentication is always used for all packets sent over the tunnel.
+The use of HTTPs is not required for secure communication.
+The protocol is completely decoupled from HTTP(s) and it merely uses HTTP(s) as a dumb transport layer.
+
+Currently only symmetric encryption is supported.
+That means the client and the server machine share a common secret.
+This is known to be not ideal and future plans include the introduction of some kind of asymmetic key handling in addition to the symmetric key handling.
+
+## Performance
+
+The performance overhead of tunnelling traffic over HTTP is big, of course.
+HTTP is a verbose protocol with large headers.
+httun tries to minimize the header sizes where possible, but of course it can't control them all.
+
+However, the performance of httun is still pretty good.
+
+It highly depends on what your application traffic looks like.
+If the application sends mainly only small packets, then this will result in a rather large overhead.
+But if the application can send big packages then the overhead of the HTTP headers and the httun headers is quite small compared to the application payload.
+
+Throughput of 10 MBit/s is possible.
+But it depends on your application what throughput you can actually get.
+
+Latency is also much elevated, as compared to direct network connections.
+Expect a latency overhead of about 10 ms to 100 ms.
+
+## The server - Either FCGI or Standalone
+
+The server can be run
+
+1. as FCGI server together with Apache, lighttpd or any other HTTP web-server which supports the FCGI protocol.
+2. as a very simple standalone HTTP server that does not require other real web-server software to be run on the server side.
+
+This gives you the full flexibility to either
+
+1. plug httun into your existing Apache/lighttpd/etc infrastructure and serve a httun tunnel from an arbitrary URL path of your existing setup or
+2. run httun standalone with no web-server overhead.
 
 # License
 
