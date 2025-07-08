@@ -34,7 +34,7 @@ const SESSION_INIT_RETRIES: usize = 5;
 
 struct CommDeque<T, const SIZE: usize> {
     deque: Mutex<heapless::Deque<T, SIZE>>,
-    put_notify: Notify,
+    notify: Notify,
     overflow: AtomicBool,
 }
 
@@ -42,13 +42,13 @@ impl<T, const SIZE: usize> CommDeque<T, SIZE> {
     pub fn new() -> Self {
         Self {
             deque: Mutex::new(heapless::Deque::new()),
-            put_notify: Notify::new(),
+            notify: Notify::new(),
             overflow: AtomicBool::new(false),
         }
     }
 
     fn clear_notification(&self) {
-        let notified = self.put_notify.notified();
+        let notified = self.notify.notified();
         pin!(notified);
         notified.enable(); // consume the notification.
     }
@@ -59,23 +59,29 @@ impl<T, const SIZE: usize> CommDeque<T, SIZE> {
     }
 
     pub async fn put(&self, mut value: T) {
-        while let Err(v) = self.deque.lock().await.push_back(value) {
-            value = v;
-            if !self.overflow.swap(true, Relaxed) && SIZE > 1 {
+        loop {
+            if let Err(v) = self.deque.lock().await.push_back(value) {
+                value = v;
+            } else {
+                break;
+            }
+            if SIZE > 1 && !self.overflow.swap(true, Relaxed) {
                 log::warn!("Httun communication queue overflow.");
             }
-            sleep(Duration::from_millis(10)).await;
+            self.notify.notified().await;
         }
-        self.put_notify.notify_one();
+        self.notify.notify_one();
     }
 
     pub async fn get(&self) -> T {
-        loop {
-            self.put_notify.notified().await;
+        let value = loop {
             if let Some(value) = self.deque.lock().await.pop_front() {
                 break value;
             }
-        }
+            self.notify.notified().await;
+        };
+        self.notify.notify_one();
+        value
     }
 }
 
