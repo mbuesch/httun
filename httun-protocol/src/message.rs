@@ -124,7 +124,7 @@ impl From<Operation> for u8 {
 /// The payload of this `Message` depends on the `Operation`.
 /// It is either a OSI/ISO L4 packet, a L7 packet or other HTTUN control data.
 ///
-/// In case of a L7 the payload must be a `SockMessage`.
+/// In case of a L7 the payload must be a `L7Container`.
 #[derive(Clone)]
 pub struct Message {
     type_: MsgType,
