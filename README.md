@@ -1,4 +1,4 @@
-# IP4/6 or layer-7 network traffic over encrypted HTTP tunnel
+# Encrypted HTTP tunnel for IP4/6 or layer-7 network traffic
 
 httun is a network tunneling tool for tunneling arbitrary network traffic over HTTP(s).
 
@@ -16,6 +16,16 @@ The tunnel is always strongly encrypted and authenticated.
 
 The tunnelling option 1. is preferred, because it's much more flexible.
 But it's also much harder to set up due to the need to configure and route the traffic to and from the Linux TUN endpoints.
+Standard Linux routing (ip route) and filtering (nftables / iptables) can be used.
+
+The tunnelling option 2. has the downside that it is restricted to a single port and that it basically pokes a hole through your server firewall.
+Therefore, use it with care.
+httun provides some server side block- and allow-list based filtering to mitigate this risk.
+But it has the advantage that it's easier to set up.
+
+This powerful tool comes with great benefits if used correctly and risks if used incorrectly.
+Like with any other tunnelling/VPN tool.
+Please read the httun documentation to understand both the potential and the risk of httun tunnelling.
 
 ## Maturity
 
