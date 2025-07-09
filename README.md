@@ -23,7 +23,7 @@ Therefore, use it with care.
 httun provides some server side block- and allow-list based filtering to mitigate this risk.
 But it has the advantage that it's easier to set up.
 
-This powerful tool comes with great benefits if used correctly and risks if used incorrectly.
+This powerful tool comes with great benefits if used correctly and it comes with risks if used incorrectly.
 Like with any other tunnelling/VPN tool.
 Please read the httun documentation to understand both the potential and the risk of httun tunnelling.
 
@@ -57,11 +57,11 @@ It highly depends on what your application traffic looks like.
 If the application sends mainly only small packets, then this will result in a rather large overhead.
 But if the application can send big packages then the overhead of the HTTP headers and the httun headers is quite small compared to the application payload.
 
-Throughput of 10 MBit/s is possible.
+Throughput of more than 10 MBit/s is possible.
 But it depends on your application what throughput you can actually get.
 
 Latency is also much elevated, as compared to direct network connections.
-Expect a latency overhead of about 10 ms to 100 ms.
+Expect a latency overhead of at least 10 ms.
 
 ## The server - Either FCGI or Standalone
 
@@ -74,6 +74,48 @@ This gives you the full flexibility to either
 
 1. plug httun into your existing Apache/lighttpd/etc infrastructure and serve a httun tunnel from an arbitrary URL path of your existing setup or
 2. run httun standalone with no web-server overhead.
+
+# Building
+
+## Prerequisites
+
+httun requires
+[Rust 1.88](https://www.rust-lang.org/tools/install)
+or later to be installed on your system to build the source code.
+
+## Building the source code
+
+TODO
+
+# Installing
+
+## Installing client
+
+TODO
+
+## Installing server: FCGI
+
+TODO
+
+## Installing server: Standalone
+
+TODO
+
+# Configuring
+
+TODO
+
+## Example: Linux TUN based tunnel
+
+TODO
+
+## Example: ISO/OSI layer 7 (socket) tunnel
+
+TODO
+
+# Distribution packaging
+
+TODO
 
 # License
 
