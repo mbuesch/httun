@@ -220,9 +220,9 @@ define_direction!(DirectionR, "r");
 define_direction!(DirectionW, "w");
 
 async fn direction_r(
-    chan: Arc<DirectionR>,
-    ready: Arc<Notify>,
-    comm: Arc<HttunComm>,
+    chan: &DirectionR,
+    ready: &Notify,
+    comm: &HttunComm,
     user_agent: &str,
     key: &Key,
     session_secret: SessionSecret,
@@ -316,9 +316,9 @@ async fn direction_r(
 }
 
 async fn direction_w(
-    chan: Arc<DirectionW>,
-    ready: Arc<Notify>,
-    comm: Arc<HttunComm>,
+    chan: &DirectionW,
+    ready: &Notify,
+    comm: &HttunComm,
     user_agent: &str,
     key: &Key,
     session_secret: SessionSecret,
@@ -535,13 +535,13 @@ impl HttunClient {
             let mut r_task = task::spawn({
                 let r = Arc::clone(&self.r);
                 let ready = Arc::clone(&r_task_ready);
-                let ready_exit = Arc::clone(&r_task_ready);
                 let comm = Arc::clone(&comm);
                 let user_agent = self.user_agent.clone();
                 let key = Arc::clone(&self.key);
                 async move {
-                    let res = direction_r(r, ready, comm, &user_agent, &key, session_secret).await;
-                    ready_exit.notify_one();
+                    let res =
+                        direction_r(&r, &ready, &comm, &user_agent, &key, session_secret).await;
+                    ready.notify_one();
                     res
                 }
             });
@@ -549,13 +549,13 @@ impl HttunClient {
             let mut w_task = task::spawn({
                 let w = Arc::clone(&self.w);
                 let ready = Arc::clone(&w_task_ready);
-                let ready_exit = Arc::clone(&r_task_ready);
                 let comm = Arc::clone(&comm);
                 let user_agent = self.user_agent.clone();
                 let key = Arc::clone(&self.key);
                 async move {
-                    let res = direction_w(w, ready, comm, &user_agent, &key, session_secret).await;
-                    ready_exit.notify_one();
+                    let res =
+                        direction_w(&w, &ready, &comm, &user_agent, &key, session_secret).await;
+                    ready.notify_one();
                     res
                 }
             });
