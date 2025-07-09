@@ -53,6 +53,14 @@ impl<T, const SIZE: usize> CommDeque<T, SIZE> {
         notified.enable(); // consume the notification.
     }
 
+    fn notify(&self) {
+        self.notify.notify_one();
+    }
+
+    async fn wait_for_notify(&self) {
+        self.notify.notified().await;
+    }
+
     pub async fn clear(&self) {
         self.deque.lock().await.clear();
         self.clear_notification();
@@ -68,9 +76,9 @@ impl<T, const SIZE: usize> CommDeque<T, SIZE> {
             if SIZE > 1 && !self.overflow.swap(true, Relaxed) {
                 log::warn!("Httun communication queue overflow.");
             }
-            self.notify.notified().await;
+            self.wait_for_notify().await;
         }
-        self.notify.notify_one();
+        self.notify();
     }
 
     pub async fn get(&self) -> T {
@@ -78,9 +86,9 @@ impl<T, const SIZE: usize> CommDeque<T, SIZE> {
             if let Some(value) = self.deque.lock().await.pop_front() {
                 break value;
             }
-            self.notify.notified().await;
+            self.wait_for_notify().await;
         };
-        self.notify.notify_one();
+        self.notify();
         value
     }
 }
@@ -93,7 +101,7 @@ pub struct HttunComm {
 
 impl HttunComm {
     pub fn new() -> Self {
-        let (restart_watch, _) = watch::channel(false);
+        let (restart_watch, _) = watch::channel(true);
         Self {
             from_httun: CommDeque::new(),
             to_httun: CommDeque::new(),
@@ -213,6 +221,7 @@ define_direction!(DirectionW, "w");
 
 async fn direction_r(
     chan: Arc<DirectionR>,
+    ready: Arc<Notify>,
     comm: Arc<HttunComm>,
     user_agent: &str,
     key: &Key,
@@ -235,6 +244,7 @@ async fn direction_r(
 
     let http_auth = chan_conf.http_basic_auth().clone();
 
+    ready.notify_one();
     loop {
         let oper = match chan.mode {
             HttunClientMode::L4 => Operation::L4FromSrv,
@@ -307,6 +317,7 @@ async fn direction_r(
 
 async fn direction_w(
     chan: Arc<DirectionW>,
+    ready: Arc<Notify>,
     comm: Arc<HttunComm>,
     user_agent: &str,
     key: &Key,
@@ -327,6 +338,7 @@ async fn direction_w(
 
     let http_auth = chan_conf.http_basic_auth().clone();
 
+    ready.notify_one();
     loop {
         let mut msg = comm.recv_to_httun().await;
         msg.set_sequence(tx_sequence_b.next());
@@ -517,22 +529,39 @@ impl HttunClient {
 
             comm.clear().await;
 
+            let r_task_ready = Arc::new(Notify::new());
+            let w_task_ready = Arc::new(Notify::new());
+
             let mut r_task = task::spawn({
                 let r = Arc::clone(&self.r);
+                let ready = Arc::clone(&r_task_ready);
+                let ready_exit = Arc::clone(&r_task_ready);
                 let comm = Arc::clone(&comm);
                 let user_agent = self.user_agent.clone();
                 let key = Arc::clone(&self.key);
-                async move { direction_r(r, comm, &user_agent, &key, session_secret).await }
+                async move {
+                    let res = direction_r(r, ready, comm, &user_agent, &key, session_secret).await;
+                    ready_exit.notify_one();
+                    res
+                }
             });
 
             let mut w_task = task::spawn({
                 let w = Arc::clone(&self.w);
+                let ready = Arc::clone(&w_task_ready);
+                let ready_exit = Arc::clone(&r_task_ready);
                 let comm = Arc::clone(&comm);
                 let user_agent = self.user_agent.clone();
                 let key = Arc::clone(&self.key);
-                async move { direction_w(w, comm, &user_agent, &key, session_secret).await }
+                async move {
+                    let res = direction_w(w, ready, comm, &user_agent, &key, session_secret).await;
+                    ready_exit.notify_one();
+                    res
+                }
             });
 
+            r_task_ready.notified().await;
+            w_task_ready.notified().await;
             comm.notify_restart_done();
 
             tokio::select! {
