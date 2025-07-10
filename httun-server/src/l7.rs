@@ -191,6 +191,10 @@ impl L7State {
             .context("Parse config l7-tunnel.address-denylist")?;
         denylist.log("l7-tunnel.address-denylist");
 
+        if let Some(bind_device) = conf.bind_to_interface() {
+            log::info!("l7-tunnel.bind-to-interface = \"{bind_device}\"");
+        }
+
         Ok(Self {
             conf: conf.clone(),
             stream: ArcSwapOption::new(None),
