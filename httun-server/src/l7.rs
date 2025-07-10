@@ -84,6 +84,17 @@ impl NetList {
             NetListCheck::NoList
         }
     }
+
+    pub fn log(&self, name: &str) {
+        if log::log_enabled!(log::Level::Info) {
+            if let Some(list) = &self.list {
+                let list: String = list.iter().map(|a| format!("\"{a:?}\", ")).collect();
+                log::info!("{name} = [{list}]");
+            } else {
+                log::info!("No {name}");
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -172,16 +183,22 @@ pub struct L7State {
 
 impl L7State {
     pub fn new(conf: &ConfigL7Tunnel) -> ah::Result<Self> {
+        let allowlist = NetList::new(conf.address_allowlist())
+            .context("Parse config l7-tunnel.address-allowlist")?;
+        allowlist.log("l7-tunnel.address-allowlist");
+
+        let denylist = NetList::new(conf.address_denylist())
+            .context("Parse config l7-tunnel.address-denylist")?;
+        denylist.log("l7-tunnel.address-denylist");
+
         Ok(Self {
             conf: conf.clone(),
             stream: ArcSwapOption::new(None),
             last_activity: AtomicU64::new(NO_ACTIVITY),
             connect_notify: Notify::new(),
             disconnect_notify: Notify::new(),
-            allowlist: NetList::new(conf.address_allowlist())
-                .context("Parse config l7-tunnel.address-allowlist")?,
-            denylist: NetList::new(conf.address_denylist())
-                .context("Parse config l7-tunnel.address-denylist")?,
+            allowlist,
+            denylist,
         })
     }
 
