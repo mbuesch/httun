@@ -46,6 +46,9 @@ pub async fn run_mode_socket(
 
     log::info!("Listening on port {local_port}");
 
+    // Start the tunnel.
+    httun_comm.request_restart().await;
+
     // Spawn task: Local socket handler.
     task::spawn({
         async move {
@@ -61,11 +64,12 @@ pub async fn run_mode_socket(
                         log::info!("New connection on local socket port {local_port}.");
                         if let Ok(permit) = conn_semaphore.acquire_owned().await {
                             task::spawn(async move {
-                                // Start the tunnel.
-                                httun_comm.request_restart().await;
-
                                 match conn
-                                    .handle_packets(httun_comm, target_addr, target_port)
+                                    .handle_packets(
+                                        Arc::clone(&httun_comm),
+                                        target_addr,
+                                        target_port,
+                                    )
                                     .await
                                 {
                                     Ok(()) => unreachable!(),
@@ -76,6 +80,10 @@ pub async fn run_mode_socket(
                                         log::error!("Local client: {e:?}");
                                     }
                                 }
+
+                                // Restart the tunnel.
+                                httun_comm.request_restart().await;
+
                                 drop(permit);
                             });
                         }
