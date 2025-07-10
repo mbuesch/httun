@@ -95,6 +95,13 @@ impl NetList {
             }
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.list
+            .as_ref()
+            .map(|list| list.is_empty())
+            .unwrap_or(true)
+    }
 }
 
 #[derive(Debug)]
@@ -191,6 +198,16 @@ impl L7State {
             .context("Parse config l7-tunnel.address-denylist")?;
         denylist.log("l7-tunnel.address-denylist");
 
+        if !allowlist.is_empty() && denylist.is_empty() {
+            log::warn!(
+                "\
+                An l7-tunnel.address-allowlist is configured, \
+                but the l7-tunnel.address-denylist is empty. \
+                The allowlist does not have en effect!\
+            "
+            );
+        }
+
         if let Some(bind_device) = conf.bind_to_interface() {
             log::info!("l7-tunnel.bind-to-interface = \"{bind_device}\"");
         }
@@ -226,26 +243,21 @@ impl L7State {
         let addr = cont.addr();
 
         match self.denylist.check(addr) {
-            NetListCheck::NoList => {
-                // No denylist. Allow address.
+            NetListCheck::NoList | NetListCheck::Absent => {
+                // No denylist or address is not in denylist.
+                // Allow address.
             }
             NetListCheck::Contains => {
-                return Err(err!("l7-tunnel.address-denylist contains {addr}"));
-            }
-            NetListCheck::Absent => {
-                // Address is not in denylist. Allow address.
-            }
-        }
-
-        match self.allowlist.check(addr) {
-            NetListCheck::NoList => {
-                // No allowlist. Allow address.
-            }
-            NetListCheck::Contains => {
-                // Address is in allowlist. Allow address.
-            }
-            NetListCheck::Absent => {
-                return Err(err!("l7-tunnel.address-allowlist does not contain {addr}"));
+                match self.allowlist.check(addr) {
+                    NetListCheck::NoList | NetListCheck::Absent => {
+                        // Address not in allowlist and denylist matched.
+                        return Err(err!("l7-tunnel.address-denylist contains {addr}"));
+                    }
+                    NetListCheck::Contains => {
+                        // Address is in allowlist. This overrides denylist.
+                        // Allow address.
+                    }
+                }
             }
         }
 
