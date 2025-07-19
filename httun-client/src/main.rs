@@ -154,7 +154,7 @@ macro_rules! recv_signal {
 
 async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     if matches!(opts.mode, Some(Mode::Genkey {})) {
-        return run_mode_genkey(&opts.channel).await;
+        return run_mode_genkey().await;
     }
 
     if opts.mode.is_none() {
