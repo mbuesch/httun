@@ -126,6 +126,27 @@ install_httun_server()
             /opt/httun/etc/httun/server.conf
     fi
 
+
+    if [ -e /opt/httun/etc/httun/server-start-pre.sh ]; then
+        do_chown root:root /opt/httun/etc/httun/server-start-pre.sh
+        do_chmod 0750 /opt/httun/etc/httun/server-start-pre.sh
+    else
+        do_install \
+            -o root -g root -m 0750 \
+            "$basedir/httun-server/server-start-pre.sh" \
+            /opt/httun/etc/httun/server-start-pre.sh
+    fi
+
+    if [ -e /opt/httun/etc/httun/server-start-post.sh ]; then
+        do_chown root:root /opt/httun/etc/httun/server-start-post.sh
+        do_chmod 0750 /opt/httun/etc/httun/server-start-post.sh
+    else
+        do_install \
+            -o root -g root -m 0750 \
+            "$basedir/httun-server/server-start-post.sh" \
+            /opt/httun/etc/httun/server-start-post.sh
+    fi
+
     do_install \
         -o root -g root -m 0755 \
         "$target/httun-server" \
