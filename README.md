@@ -4,6 +4,14 @@ httun is a network tunneling tool for tunneling arbitrary network traffic over H
 
 The tunnel is always strongly encrypted and authenticated.
 
+## Why?
+
+Some public "internet" access points only allow access to certain ports and protocols.
+
+HTTP almost certainly is one of the allowed protocols.
+
+If you only have access to one of these limited access points you can use your httun server to tunnel to the real internet with all services available that you enable in your server routing/firewall.
+
 ## What kind of traffic can be tunnelled?
 
 1. IP v4 and IP v6 traffic can be tunneled.
