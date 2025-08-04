@@ -30,6 +30,7 @@ const HTTP_R_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S + 3);
 const HTTP_W_TIMEOUT: Duration = Duration::from_secs(3);
 #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
 const TCP_USER_TIMEOUT: Duration = Duration::from_secs(2);
+const RW_RETRIES: usize = 5;
 const SESSION_INIT_RETRIES: usize = 5;
 
 struct CommDeque<T, const SIZE: usize> {
@@ -253,7 +254,13 @@ async fn direction_r(
         };
         let mut resp;
 
+        let mut tries = 0;
         'http: loop {
+            if tries >= RW_RETRIES {
+                return Err(err!("httun HTTP-r: Maximum number of retries exceeded."));
+            }
+            tries += 1;
+
             let mut msg = Message::new(MsgType::Data, oper, vec![])?;
             msg.set_sequence(tx_sequence_c.next());
             let msg = msg.serialize_b64u(key, Some(session_secret));
@@ -275,6 +282,8 @@ async fn direction_r(
                     break 'http;
                 }
                 StatusCode::REQUEST_TIMEOUT => {
+                    // This is normal behavior, if the inferface is idle.
+                    tries = 0;
                     // Fast retry.
                     continue 'http;
                 }
@@ -347,7 +356,13 @@ async fn direction_w(
 
         log::trace!("Send to HTTP-w");
 
+        let mut tries = 0;
         'http: loop {
+            if tries >= RW_RETRIES {
+                return Err(err!("httun HTTP-w: Maximum number of retries exceeded."));
+            }
+            tries += 1;
+
             let url = format_url_serial(&chan.url, chan.serial.fetch_add(1, Relaxed));
             let mut req = client
                 .post(&url)
