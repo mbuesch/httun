@@ -247,7 +247,7 @@ async fn direction_r(
     ready.notify_one();
     loop {
         let oper = match chan.mode {
-            HttunClientMode::L4 => Operation::L4FromSrv,
+            HttunClientMode::L3 => Operation::L3FromSrv,
             HttunClientMode::L7 => Operation::L7FromSrv,
             HttunClientMode::Test => Operation::TestFromSrv,
         };
@@ -459,7 +459,7 @@ async fn get_session(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttunClientMode {
-    L4,
+    L3,
     L7,
     Test,
 }

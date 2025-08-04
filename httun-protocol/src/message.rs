@@ -61,8 +61,8 @@ impl From<MsgType> for u8 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
     Init,
-    L4ToSrv,
-    L4FromSrv,
+    L3ToSrv,
+    L3FromSrv,
     L7ToSrv,
     L7FromSrv,
     TestToSrv,
@@ -74,16 +74,16 @@ impl TryFrom<u8> for Operation {
 
     fn try_from(op: u8) -> ah::Result<Self> {
         const INIT: u8 = Operation::Init as _;
-        const L4TOSRV: u8 = Operation::L4ToSrv as _;
-        const L4FROMSRV: u8 = Operation::L4FromSrv as _;
+        const L3TOSRV: u8 = Operation::L3ToSrv as _;
+        const L3FROMSRV: u8 = Operation::L3FromSrv as _;
         const L7TOSRV: u8 = Operation::L7ToSrv as _;
         const L7FROMSRV: u8 = Operation::L7FromSrv as _;
         const TESTTOSRV: u8 = Operation::TestToSrv as _;
         const TESTFROMSRV: u8 = Operation::TestFromSrv as _;
         match op {
             INIT => Ok(Operation::Init),
-            L4TOSRV => Ok(Operation::L4ToSrv),
-            L4FROMSRV => Ok(Operation::L4FromSrv),
+            L3TOSRV => Ok(Operation::L3ToSrv),
+            L3FROMSRV => Ok(Operation::L3FromSrv),
             L7TOSRV => Ok(Operation::L7ToSrv),
             L7FROMSRV => Ok(Operation::L7FromSrv),
             TESTTOSRV => Ok(Operation::TestToSrv),
@@ -122,7 +122,7 @@ impl From<Operation> for u8 {
 /// ## Payload
 ///
 /// The payload of this `Message` depends on the `Operation`.
-/// It is either a OSI/ISO L4 packet, a L7 packet or other HTTUN control data.
+/// It is either a OSI/ISO L3 packet, a L7 packet or other HTTUN control data.
 ///
 /// In case of a L7 the payload must be a `L7Container`.
 #[derive(Clone)]

@@ -190,7 +190,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     //TODO resolve server_url host name.
 
     let client_mode = match &opts.mode {
-        Some(Mode::Tun { .. }) => HttunClientMode::L4,
+        Some(Mode::Tun { .. }) => HttunClientMode::L3,
         Some(Mode::Socket { .. }) => HttunClientMode::L7,
         Some(Mode::Test {}) => HttunClientMode::Test,
         None | Some(Mode::Genkey {}) => unreachable!(),

@@ -31,7 +31,7 @@ pub async fn run_mode_tun(httun_comm: Arc<HttunComm>, tun_name: &str) -> ah::Res
             loop {
                 match tun.recv().await {
                     Ok(pkg) => {
-                        let msg = match Message::new(MsgType::Data, Operation::L4ToSrv, pkg) {
+                        let msg = match Message::new(MsgType::Data, Operation::L3ToSrv, pkg) {
                             Ok(msg) => msg,
                             Err(e) => {
                                 log::error!("Make httun packet failed: {e:?}");

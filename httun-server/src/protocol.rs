@@ -114,11 +114,11 @@ impl ProtocolHandler {
             .context("rx sequence validation SequenceType::B")?;
 
         match oper {
-            Operation::L4ToSrv => {
-                log::trace!("Received Operation::L4ToSrv");
-                chan.l4send(msg.payload())
+            Operation::L3ToSrv => {
+                log::trace!("Received Operation::L3ToSrv");
+                chan.l3send(msg.payload())
                     .await
-                    .context("Channel L4 send")?;
+                    .context("Channel L3 send")?;
             }
             Operation::L7ToSrv => {
                 log::trace!("Received Operation::L7ToSrv");
@@ -194,11 +194,11 @@ impl ProtocolHandler {
             .context("rx sequence validation SequenceType::C")?;
 
         let (reply_oper, payload) = match oper {
-            Operation::L4FromSrv => {
-                log::trace!("Received Operation::L4FromSrv");
+            Operation::L3FromSrv => {
+                log::trace!("Received Operation::L3FromSrv");
                 (
-                    Operation::L4FromSrv,
-                    chan.l4recv().await.context("Channel L4 receive")?,
+                    Operation::L3FromSrv,
+                    chan.l3recv().await.context("Channel L3 receive")?,
                 )
             }
             Operation::L7FromSrv => {

@@ -40,7 +40,7 @@ struct SessionState {
 #[derive(Debug)]
 pub struct Channel {
     name: String,
-    l4: Option<TunHandler>,
+    l3: Option<TunHandler>,
     l7: Option<L7State>,
     key: Key,
     test_enabled: bool,
@@ -53,7 +53,7 @@ impl Channel {
     fn new(
         conf: &Config,
         name: &str,
-        l4: Option<TunHandler>,
+        l3: Option<TunHandler>,
         l7: Option<L7State>,
         key: Key,
         test_enabled: bool,
@@ -67,7 +67,7 @@ impl Channel {
         };
         Self {
             name: name.to_string(),
-            l4,
+            l3,
             l7,
             key,
             test_enabled,
@@ -146,9 +146,9 @@ impl Channel {
         self.ping.get().await
     }
 
-    pub async fn l4send(&self, data: &[u8]) -> ah::Result<()> {
-        if let Some(l4) = &self.l4 {
-            l4.send(data).await.context("TUN/L4 send")
+    pub async fn l3send(&self, data: &[u8]) -> ah::Result<()> {
+        if let Some(l3) = &self.l3 {
+            l3.send(data).await.context("TUN/L3 send")
         } else {
             Err(err!(
                 "Can't send data to TUN interface. \
@@ -158,9 +158,9 @@ impl Channel {
         }
     }
 
-    pub async fn l4recv(&self) -> ah::Result<Vec<u8>> {
-        if let Some(l4) = &self.l4 {
-            l4.recv().await.context("TUN/L4 receive")
+    pub async fn l3recv(&self) -> ah::Result<Vec<u8>> {
+        if let Some(l3) = &self.l3 {
+            l3.recv().await.context("TUN/L3 receive")
         } else {
             Err(err!(
                 "Can't receive data from TUN interface. \
