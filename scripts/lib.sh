@@ -56,28 +56,35 @@ stop_services()
     try_systemctl stop httun-server.socket
     try_systemctl stop httun-server.service
     try_systemctl stop httun-server-standalone.service
+}
 
+disable_services()
+{
     try_systemctl disable httun-server.service
     try_systemctl disable httun-server.socket
     try_systemctl disable httun-server-standalone.service
 }
 
-start_services()
+enable_services_fcgi()
 {
-    local mode="$1"
+    do_systemctl enable httun-server.socket
+    #do_systemctl enable httun-server.service
+}
 
-    case "$mode" in
-        fcgi)
-            do_systemctl start httun-server.socket
-            do_systemctl start httun-server.service
-            ;;
-        standalone)
-            do_systemctl start httun-server-standalone.service
-            ;;
-        *)
-            die "start_services: Invalid mode"
-            ;;
-    esac
+enable_services_standalone()
+{
+    do_systemctl enable httun-server-standalone.service
+}
+
+start_services_fcgi()
+{
+    do_systemctl start httun-server.socket
+    do_systemctl start httun-server.service
+}
+
+start_services_standalone()
+{
+    do_systemctl start httun-server-standalone.service
 }
 
 install_entry_checks()
@@ -114,8 +121,6 @@ install_dirs()
 
 install_httun_server()
 {
-    local mode="$1"
-
     if [ -e /opt/httun/etc/httun/server.conf ]; then
         do_chown root:root /opt/httun/etc/httun/server.conf
         do_chmod 0640 /opt/httun/etc/httun/server.conf
@@ -152,33 +157,20 @@ install_httun_server()
         "$target/httun-server" \
         /opt/httun/bin/
 
-    case "$mode" in
-        fcgi)
-            do_install \
-                -o root -g root -m 0644 \
-                "$basedir/httun-server/httun-server.service" \
-                /etc/systemd/system/
+    do_install \
+        -o root -g root -m 0644 \
+        "$basedir/httun-server/httun-server.service" \
+        /etc/systemd/system/
 
-            do_install \
-                -o root -g root -m 0644 \
-                "$basedir/httun-server/httun-server.socket" \
-                /etc/systemd/system/
+    do_install \
+        -o root -g root -m 0644 \
+        "$basedir/httun-server/httun-server.socket" \
+        /etc/systemd/system/
 
-            do_systemctl enable httun-server.socket
-            #do_systemctl enable httun-server.service
-            ;;
-        standalone)
-            do_install \
-                -o root -g root -m 0644 \
-                "$basedir/httun-server/httun-server-standalone.service" \
-                /etc/systemd/system/
-
-            do_systemctl enable httun-server-standalone.service
-            ;;
-        *)
-            die "install_httun_server: Invalid mode"
-            ;;
-    esac
+    do_install \
+        -o root -g root -m 0644 \
+        "$basedir/httun-server/httun-server-standalone.service" \
+        /etc/systemd/system/
 }
 
 install_httun_client()

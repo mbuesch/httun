@@ -24,9 +24,11 @@ target="$basedir/target/$release"
 
 install_entry_checks
 stop_services
+disable_services
 install_dirs
-install_httun_server standalone
+install_httun_server
 install_httun_client
-start_services standalone
+enable_services_standalone
+start_services_standalone
 
 # vim: ts=4 sw=4 expandtab
