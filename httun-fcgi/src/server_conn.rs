@@ -5,7 +5,7 @@
 use anyhow::{self as ah, Context as _, format_err as err};
 use arc_swap::ArcSwap;
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
-use httun_util::errors::ConnectionResetError;
+use httun_util::errors::{ConnectionResetError, DisconnectedError};
 use std::{
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -94,7 +94,7 @@ impl ServerUnixConn {
             match self.stream.load().try_read(&mut data[count..]) {
                 Ok(n) => {
                     if n == 0 {
-                        return Err(err!("Socket read: Peer disconnected"));
+                        return Err(DisconnectedError.into());
                     }
                     count += n;
                     assert!(count <= size);
@@ -138,7 +138,10 @@ impl ServerUnixConn {
                 ))
                 .await
             {
-                Err(e) if e.downcast_ref::<ConnectionResetError>().is_some() => {
+                Err(e)
+                    if e.downcast_ref::<ConnectionResetError>().is_some()
+                        || e.downcast_ref::<DisconnectedError>().is_some() =>
+                {
                     self.reconnect().await?;
                     continue;
                 }
@@ -157,7 +160,10 @@ impl ServerUnixConn {
                 ))
                 .await
             {
-                Err(e) if e.downcast_ref::<ConnectionResetError>().is_some() => {
+                Err(e)
+                    if e.downcast_ref::<ConnectionResetError>().is_some()
+                        || e.downcast_ref::<DisconnectedError>().is_some() =>
+                {
                     self.reconnect().await?;
                     continue;
                 }
@@ -165,7 +171,10 @@ impl ServerUnixConn {
                 Ok(()) => (),
             }
             let msg = match self.recv_msg().await {
-                Err(e) if e.downcast_ref::<ConnectionResetError>().is_some() => {
+                Err(e)
+                    if e.downcast_ref::<ConnectionResetError>().is_some()
+                        || e.downcast_ref::<DisconnectedError>().is_some() =>
+                {
                     self.reconnect().await?;
                     continue;
                 }
