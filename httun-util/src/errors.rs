@@ -18,5 +18,6 @@ macro_rules! define_simple_error {
 }
 
 define_simple_error!(DisconnectedError);
+define_simple_error!(ConnectionResetError);
 
 // vim: ts=4 sw=4 expandtab

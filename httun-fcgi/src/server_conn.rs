@@ -3,40 +3,64 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use anyhow::{self as ah, Context as _, format_err as err};
+use arc_swap::ArcSwap;
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
-use std::{io::ErrorKind, path::Path};
+use httun_util::errors::ConnectionResetError;
+use std::{
+    io::ErrorKind,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::net::UnixStream;
+
+const TRIES: usize = 3;
+
+async fn unix_connect(path: &Path) -> ah::Result<UnixStream> {
+    UnixStream::connect(path)
+        .await
+        .context("Connect to Unix socket")
+}
 
 #[derive(Debug)]
 pub struct ServerUnixConn {
-    stream: UnixStream,
+    socket_path: PathBuf,
+    stream: ArcSwap<UnixStream>,
     chan_name: String,
 }
 
 impl ServerUnixConn {
     pub async fn new(socket_path: &Path, chan_name: &str) -> ah::Result<Self> {
-        let stream = UnixStream::connect(socket_path)
-            .await
-            .context("Connect to Unix socket")?;
         let this = Self {
-            stream,
+            socket_path: socket_path.to_path_buf(),
+            stream: ArcSwap::new(Arc::new(unix_connect(socket_path).await?)),
             chan_name: chan_name.to_string(),
         };
-        this.send_msg(UnMessage::new_init(chan_name.to_string()))
-            .await
-            .context("Initialize unix connection to httun-server")?;
+        this.init_conn().await?;
         Ok(this)
+    }
+
+    async fn init_conn(&self) -> ah::Result<()> {
+        self.send_msg(UnMessage::new_init(self.chan_name.to_string()))
+            .await
+            .context("Initialize unix connection to httun-server")
+    }
+
+    async fn reconnect(&self) -> ah::Result<()> {
+        self.stream
+            .store(Arc::new(unix_connect(&self.socket_path).await?));
+        self.init_conn().await
     }
 
     async fn do_send(&self, data: &[u8]) -> ah::Result<()> {
         let mut count = 0;
         loop {
             self.stream
+                .load()
                 .writable()
                 .await
                 .context("Socket polling (send)")?;
 
-            match self.stream.try_write(&data[count..]) {
+            match self.stream.load().try_write(&data[count..]) {
                 Ok(n) => {
                     count += n;
                     assert!(count <= data.len());
@@ -45,6 +69,11 @@ impl ServerUnixConn {
                     }
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => (),
+                Err(e)
+                    if [ErrorKind::ConnectionReset, ErrorKind::BrokenPipe].contains(&e.kind()) =>
+                {
+                    return Err(ConnectionResetError.into());
+                }
                 Err(e) => {
                     return Err(err!("Socket write: {e}"));
                 }
@@ -57,11 +86,12 @@ impl ServerUnixConn {
         let mut data = vec![0_u8; size];
         loop {
             self.stream
+                .load()
                 .readable()
                 .await
                 .context("Socket polling (recv)")?;
 
-            match self.stream.try_read(&mut data[count..]) {
+            match self.stream.load().try_read(&mut data[count..]) {
                 Ok(n) => {
                     if n == 0 {
                         return Err(err!("Socket read: Peer disconnected"));
@@ -73,6 +103,11 @@ impl ServerUnixConn {
                     }
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => (),
+                Err(e)
+                    if [ErrorKind::ConnectionReset, ErrorKind::BrokenPipe].contains(&e.kind()) =>
+                {
+                    return Err(ConnectionResetError.into());
+                }
                 Err(e) => {
                     return Err(err!("Socket read: {e}"));
                 }
@@ -95,34 +130,67 @@ impl ServerUnixConn {
     }
 
     pub async fn send(&self, payload: Vec<u8>) -> ah::Result<()> {
-        self.send_msg(UnMessage::new_to_srv(self.chan_name.to_string(), payload))
-            .await
+        for _ in 0..TRIES {
+            match self
+                .send_msg(UnMessage::new_to_srv(
+                    self.chan_name.to_string(),
+                    payload.clone(),
+                ))
+                .await
+            {
+                Err(e) if e.downcast_ref::<ConnectionResetError>().is_some() => {
+                    self.reconnect().await?;
+                    continue;
+                }
+                res => return res,
+            }
+        }
+        Err(err!("Unix socket connection reset by peer."))
     }
 
     pub async fn recv(&self, payload: Vec<u8>) -> ah::Result<Vec<u8>> {
-        self.send_msg(UnMessage::new_req_from_srv(
-            self.chan_name.to_string(),
-            payload,
-        ))
-        .await?;
-        let msg = self.recv_msg().await?;
-        match msg.op() {
-            UnOperation::Close => {
-                return Err(err!("ServerUnixConn: Closed by server"));
+        for _ in 0..TRIES {
+            match self
+                .send_msg(UnMessage::new_req_from_srv(
+                    self.chan_name.to_string(),
+                    payload.clone(),
+                ))
+                .await
+            {
+                Err(e) if e.downcast_ref::<ConnectionResetError>().is_some() => {
+                    self.reconnect().await?;
+                    continue;
+                }
+                Err(e) => return Err(e),
+                Ok(()) => (),
             }
-            UnOperation::FromSrv => (),
-            op => {
-                return Err(err!("ServerUnixConn: Got unexpected op: {op:?}"));
+            let msg = match self.recv_msg().await {
+                Err(e) if e.downcast_ref::<ConnectionResetError>().is_some() => {
+                    self.reconnect().await?;
+                    continue;
+                }
+                Err(e) => return Err(e),
+                Ok(m) => m,
+            };
+            match msg.op() {
+                UnOperation::Close => {
+                    return Err(err!("ServerUnixConn: Closed by server"));
+                }
+                UnOperation::FromSrv => (),
+                op => {
+                    return Err(err!("ServerUnixConn: Got unexpected op: {op:?}"));
+                }
             }
+            if msg.chan_name() != self.chan_name {
+                return Err(err!(
+                    "ServerUnixConn: Reply chan was '{}' instead of '{}'",
+                    msg.chan_name(),
+                    self.chan_name
+                ));
+            }
+            return Ok(msg.into_payload());
         }
-        if msg.chan_name() != self.chan_name {
-            return Err(err!(
-                "ServerUnixConn: Reply chan was '{}' instead of '{}'",
-                msg.chan_name(),
-                self.chan_name
-            ));
-        }
-        Ok(msg.into_payload())
+        Err(err!("Unix socket connection reset by peer."))
     }
 }
 
