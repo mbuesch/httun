@@ -183,7 +183,8 @@ impl ServerUnixConn {
             };
             match msg.op() {
                 UnOperation::Close => {
-                    return Err(err!("ServerUnixConn: Closed by server"));
+                    self.reconnect().await?;
+                    continue;
                 }
                 UnOperation::FromSrv => (),
                 op => {
