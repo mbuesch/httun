@@ -30,8 +30,8 @@ const HTTP_R_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S + 3);
 const HTTP_W_TIMEOUT: Duration = Duration::from_secs(3);
 #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
 const TCP_USER_TIMEOUT: Duration = Duration::from_secs(2);
-const RW_RETRIES: usize = 5;
-const SESSION_INIT_RETRIES: usize = 5;
+const HTTP_RW_TRIES: usize = 3;
+const SESSION_INIT_TRIES: usize = 5;
 
 struct CommDeque<T, const SIZE: usize> {
     deque: Mutex<heapless::Deque<T, SIZE>>,
@@ -131,8 +131,12 @@ impl HttunComm {
         self.to_httun.get().await
     }
 
+    pub fn set_restart_request(&self) {
+        self.restart_watch.send_replace(true);
+    }
+
     pub async fn request_restart(&self) {
-        let _ = self.restart_watch.send(true);
+        self.set_restart_request();
         let _ = self.restart_watch.subscribe().wait_for(|r| !*r).await;
     }
 
@@ -141,7 +145,7 @@ impl HttunComm {
     }
 
     fn notify_restart_done(&self) {
-        let _ = self.restart_watch.send(false);
+        self.restart_watch.send_replace(false);
     }
 }
 
@@ -256,7 +260,7 @@ async fn direction_r(
 
         let mut tries = 0;
         'http: loop {
-            if tries >= RW_RETRIES {
+            if tries >= HTTP_RW_TRIES {
                 return Err(err!("httun HTTP-r: Maximum number of retries exceeded."));
             }
             tries += 1;
@@ -358,7 +362,7 @@ async fn direction_w(
 
         let mut tries = 0;
         'http: loop {
-            if tries >= RW_RETRIES {
+            if tries >= HTTP_RW_TRIES {
                 return Err(err!("httun HTTP-w: Maximum number of retries exceeded."));
             }
             tries += 1;
@@ -416,8 +420,8 @@ async fn get_session(
 
     let http_auth = chan_conf.http_basic_auth().clone();
 
-    for i in 0..SESSION_INIT_RETRIES {
-        let last_try = i == SESSION_INIT_RETRIES - 1;
+    for i in 0..SESSION_INIT_TRIES {
+        let last_try = i == SESSION_INIT_TRIES - 1;
 
         let msg = Message::new(MsgType::Init, Operation::Init, vec![])?;
         let msg = msg.serialize_b64u(key, None);
@@ -585,12 +589,14 @@ impl HttunClient {
                 ret = &mut r_task => {
                     w_task.abort();
                     let _ = w_task.await;
+                    comm.set_restart_request();
                     ret.context("httun HTTP-r")??;
                     unreachable!(); // Task never returns Ok.
                 }
                 ret = &mut w_task => {
                     r_task.abort();
                     let _ = r_task.await;
+                    comm.set_restart_request();
                     ret.context("httun HTTP-w")??;
                     unreachable!(); // Task never returns Ok.
                 }
