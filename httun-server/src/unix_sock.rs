@@ -90,6 +90,9 @@ impl UnixConn {
             return Ok(None);
         };
         let msg = UnMessage::deserialize(&msg)?;
+        if !self.name.is_empty() && msg.chan_name() != self.name {
+            return Err(err!("Unix socket: Received message for wrong channel."));
+        }
         Ok(Some(msg))
     }
 
