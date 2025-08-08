@@ -58,6 +58,9 @@ pub enum UnOperation {
     /// First message to server.
     Init,
 
+    /// Keep-alive message to server.
+    Keepalive,
+
     /// To httun-server.
     ToSrv,
 
@@ -99,6 +102,10 @@ impl UnMessage {
 
     pub fn new_init(chan_name: String) -> Self {
         Self::new(UnOperation::Init, chan_name, vec![])
+    }
+
+    pub fn new_keepalive(chan_name: String) -> Self {
+        Self::new(UnOperation::Keepalive, chan_name, vec![])
     }
 
     pub fn new_to_srv(chan_name: String, payload: Vec<u8>) -> Self {

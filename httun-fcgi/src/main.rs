@@ -117,6 +117,10 @@ async fn send_to_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<()
     }
 }
 
+async fn send_keepalive_to_httun_server(name: &str) -> ah::Result<()> {
+    get_connection(name, true).await?.send_keepalive().await
+}
+
 async fn fcgi_response(
     req: &FcgiRequest<'_>,
     status: &str,
@@ -240,7 +244,12 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
         )
         .await
         {
-            Err(_) => fcgi_response(&req, "408 Request Timeout", None).await,
+            Err(_) => {
+                if let Err(e) = send_keepalive_to_httun_server(&chan_name).await {
+                    eprintln!("FCGI: HTTP-r: keepalive to server failed: {e:?}");
+                }
+                fcgi_response(&req, "408 Request Timeout", None).await
+            }
             Ok(Err(e)) => {
                 eprintln!("FCGI: HTTP-r: recv from server failed: {e:?}");
                 fcgi_response_error(

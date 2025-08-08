@@ -99,6 +99,11 @@ impl ServerUnixConn {
             .await
     }
 
+    pub async fn send_keepalive(&self) -> ah::Result<()> {
+        self.send_msg(UnMessage::new_keepalive(self.chan_name.to_string()))
+            .await
+    }
+
     pub async fn recv(&self, payload: Vec<u8>) -> ah::Result<Vec<u8>> {
         self.send_msg(UnMessage::new_req_from_srv(
             self.chan_name.to_string(),

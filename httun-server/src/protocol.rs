@@ -101,10 +101,10 @@ impl ProtocolHandler {
     }
 
     async fn handle_tosrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
-        log::debug!("W direction packet received");
-
         let chan = self.chan()?;
         let session = chan.session();
+
+        log::debug!("{}: W direction packet received", chan.name());
 
         let msg = Message::deserialize(&payload, chan.key(), session.secret)?;
         let oper = msg.oper();
@@ -115,21 +115,22 @@ impl ProtocolHandler {
 
         match oper {
             Operation::L3ToSrv => {
-                log::trace!("Received Operation::L3ToSrv");
+                log::trace!("{}: Received Operation::L3ToSrv", chan.name());
                 chan.l3send(msg.payload())
                     .await
                     .context("Channel L3 send")?;
             }
             Operation::L7ToSrv => {
-                log::trace!("Received Operation::L7ToSrv");
+                log::trace!("{}: Received Operation::L7ToSrv", chan.name());
                 chan.l7send(msg.payload())
                     .await
                     .context("Channel L7 send")?;
             }
             Operation::TestToSrv if chan.test_enabled() => {
-                log::trace!("Received Operation::TestToSrv");
+                log::trace!("{}: Received Operation::TestToSrv", chan.name());
                 log::debug!(
-                    "Received test mode ping: '{}'",
+                    "{}: Received test mode ping: '{}'",
+                    chan.name(),
                     String::from_utf8_lossy(msg.payload())
                 );
                 chan.put_ping(msg.into_payload()).await;
@@ -152,10 +153,10 @@ impl ProtocolHandler {
     }
 
     async fn handle_fromsrv_init(&self, payload: Vec<u8>) -> ah::Result<()> {
-        log::debug!("Session init packet received");
-
         let chan = self.chan()?;
         let mut session = chan.session();
+
+        log::debug!("{}: Session init packet received", chan.name());
 
         // Deserialize the received message, even though we don't use it.
         // This checks the authenticity of the message.
@@ -166,7 +167,7 @@ impl ProtocolHandler {
             return Err(err!("Received {oper:?} in init context"));
         }
 
-        log::trace!("Session init message: {msg:?}");
+        log::trace!("{}: Session init", chan.name());
 
         let new_session_secret = self.create_new_session(&chan).await;
 
@@ -181,10 +182,10 @@ impl ProtocolHandler {
     }
 
     async fn handle_fromsrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
-        log::debug!("R direction packet received");
-
         let chan = self.chan()?;
         let session = chan.session();
+
+        log::debug!("{}: R direction packet received", chan.name());
 
         let msg = Message::deserialize(&payload, chan.key(), session.secret)?;
         let oper = msg.oper();
@@ -195,21 +196,21 @@ impl ProtocolHandler {
 
         let (reply_oper, payload) = match oper {
             Operation::L3FromSrv => {
-                log::trace!("Received Operation::L3FromSrv");
+                log::trace!("{}: Received Operation::L3FromSrv", chan.name());
                 (
                     Operation::L3FromSrv,
                     chan.l3recv().await.context("Channel L3 receive")?,
                 )
             }
             Operation::L7FromSrv => {
-                log::trace!("Received Operation::L7FromSrv");
+                log::trace!("{}: Received Operation::L7FromSrv", chan.name());
                 (
                     Operation::L7FromSrv,
                     chan.l7recv().await.context("Channel L7 receive")?,
                 )
             }
             Operation::TestFromSrv if chan.test_enabled() => {
-                log::trace!("Received Operation::TestFromSrv");
+                log::trace!("{}: Received Operation::TestFromSrv", chan.name());
                 (Operation::TestFromSrv, chan.get_pong().await)
             }
             _ => {
@@ -245,6 +246,12 @@ impl ProtocolHandler {
                 } else {
                     self.handle_fromsrv(payload).await
                 }
+            }
+            CommRxMsg::Keepalive => {
+                let chan = self.chan()?;
+                chan.log_activity();
+                log::trace!("{}: Unix socket: Received Keepalive", chan.name());
+                Ok(())
             }
         }
     }

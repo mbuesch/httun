@@ -12,6 +12,7 @@ use std::time::Duration;
 pub enum CommRxMsg {
     ToSrv(Vec<u8>),
     ReqFromSrv(Vec<u8>),
+    Keepalive,
 }
 
 #[derive(Debug)]
@@ -45,6 +46,7 @@ impl CommBackend {
                 match umsg.op() {
                     UnOperation::ToSrv => Ok(CommRxMsg::ToSrv(umsg.into_payload())),
                     UnOperation::ReqFromSrv => Ok(CommRxMsg::ReqFromSrv(umsg.into_payload())),
+                    UnOperation::Keepalive => Ok(CommRxMsg::Keepalive),
                     UnOperation::Init | UnOperation::FromSrv | UnOperation::Close => {
                         Err(err!("Received invalid operation: {:?}", umsg.op()))
                     }
