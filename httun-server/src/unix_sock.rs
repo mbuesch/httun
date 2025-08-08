@@ -5,6 +5,7 @@
 use crate::{WEBSERVER_GID, WEBSERVER_UID, systemd::SystemdSocket};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
+use httun_util::errors::DisconnectedError;
 use std::{sync::atomic, time::Duration};
 use tokio::{
     net::{UnixListener, UnixStream},
@@ -26,13 +27,10 @@ impl UnixConn {
             stream,
         };
 
-        let Some(msg) = timeout(HANDSHAKE_TIMEOUT, this.recv())
+        let msg = timeout(HANDSHAKE_TIMEOUT, this.recv())
             .await
             .context("Handshake receive timeout")?
-            .context("Handshake receive")?
-        else {
-            return Err(err!("Disconnected."));
-        };
+            .context("Handshake receive")?;
         if msg.op() != UnOperation::Init {
             return Err(err!(
                 "UnixConn: Got {:?} but expected {:?}",
@@ -54,7 +52,7 @@ impl UnixConn {
         &self.name
     }
 
-    async fn do_recv(&self, size: usize) -> ah::Result<Option<Vec<u8>>> {
+    async fn do_recv(&self, size: usize) -> ah::Result<Vec<u8>> {
         let mut count = 0;
         let mut data = vec![0_u8; size];
         loop {
@@ -63,12 +61,12 @@ impl UnixConn {
             match self.stream.try_read(&mut data[count..]) {
                 Ok(n) => {
                     if n == 0 {
-                        return Ok(None);
+                        return Err(DisconnectedError.into());
                     }
                     count += n;
                     assert!(count <= size);
                     if count == size {
-                        return Ok(Some(data));
+                        return Ok(data);
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -81,19 +79,15 @@ impl UnixConn {
         }
     }
 
-    pub async fn recv(&self) -> ah::Result<Option<UnMessage>> {
-        let Some(hdr) = self.do_recv(UnMessageHeader::header_size()).await? else {
-            return Ok(None);
-        };
+    pub async fn recv(&self) -> ah::Result<UnMessage> {
+        let hdr = self.do_recv(UnMessageHeader::header_size()).await?;
         let hdr = UnMessageHeader::deserialize(&hdr)?;
-        let Some(msg) = self.do_recv(hdr.body_size()).await? else {
-            return Ok(None);
-        };
+        let msg = self.do_recv(hdr.body_size()).await?;
         let msg = UnMessage::deserialize(&msg)?;
         if !self.name.is_empty() && msg.chan_name() != self.name {
             return Err(err!("Unix socket: Received message for wrong channel."));
         }
-        Ok(Some(msg))
+        Ok(msg)
     }
 
     async fn do_send(&self, data: &[u8]) -> ah::Result<()> {

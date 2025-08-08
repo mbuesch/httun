@@ -40,9 +40,7 @@ impl CommBackend {
     pub async fn recv(&self) -> ah::Result<CommRxMsg> {
         match self {
             Self::Unix(conn) => {
-                let Some(umsg) = conn.recv().await.context("Unix socket receive")? else {
-                    return Err(err!("Disconnected."));
-                };
+                let umsg = conn.recv().await.context("Unix socket receive")?;
                 match umsg.op() {
                     UnOperation::ToSrv => Ok(CommRxMsg::ToSrv(umsg.into_payload())),
                     UnOperation::ReqFromSrv => Ok(CommRxMsg::ReqFromSrv(umsg.into_payload())),
