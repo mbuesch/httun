@@ -33,7 +33,7 @@ use tokio::{
     task::{self, JoinHandle},
 };
 
-const RX_BUF_SIZE: usize = 1024 * (64 + 8);
+const BUF_SIZE: usize = 1024 * (64 + 8);
 static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Debug)]
@@ -44,9 +44,17 @@ struct RecvBuf {
     cont_len: usize,
 }
 
+impl RecvBuf {
+    pub fn full_len(&self) -> ah::Result<usize> {
+        self.hdr_len
+            .checked_add(self.cont_len)
+            .ok_or_else(|| err!("HTTP packet length calculation overflow"))
+    }
+}
+
 async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
     let mut buf = RecvBuf {
-        buf: vec![0_u8; RX_BUF_SIZE],
+        buf: vec![0_u8; BUF_SIZE],
         count: 0,
         hdr_len: 0,
         cont_len: 0,
@@ -94,10 +102,7 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
 }
 
 async fn recv_rest(stream: &TcpStream, mut buf: RecvBuf) -> ah::Result<RecvBuf> {
-    let full_len = buf
-        .hdr_len
-        .checked_add(buf.cont_len)
-        .ok_or_else(|| err!("HTTP packet length calculation overflow"))?;
+    let full_len = buf.full_len()?;
     if full_len > buf.buf.len() {
         return Err(err!(
             "Received HTTP packet is too large. (>{})",
@@ -141,7 +146,7 @@ async fn send_http_reply(
     status: &str,
     mime: &str,
 ) -> ah::Result<()> {
-    let mut headers = String::with_capacity(256);
+    let mut headers = String::with_capacity(BUF_SIZE);
     write!(&mut headers, "HTTP/1.1 {status}\r\n")?;
     write!(&mut headers, "Cache-Control: no-store\r\n")?;
     if !payload.is_empty() {
@@ -150,11 +155,10 @@ async fn send_http_reply(
     }
     write!(&mut headers, "\r\n")?;
 
-    tcp_send_all(stream, headers.as_bytes()).await?;
-    if !payload.is_empty() {
-        tcp_send_all(stream, payload).await?;
-    }
-    Ok(())
+    let mut buf = headers.into_bytes();
+    buf.extend_from_slice(payload);
+
+    tcp_send_all(stream, &buf).await
 }
 
 async fn send_http_reply_ok(stream: &TcpStream, payload: &[u8]) -> ah::Result<()> {
@@ -273,6 +277,8 @@ pub struct HttunHttpReq {
 
 impl HttunHttpReq {
     pub fn extract_body(&mut self) {
+        // In case of a GET request, the httun client puts
+        // the body into a b64 encoded query named 'm'.
         if self.request == HttpRequest::Get
             && let Some(qmsg) = self.query.get("m")
             && let Ok(qmsg) = Message::decode_b64u(qmsg)
@@ -292,7 +298,7 @@ impl HttunHttpReq {
 
         log::trace!("Conn {id}: {request:?} / {chan_name} / {direction:?} / {query:?}");
 
-        // Ignore all other headers.
+        // Go through all headers.
         let body = loop {
             let Some((h, t)) = next_hdr(tail) else {
                 return Err(err!("Header end not found"));
@@ -302,6 +308,7 @@ impl HttunHttpReq {
                 break tail;
             }
 
+            // Parse authorization header:
             if let Some((n, v)) = split_hdr(h)
                 && n.eq_ignore_ascii_case(b"Authorization")
             {
