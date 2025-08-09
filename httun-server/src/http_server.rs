@@ -64,7 +64,7 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
                 // End of headers?
                 if let Some(p) = find(&buf.buf[..buf.count], b"\r\n\r\n") {
                     buf.hdr_len = p + 4;
-                    buf.cont_len = match find_hdr(&buf.buf[..buf.count], b"Content-Length") {
+                    buf.cont_len = match find_hdr(&buf.buf[..buf.hdr_len], b"Content-Length") {
                         Some(cont_len) => {
                             let Some(cont_len) = atoi::<usize>(cont_len.trim_ascii()) else {
                                 return Err(err!("Content-Length header number decode error."));
