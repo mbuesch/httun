@@ -114,7 +114,7 @@ enum Mode {
 }
 
 pub async fn error_delay() {
-    time::sleep(Duration::from_millis(500)).await;
+    time::sleep(Duration::from_millis(100)).await;
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
