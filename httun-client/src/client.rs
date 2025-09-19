@@ -503,9 +503,7 @@ impl HttunClient {
     ) -> ah::Result<Self> {
         let Some(chan) = conf.channel_with_url(base_url, chan_name) else {
             return Err(err!(
-                "Did not find a configuration for URL '{}' channel '{}'.",
-                base_url,
-                chan_name
+                "Did not find a configuration for URL '{base_url}' channel '{chan_name}'.",
             ));
         };
         let key = chan.shared_secret();
