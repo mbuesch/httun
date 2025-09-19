@@ -160,22 +160,18 @@ impl UnixSock {
         if peer_uid != web_uid {
             return Err(err!(
                 "Unix socket: \
-                The connected uid {} is not the web server's uid ({}). \
+                The connected uid {peer_uid} is not the web server's uid ({web_uid}). \
                 Rejecting connection. \
                 Please see the --webserver-user command line option.",
-                peer_uid,
-                web_uid
             ));
         }
 
         if peer_gid != web_gid {
             return Err(err!(
                 "Unix socket: \
-                The connected gid {} is not the web server's gid ({}). \
+                The connected gid {peer_gid} is not the web server's gid ({web_gid}). \
                 Rejecting connection. \
                 Please see the --webserver-group command line option.",
-                peer_gid,
-                web_gid
             ));
         }
 
