@@ -112,15 +112,38 @@ to create auditable binaries, if `cargo-auditable` is installed.
 
 ## Installing client
 
-TODO
+To install the client, use the provided `install-client.sh` script.
+This script automates the installation process and ensures all necessary components are set up correctly.
+
+Execute the script as follows:
+
+```sh
+./install-client.sh
+```
 
 ## Installing server: FCGI
 
-TODO
+For installing the FCGI server, use the `install-fcgi.sh` script.
+This script configures the httun server to work with web servers like Apache or lighttpd.
+This script automates the installation process and ensures all necessary components are set up correctly.
+
+Execute the script as follows:
+
+```sh
+./install-fcgi.sh
+```
 
 ## Installing server: Standalone
 
-TODO
+To install the httun server in standalone mode (not FCGI), use the `install-standalone.sh` script.
+This script sets up the server to run independently without requiring a web server.
+This script automates the installation process and ensures all necessary components are set up correctly.
+
+Execute the script as follows:
+
+```sh
+./install-standalone.sh
+```
 
 # Configuring
 
