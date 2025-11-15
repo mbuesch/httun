@@ -93,7 +93,20 @@ or later to be installed on your system to build the source code.
 
 ## Building the source code
 
-TODO
+To build the source code, you can use the provided build scripts for convenience.
+These scripts automate the build process and ensure all necessary dependencies are handled correctly.
+
+Run the `build.sh` script located in the root directory of the project:
+
+```sh
+./build.sh
+```
+
+This script compiles the entire project using the default settings.
+
+The build script uses
+[cargo-auditable](https://crates.io/crates/cargo-auditable)
+to create auditable binaries, if `cargo-auditable` is installed.
 
 # Installing
 
