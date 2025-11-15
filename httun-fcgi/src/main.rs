@@ -358,9 +358,11 @@ async fn async_main() -> ah::Result<()> {
 }
 
 fn main() -> ah::Result<()> {
-    runtime::Builder::new_current_thread()
+    const WORKER_THREADS: usize = 6;
+    runtime::Builder::new_multi_thread()
         .thread_keep_alive(Duration::from_millis(5000))
-        .max_blocking_threads(MAX_NUM_CONNECTIONS * 2)
+        .max_blocking_threads(WORKER_THREADS * 4)
+        .worker_threads(WORKER_THREADS)
         .enable_all()
         .build()
         .context("Tokio runtime builder")?
