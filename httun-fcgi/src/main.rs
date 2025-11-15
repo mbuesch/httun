@@ -34,7 +34,7 @@ use tokio::{
     time::timeout,
 };
 
-const MAX_NUM_CONNECTIONS: usize = 16;
+const MAX_NUM_CONNECTIONS: u8 = 64;
 const UNIX_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]
@@ -310,7 +310,7 @@ async fn async_main() -> ah::Result<()> {
 
     // Spawn task: Socket handler.
     task::spawn(async move {
-        let conn_semaphore = Arc::new(Semaphore::new(MAX_NUM_CONNECTIONS));
+        let conn_semaphore = Arc::new(Semaphore::new(MAX_NUM_CONNECTIONS.into()));
         loop {
             let conn_semaphore = Arc::clone(&conn_semaphore);
             match fcgi.accept().await {

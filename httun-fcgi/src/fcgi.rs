@@ -2,6 +2,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+use crate::MAX_NUM_CONNECTIONS;
 use anyhow::{self as ah, Context as _, format_err as err};
 use std::{
     os::fd::{FromRawFd as _, RawFd},
@@ -13,7 +14,7 @@ use tokio::{
 };
 use tokio_fastcgi::{Request, RequestResult, Requests, Role};
 
-const FCGI_MAX_CONNS: u8 = 16;
+/// Maximum number of requests per connection.
 const FCGI_MAX_REQS: u8 = 16;
 
 const INET46: [Option<libc::c_int>; 2] = [Some(libc::AF_INET), Some(libc::AF_INET6)];
@@ -112,7 +113,7 @@ impl FcgiConn {
         mut handler: C,
     ) -> ah::Result<()> {
         let sock = self.stream.split();
-        let mut reqs = Requests::from_split_socket(sock, FCGI_MAX_CONNS, FCGI_MAX_REQS);
+        let mut reqs = Requests::from_split_socket(sock, MAX_NUM_CONNECTIONS, FCGI_MAX_REQS);
 
         while let Ok(Some(request)) = reqs.next().await {
             request
@@ -159,16 +160,14 @@ pub struct Fcgi {
 
 impl Fcgi {
     pub fn new(fd: RawFd) -> ah::Result<Self> {
-        let is_unix = is_unix_socket(fd);
-        let is_tcp = is_tcp_socket(fd);
-        let listener = if is_unix {
+        let listener = if is_unix_socket(fd) {
             // SAFETY: We have checked that this is a Unix socket.
             let sock = unsafe { std::os::unix::net::UnixListener::from_raw_fd(fd) };
             sock.set_nonblocking(true)
                 .context("Set socket non-blocking")?;
             let listener = UnixListener::from_std(sock)?;
             FcgiListener::Unix(listener)
-        } else if is_tcp {
+        } else if is_tcp_socket(fd) {
             // SAFETY: We have checked that this is a TCP socket.
             let sock = unsafe { std::net::TcpListener::from_raw_fd(fd) };
             sock.set_nonblocking(true)
