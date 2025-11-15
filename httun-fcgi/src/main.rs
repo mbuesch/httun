@@ -360,7 +360,7 @@ async fn async_main() -> ah::Result<()> {
 fn main() -> ah::Result<()> {
     runtime::Builder::new_current_thread()
         .thread_keep_alive(Duration::from_millis(5000))
-        .max_blocking_threads(2)
+        .max_blocking_threads(MAX_NUM_CONNECTIONS * 2)
         .enable_all()
         .build()
         .context("Tokio runtime builder")?
