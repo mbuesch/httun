@@ -89,14 +89,18 @@ start_services_standalone()
 
 install_entry_checks()
 {
+    local mode="$1"
+
     [ -d "$target" ] || die "httun is not built! Run ./build.sh"
     [ "$(id -u)" = "0" ] || die "Must be root to install httun."
 
-    if ! grep -qe '^httun:' /etc/passwd; then
-        die "The system user 'httun' does not exist in /etc/passwd. Please run ./create-user.sh"
-    fi
-    if ! grep -qe '^httun:' /etc/group; then
-        die "The system group 'httun' does not exist in /etc/group. Please run ./create-user.sh"
+    if [ "$mode" = "server" ]; then
+        if ! grep -qe '^httun:' /etc/passwd; then
+            die "The system user 'httun' does not exist in /etc/passwd. Please run ./create-user.sh"
+        fi
+        if ! grep -qe '^httun:' /etc/group; then
+            die "The system group 'httun' does not exist in /etc/group. Please run ./create-user.sh"
+        fi
     fi
 }
 
@@ -130,7 +134,6 @@ install_httun_server()
             "$basedir/httun-server/server.conf" \
             /opt/httun/etc/httun/server.conf
     fi
-
 
     if [ -e /opt/httun/etc/httun/server-start-pre.sh ]; then
         do_chown root:root /opt/httun/etc/httun/server-start-pre.sh
@@ -171,6 +174,17 @@ install_httun_server()
         -o root -g root -m 0644 \
         "$basedir/httun-server/httun-server-standalone.service" \
         /etc/systemd/system/
+}
+
+install_httun_fcgi()
+{
+    do_install \
+        -o root -g root -m 0755 \
+        "$target/httun-fcgi" \
+        /opt/httun/lib/fcgi-bin/
+
+    try_systemctl restart apache2.service
+    try_systemctl restart lighttpd.service
 }
 
 install_httun_client()

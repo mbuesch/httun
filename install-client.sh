@@ -22,13 +22,8 @@ while [ $# -ge 1 ]; do
 done
 target="$basedir/target/$release"
 
-install_entry_checks server
-stop_services
-disable_services
+install_entry_checks client
 install_dirs
-install_httun_server
-install_httun_fcgi
-enable_services_fcgi
-start_services_fcgi
+install_httun_client
 
 # vim: ts=4 sw=4 expandtab

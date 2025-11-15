@@ -22,12 +22,11 @@ while [ $# -ge 1 ]; do
 done
 target="$basedir/target/$release"
 
-install_entry_checks
+install_entry_checks server
 stop_services
 disable_services
 install_dirs
 install_httun_server
-install_httun_client
 enable_services_standalone
 start_services_standalone
 
