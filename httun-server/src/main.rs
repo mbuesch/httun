@@ -200,7 +200,9 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             .context("Initialize channels")?,
     );
 
-    if !opts.no_drop_root {
+    if opts.no_drop_root {
+        log::warn!("Not dropping root privileges as requested (--no-drop-root).");
+    } else {
         drop_privileges().context("Drop root privileges")?;
     }
 
