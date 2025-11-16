@@ -8,7 +8,7 @@ use httun_protocol::{
     Key, Message, MsgType, Operation, SequenceGenerator, SequenceType, SequenceValidator,
     SessionSecret, secure_random,
 };
-use httun_util::timeouts::{HTTP_R_TIMEOUT, HTTP_TCP_USER_TIMEOUT, HTTP_W_TIMEOUT};
+use httun_util::timeouts::{HTTP_R_TIMEOUT, HTTP_W_TIMEOUT};
 use reqwest::{Client, StatusCode};
 use std::{
     sync::{
@@ -159,7 +159,7 @@ fn make_client(
     c = c.timeout(timeout);
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     {
-        c = c.tcp_user_timeout(HTTP_TCP_USER_TIMEOUT);
+        c = c.tcp_user_timeout(httun_util::timeouts::HTTP_TCP_USER_TIMEOUT);
     }
     c = c.tcp_nodelay(true);
 
