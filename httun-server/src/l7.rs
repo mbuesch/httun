@@ -7,7 +7,10 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use arc_swap::ArcSwapOption;
 use httun_conf::ConfigL7Tunnel;
 use httun_protocol::{L7C_MAX_PAYLOAD_LEN, L7Container};
-use httun_util::net::{tcp_recv_until_blocking, tcp_send_all};
+use httun_util::{
+    net::{tcp_recv_until_blocking, tcp_send_all},
+    timeouts::{L7_TIMEOUT_S, L7_TX_TIMEOUT},
+};
 use ipnet::IpNet;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
@@ -17,14 +20,10 @@ use std::{
         Arc,
         atomic::{self, AtomicU64},
     },
-    time::Duration,
 };
 use tokio::{net::TcpStream, sync::Notify, time::timeout};
 
-const L7_TIMEOUT_S: i64 = 30;
 const RX_BUF_SIZE: usize = L7C_MAX_PAYLOAD_LEN;
-const TX_TIMEOUT: Duration = Duration::from_secs(10);
-const RX_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug)]
 struct NetList {
@@ -286,7 +285,7 @@ impl L7State {
             if let Some(stream) = stream.as_ref() {
                 log::trace!("Sending {} bytes to {}", cont.payload().len(), addr);
 
-                match timeout(TX_TIMEOUT, stream.send_all(cont.payload())).await {
+                match timeout(L7_TX_TIMEOUT, stream.send_all(cont.payload())).await {
                     Err(_) => {
                         // timeout
                         return Err(err!("L7 transmit timeout."));
@@ -330,7 +329,7 @@ impl L7State {
                         // disconnected
                         continue 'a;
                     }
-                    res = timeout(RX_TIMEOUT, stream.recv()) => {
+                    res = timeout(L7_TX_TIMEOUT, stream.recv()) => {
                         match res {
                             Err(_) => {
                                 // timeout

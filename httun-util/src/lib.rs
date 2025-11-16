@@ -4,10 +4,10 @@
 
 #![forbid(unsafe_code)]
 
-pub mod consts;
 pub mod errors;
 pub mod net;
 pub mod query;
 pub mod strings;
+pub mod timeouts;
 
 // vim: ts=4 sw=4 expandtab

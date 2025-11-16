@@ -5,7 +5,7 @@
 use crate::{http_server::HttpConn, unix_sock::UnixConn};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_unix_protocol::{UnMessage, UnOperation};
-use httun_util::consts::CHAN_R_TIMEOUT;
+use httun_util::timeouts::CHAN_R_TIMEOUT;
 use std::time::Duration;
 
 #[derive(Debug)]

@@ -5,14 +5,12 @@
 use crate::{WEBSERVER_GID, WEBSERVER_UID, systemd::SystemdSocket};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
-use httun_util::errors::DisconnectedError;
-use std::{sync::atomic, time::Duration};
+use httun_util::{errors::DisconnectedError, timeouts::UNIX_HANDSHAKE_TIMEOUT};
+use std::sync::atomic;
 use tokio::{
     net::{UnixListener, UnixStream},
     time::timeout,
 };
-
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 pub struct UnixConn {
@@ -27,7 +25,7 @@ impl UnixConn {
             stream,
         };
 
-        let msg = timeout(HANDSHAKE_TIMEOUT, this.recv())
+        let msg = timeout(UNIX_HANDSHAKE_TIMEOUT, this.recv())
             .await
             .context("Handshake receive timeout")?
             .context("Handshake receive")?;

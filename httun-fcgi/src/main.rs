@@ -13,9 +13,9 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Message;
 use httun_unix_protocol::UNIX_SOCK;
 use httun_util::{
-    consts::CHAN_R_TIMEOUT,
     query::Query,
     strings::{Direction, parse_path},
+    timeouts::{CHAN_R_TIMEOUT, UNIX_TIMEOUT},
 };
 use std::{
     collections::HashMap,
@@ -35,7 +35,6 @@ use tokio::{
 };
 
 const MAX_NUM_CONNECTIONS: u8 = 64;
-const UNIX_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]
 struct Connection {

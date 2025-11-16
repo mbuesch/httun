@@ -13,6 +13,7 @@ use httun_protocol::{
     Key, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret, secure_random,
 };
 use httun_tun::TunHandler;
+use httun_util::timeouts::CHAN_ACTIVITY_TIMEOUT_S;
 use std::{
     collections::HashMap,
     sync::{
@@ -20,8 +21,6 @@ use std::{
         atomic::{self, AtomicU64},
     },
 };
-
-const ACTIVITY_TIMEOUT_S: i64 = 30;
 
 #[derive(Clone, Debug, Default)]
 pub struct Session {
@@ -135,7 +134,7 @@ impl Channel {
     }
 
     pub fn activity_timed_out(&self) -> bool {
-        tdiff(now(), self.last_activity.load(atomic::Ordering::Relaxed)) > ACTIVITY_TIMEOUT_S
+        tdiff(now(), self.last_activity.load(atomic::Ordering::Relaxed)) > CHAN_ACTIVITY_TIMEOUT_S
     }
 
     pub async fn put_ping(&self, payload: Vec<u8>) {
