@@ -226,170 +226,174 @@ macro_rules! define_direction {
 define_direction!(DirectionR, "r");
 define_direction!(DirectionW, "w");
 
-async fn direction_r(
-    chan: &DirectionR,
-    ready: &Notify,
-    comm: &HttunComm,
-    user_agent: &str,
-    key: &Key,
-    session_secret: SessionSecret,
-) -> ah::Result<()> {
-    chan.serial
-        .store(u64::from_ne_bytes(secure_random()), Relaxed);
+impl DirectionR {
+    async fn run(
+        &self,
+        ready: &Notify,
+        comm: &HttunComm,
+        user_agent: &str,
+        key: &Key,
+        session_secret: SessionSecret,
+    ) -> ah::Result<()> {
+        self.serial
+            .store(u64::from_ne_bytes(secure_random()), Relaxed);
 
-    let tx_sequence_c = SequenceGenerator::new(SequenceType::C);
-    let window_length = chan.conf.parameters().receive().window_length();
-    let mut rx_validator_a = SequenceValidator::new(SequenceType::A, window_length);
+        let tx_sequence_c = SequenceGenerator::new(SequenceType::C);
+        let window_length = self.conf.parameters().receive().window_length();
+        let mut rx_validator_a = SequenceValidator::new(SequenceType::A, window_length);
 
-    let client = make_client(user_agent, HTTP_R_TIMEOUT, &chan.chan_conf)
-        .context("httun HTTP-r build HTTP client")?;
+        let client = make_client(user_agent, HTTP_R_TIMEOUT, &self.chan_conf)
+            .context("httun HTTP-r build HTTP client")?;
 
-    let http_auth = &chan.chan_conf.http_basic_auth().clone();
+        let http_auth = self.chan_conf.http_basic_auth().clone();
 
-    ready.notify_one();
-    loop {
-        let oper = match chan.mode {
-            HttunClientMode::L3 => Operation::L3FromSrv,
-            HttunClientMode::L7 => Operation::L7FromSrv,
-            HttunClientMode::Test => Operation::TestFromSrv,
-        };
-        let mut resp;
+        ready.notify_one();
+        loop {
+            let oper = match self.mode {
+                HttunClientMode::L3 => Operation::L3FromSrv,
+                HttunClientMode::L7 => Operation::L7FromSrv,
+                HttunClientMode::Test => Operation::TestFromSrv,
+            };
+            let mut resp;
 
-        let mut tries = 0;
-        'http: loop {
-            if tries >= HTTP_RW_TRIES {
-                return Err(err!("httun HTTP-r: Maximum number of retries exceeded."));
-            }
-            tries += 1;
-
-            let mut msg = Message::new(MsgType::Data, oper, vec![])?;
-            msg.set_sequence(tx_sequence_c.next());
-            let msg = msg.serialize_b64u(key, Some(session_secret));
-
-            log::trace!("Requesting from HTTP-r");
-
-            let url = format_url_serial(&chan.url, chan.serial.fetch_add(1, Relaxed));
-            let mut req = client
-                .get(&url)
-                .query(&[("m", &msg)])
-                .header("Cache-Control", "no-store");
-            if let Some(http_auth) = &http_auth {
-                req = req.basic_auth(http_auth.user(), http_auth.password());
-            }
-            resp = req.send().await.context("httun HTTP-r send")?;
-
-            match resp.status() {
-                StatusCode::OK => {
-                    break 'http;
+            let mut tries = 0;
+            'http: loop {
+                if tries >= HTTP_RW_TRIES {
+                    return Err(err!("httun HTTP-r: Maximum number of retries exceeded."));
                 }
-                StatusCode::REQUEST_TIMEOUT => {
-                    // This is normal behavior, if the inferface is idle.
-                    tries = 0;
-                    // Fast retry.
-                    continue 'http;
+                tries += 1;
+
+                let mut msg = Message::new(MsgType::Data, oper, vec![])?;
+                msg.set_sequence(tx_sequence_c.next());
+                let msg = msg.serialize_b64u(key, Some(session_secret));
+
+                log::trace!("Requesting from HTTP-r");
+
+                let url = format_url_serial(&self.url, self.serial.fetch_add(1, Relaxed));
+                let mut req = client
+                    .get(&url)
+                    .query(&[("m", &msg)])
+                    .header("Cache-Control", "no-store");
+                if let Some(http_auth) = &http_auth {
+                    req = req.basic_auth(http_auth.user(), http_auth.password());
                 }
-                StatusCode::BAD_GATEWAY
-                | StatusCode::GATEWAY_TIMEOUT
-                | StatusCode::SERVICE_UNAVAILABLE
-                | StatusCode::TOO_MANY_REQUESTS => {
-                    // Slow retry.
-                    sleep(Duration::from_millis(100)).await;
-                    continue 'http;
-                }
-                status => {
-                    // Hard error.
-                    sleep(Duration::from_millis(100)).await;
-                    return Err(err!("httun HTTP-r response: {status}"));
+                resp = req.send().await.context("httun HTTP-r send")?;
+
+                match resp.status() {
+                    StatusCode::OK => {
+                        break 'http;
+                    }
+                    StatusCode::REQUEST_TIMEOUT => {
+                        // This is normal behavior, if the inferface is idle.
+                        tries = 0;
+                        // Fast retry.
+                        continue 'http;
+                    }
+                    StatusCode::BAD_GATEWAY
+                    | StatusCode::GATEWAY_TIMEOUT
+                    | StatusCode::SERVICE_UNAVAILABLE
+                    | StatusCode::TOO_MANY_REQUESTS => {
+                        // Slow retry.
+                        sleep(Duration::from_millis(100)).await;
+                        continue 'http;
+                    }
+                    status => {
+                        // Hard error.
+                        sleep(Duration::from_millis(100)).await;
+                        return Err(err!("httun HTTP-r response: {status}"));
+                    }
                 }
             }
-        }
 
-        let data: &[u8] = &resp.bytes().await.context("httun HTTP-r get body")?;
-        if !data.is_empty() {
-            log::trace!("Received from HTTP-r");
+            let data: &[u8] = &resp.bytes().await.context("httun HTTP-r get body")?;
+            if !data.is_empty() {
+                log::trace!("Received from HTTP-r");
 
-            let msg = Message::deserialize(data, key, Some(session_secret))
-                .context("Message deserialize")?;
-            if msg.type_() != MsgType::Data {
-                return Err(err!("Received invalid message type"));
+                let msg = Message::deserialize(data, key, Some(session_secret))
+                    .context("Message deserialize")?;
+                if msg.type_() != MsgType::Data {
+                    return Err(err!("Received invalid message type"));
+                }
+                if msg.oper() != oper {
+                    return Err(err!("Received invalid message operation"));
+                }
+                rx_validator_a
+                    .check_recv_seq(&msg)
+                    .context("rx sequence validation SequenceType::A")?;
+
+                comm.send_from_httun(msg).await;
             }
-            if msg.oper() != oper {
-                return Err(err!("Received invalid message operation"));
-            }
-            rx_validator_a
-                .check_recv_seq(&msg)
-                .context("rx sequence validation SequenceType::A")?;
-
-            comm.send_from_httun(msg).await;
         }
     }
 }
 
-async fn direction_w(
-    chan: &DirectionW,
-    ready: &Notify,
-    comm: &HttunComm,
-    user_agent: &str,
-    key: &Key,
-    session_secret: SessionSecret,
-) -> ah::Result<()> {
-    chan.serial
-        .store(u64::from_ne_bytes(secure_random()), Relaxed);
+impl DirectionW {
+    async fn run(
+        &self,
+        ready: &Notify,
+        comm: &HttunComm,
+        user_agent: &str,
+        key: &Key,
+        session_secret: SessionSecret,
+    ) -> ah::Result<()> {
+        self.serial
+            .store(u64::from_ne_bytes(secure_random()), Relaxed);
 
-    let tx_sequence_b = SequenceGenerator::new(SequenceType::B);
+        let tx_sequence_b = SequenceGenerator::new(SequenceType::B);
 
-    let client = make_client(user_agent, HTTP_W_TIMEOUT, &chan.chan_conf)
-        .context("httun HTTP-w build HTTP client")?;
+        let client = make_client(user_agent, HTTP_W_TIMEOUT, &self.chan_conf)
+            .context("httun HTTP-w build HTTP client")?;
 
-    let http_auth = &chan.chan_conf.http_basic_auth().clone();
+        let http_auth = self.chan_conf.http_basic_auth().clone();
 
-    ready.notify_one();
-    loop {
-        let mut msg = comm.recv_to_httun().await;
-        msg.set_sequence(tx_sequence_b.next());
+        ready.notify_one();
+        loop {
+            let mut msg = comm.recv_to_httun().await;
+            msg.set_sequence(tx_sequence_b.next());
 
-        let msg = msg.serialize(key, Some(session_secret));
+            let msg = msg.serialize(key, Some(session_secret));
 
-        log::trace!("Send to HTTP-w");
+            log::trace!("Send to HTTP-w");
 
-        let mut tries = 0;
-        'http: loop {
-            if tries >= HTTP_RW_TRIES {
-                return Err(err!("httun HTTP-w: Maximum number of retries exceeded."));
-            }
-            tries += 1;
-
-            let url = format_url_serial(&chan.url, chan.serial.fetch_add(1, Relaxed));
-            let mut req = client
-                .post(&url)
-                .header("Cache-Control", "no-store")
-                .header("Content-Type", "application/octet-stream")
-                .body(msg.clone());
-            if let Some(http_auth) = &http_auth {
-                req = req.basic_auth(http_auth.user(), http_auth.password());
-            }
-            let resp = req.send().await.context("httun HTTP-w send")?;
-
-            match resp.status() {
-                StatusCode::OK => {
-                    break 'http;
+            let mut tries = 0;
+            'http: loop {
+                if tries >= HTTP_RW_TRIES {
+                    return Err(err!("httun HTTP-w: Maximum number of retries exceeded."));
                 }
-                StatusCode::REQUEST_TIMEOUT => {
-                    // Fast retry.
-                    continue 'http;
+                tries += 1;
+
+                let url = format_url_serial(&self.url, self.serial.fetch_add(1, Relaxed));
+                let mut req = client
+                    .post(&url)
+                    .header("Cache-Control", "no-store")
+                    .header("Content-Type", "application/octet-stream")
+                    .body(msg.clone());
+                if let Some(http_auth) = &http_auth {
+                    req = req.basic_auth(http_auth.user(), http_auth.password());
                 }
-                StatusCode::BAD_GATEWAY
-                | StatusCode::GATEWAY_TIMEOUT
-                | StatusCode::SERVICE_UNAVAILABLE
-                | StatusCode::TOO_MANY_REQUESTS => {
-                    // Slow retry.
-                    sleep(Duration::from_millis(100)).await;
-                    continue 'http;
-                }
-                status => {
-                    // Hard error.
-                    sleep(Duration::from_millis(100)).await;
-                    return Err(err!("httun HTTP-w response: {status}"));
+                let resp = req.send().await.context("httun HTTP-w send")?;
+
+                match resp.status() {
+                    StatusCode::OK => {
+                        break 'http;
+                    }
+                    StatusCode::REQUEST_TIMEOUT => {
+                        // Fast retry.
+                        continue 'http;
+                    }
+                    StatusCode::BAD_GATEWAY
+                    | StatusCode::GATEWAY_TIMEOUT
+                    | StatusCode::SERVICE_UNAVAILABLE
+                    | StatusCode::TOO_MANY_REQUESTS => {
+                        // Slow retry.
+                        sleep(Duration::from_millis(100)).await;
+                        continue 'http;
+                    }
+                    status => {
+                        // Hard error.
+                        sleep(Duration::from_millis(100)).await;
+                        return Err(err!("httun HTTP-w response: {status}"));
+                    }
                 }
             }
         }
@@ -557,8 +561,9 @@ impl HttunClient {
                 let user_agent = self.user_agent.clone();
                 let key = Arc::clone(&self.key);
                 async move {
-                    let res =
-                        direction_r(&r, &ready, &comm, &user_agent, &key, session_secret).await;
+                    let res = r
+                        .run(&ready, &comm, &user_agent, &key, session_secret)
+                        .await;
                     ready.notify_one();
                     res
                 }
@@ -571,8 +576,9 @@ impl HttunClient {
                 let user_agent = self.user_agent.clone();
                 let key = Arc::clone(&self.key);
                 async move {
-                    let res =
-                        direction_w(&w, &ready, &comm, &user_agent, &key, session_secret).await;
+                    let res = w
+                        .run(&ready, &comm, &user_agent, &key, session_secret)
+                        .await;
                     ready.notify_one();
                     res
                 }
