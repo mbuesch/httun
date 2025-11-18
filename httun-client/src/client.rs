@@ -200,6 +200,8 @@ macro_rules! define_direction {
             url: String,
             #[allow(dead_code)]
             mode: HttunClientMode,
+            user_agent: Arc<String>,
+            key: Arc<Key>,
             serial: AtomicU64,
         }
 
@@ -209,6 +211,8 @@ macro_rules! define_direction {
                 chan_conf: ConfigChannel,
                 base_url: &str,
                 mode: HttunClientMode,
+                user_agent: Arc<String>,
+                key: Arc<Key>,
             ) -> Self {
                 let url = format_url(base_url, chan_conf.name(), $urlpath);
                 Self {
@@ -216,6 +220,8 @@ macro_rules! define_direction {
                     chan_conf,
                     url,
                     mode,
+                    user_agent,
+                    key,
                     serial: AtomicU64::new(0),
                 }
             }
@@ -231,8 +237,6 @@ impl DirectionR {
         &self,
         ready: &Notify,
         comm: &HttunComm,
-        user_agent: &str,
-        key: &Key,
         session_secret: SessionSecret,
     ) -> ah::Result<()> {
         self.serial
@@ -242,7 +246,7 @@ impl DirectionR {
         let window_length = self.conf.parameters().receive().window_length();
         let mut rx_validator_a = SequenceValidator::new(SequenceType::A, window_length);
 
-        let client = make_client(user_agent, HTTP_R_TIMEOUT, &self.chan_conf)
+        let client = make_client(&self.user_agent, HTTP_R_TIMEOUT, &self.chan_conf)
             .context("httun HTTP-r build HTTP client")?;
 
         let http_auth = self.chan_conf.http_basic_auth().clone();
@@ -265,7 +269,7 @@ impl DirectionR {
 
                 let mut msg = Message::new(MsgType::Data, oper, vec![])?;
                 msg.set_sequence(tx_sequence_c.next());
-                let msg = msg.serialize_b64u(key, Some(session_secret));
+                let msg = msg.serialize_b64u(&self.key, Some(session_secret));
 
                 log::trace!("Requesting from HTTP-r");
 
@@ -309,7 +313,7 @@ impl DirectionR {
             if !data.is_empty() {
                 log::trace!("Received from HTTP-r");
 
-                let msg = Message::deserialize(data, key, Some(session_secret))
+                let msg = Message::deserialize(data, &self.key, Some(session_secret))
                     .context("Message deserialize")?;
                 if msg.type_() != MsgType::Data {
                     return Err(err!("Received invalid message type"));
@@ -332,8 +336,6 @@ impl DirectionW {
         &self,
         ready: &Notify,
         comm: &HttunComm,
-        user_agent: &str,
-        key: &Key,
         session_secret: SessionSecret,
     ) -> ah::Result<()> {
         self.serial
@@ -341,7 +343,7 @@ impl DirectionW {
 
         let tx_sequence_b = SequenceGenerator::new(SequenceType::B);
 
-        let client = make_client(user_agent, HTTP_W_TIMEOUT, &self.chan_conf)
+        let client = make_client(&self.user_agent, HTTP_W_TIMEOUT, &self.chan_conf)
             .context("httun HTTP-w build HTTP client")?;
 
         let http_auth = self.chan_conf.http_basic_auth().clone();
@@ -351,7 +353,7 @@ impl DirectionW {
             let mut msg = comm.recv_to_httun().await;
             msg.set_sequence(tx_sequence_b.next());
 
-            let msg = msg.serialize(key, Some(session_secret));
+            let msg = msg.serialize(&self.key, Some(session_secret));
 
             log::trace!("Send to HTTP-w");
 
@@ -479,7 +481,7 @@ pub struct HttunClient {
     chan_conf: ConfigChannel,
     r: Arc<DirectionR>,
     w: Arc<DirectionW>,
-    user_agent: String,
+    user_agent: Arc<String>,
     key: Arc<Key>,
 }
 
@@ -520,6 +522,9 @@ impl HttunClient {
             }
         }
 
+        let user_agent = Arc::new(user_agent.to_string());
+        let key = Arc::new(chan_conf.shared_secret());
+
         Ok(Self {
             base_url: base_url.to_string(),
             chan_conf: chan_conf.clone(),
@@ -528,15 +533,19 @@ impl HttunClient {
                 chan_conf.clone(),
                 base_url.as_str(),
                 mode,
+                Arc::clone(&user_agent),
+                Arc::clone(&key),
             )),
             w: Arc::new(DirectionW::new(
                 Arc::clone(&conf),
                 chan_conf.clone(),
                 base_url.as_str(),
                 mode,
+                Arc::clone(&user_agent),
+                Arc::clone(&key),
             )),
-            user_agent: user_agent.to_string(),
-            key: Arc::new(chan_conf.shared_secret()),
+            user_agent: Arc::clone(&user_agent),
+            key: Arc::clone(&key),
         })
     }
 
@@ -558,12 +567,8 @@ impl HttunClient {
                 let r = Arc::clone(&self.r);
                 let ready = Arc::clone(&r_task_ready);
                 let comm = Arc::clone(&comm);
-                let user_agent = self.user_agent.clone();
-                let key = Arc::clone(&self.key);
                 async move {
-                    let res = r
-                        .run(&ready, &comm, &user_agent, &key, session_secret)
-                        .await;
+                    let res = r.run(&ready, &comm, session_secret).await;
                     ready.notify_one();
                     res
                 }
@@ -573,12 +578,8 @@ impl HttunClient {
                 let w = Arc::clone(&self.w);
                 let ready = Arc::clone(&w_task_ready);
                 let comm = Arc::clone(&comm);
-                let user_agent = self.user_agent.clone();
-                let key = Arc::clone(&self.key);
                 async move {
-                    let res = w
-                        .run(&ready, &comm, &user_agent, &key, session_secret)
-                        .await;
+                    let res = w.run(&ready, &comm, session_secret).await;
                     ready.notify_one();
                     res
                 }
