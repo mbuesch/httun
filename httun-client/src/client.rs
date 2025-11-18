@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
+use crate::resolver::{ResConf, ResMode, resolve};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::{Config, ConfigChannel};
 use httun_protocol::{
@@ -23,6 +24,7 @@ use tokio::{
     task,
     time::sleep,
 };
+use url::{Host, Url};
 
 const COMM_DEQUE_SIZE_TO_HTTUN: usize = 1;
 const COMM_DEQUE_SIZE_FROM_HTTUN: usize = 16;
@@ -194,8 +196,7 @@ macro_rules! define_direction {
         struct $struct {
             #[allow(dead_code)]
             conf: Arc<Config>,
-            base_url: String,
-            name: String,
+            chan_conf: ConfigChannel,
             url: String,
             #[allow(dead_code)]
             mode: HttunClientMode,
@@ -203,12 +204,17 @@ macro_rules! define_direction {
         }
 
         impl $struct {
-            fn new(conf: Arc<Config>, base_url: &str, name: &str, mode: HttunClientMode) -> Self {
+            fn new(
+                conf: Arc<Config>,
+                chan_conf: ConfigChannel,
+                base_url: &str,
+                mode: HttunClientMode,
+            ) -> Self {
+                let url = format_url(base_url, chan_conf.name(), $urlpath);
                 Self {
                     conf,
-                    name: name.to_string(),
-                    base_url: base_url.to_string(),
-                    url: format_url(base_url, name, $urlpath),
+                    chan_conf,
+                    url,
                     mode,
                     serial: AtomicU64::new(0),
                 }
@@ -228,11 +234,6 @@ async fn direction_r(
     key: &Key,
     session_secret: SessionSecret,
 ) -> ah::Result<()> {
-    let chan_conf = chan
-        .conf
-        .channel_with_url(&chan.base_url, &chan.name)
-        .expect("Chan conf");
-
     chan.serial
         .store(u64::from_ne_bytes(secure_random()), Relaxed);
 
@@ -240,10 +241,10 @@ async fn direction_r(
     let window_length = chan.conf.parameters().receive().window_length();
     let mut rx_validator_a = SequenceValidator::new(SequenceType::A, window_length);
 
-    let client = make_client(user_agent, HTTP_R_TIMEOUT, chan_conf)
+    let client = make_client(user_agent, HTTP_R_TIMEOUT, &chan.chan_conf)
         .context("httun HTTP-r build HTTP client")?;
 
-    let http_auth = chan_conf.http_basic_auth().clone();
+    let http_auth = &chan.chan_conf.http_basic_auth().clone();
 
     ready.notify_one();
     loop {
@@ -332,20 +333,15 @@ async fn direction_w(
     key: &Key,
     session_secret: SessionSecret,
 ) -> ah::Result<()> {
-    let chan_conf = chan
-        .conf
-        .channel_with_url(&chan.base_url, &chan.name)
-        .expect("Chan conf");
-
     chan.serial
         .store(u64::from_ne_bytes(secure_random()), Relaxed);
 
     let tx_sequence_b = SequenceGenerator::new(SequenceType::B);
 
-    let client = make_client(user_agent, HTTP_W_TIMEOUT, chan_conf)
+    let client = make_client(user_agent, HTTP_W_TIMEOUT, &chan.chan_conf)
         .context("httun HTTP-w build HTTP client")?;
 
-    let http_auth = chan_conf.http_basic_auth().clone();
+    let http_auth = &chan.chan_conf.http_basic_auth().clone();
 
     ready.notify_one();
     loop {
@@ -401,16 +397,11 @@ async fn direction_w(
 }
 
 async fn get_session(
-    conf: &Config,
+    chan_conf: &ConfigChannel,
     base_url: &str,
-    chan_name: &str,
     user_agent: &str,
     key: &Key,
 ) -> ah::Result<SessionSecret> {
-    let chan_conf = conf
-        .channel_with_url(base_url, chan_name)
-        .expect("Chan conf");
-
     let client = make_client(user_agent, Duration::from_secs(5), chan_conf)
         .context("httun session build HTTP client")?;
 
@@ -423,7 +414,7 @@ async fn get_session(
         let msg = msg.serialize_b64u(key, None);
 
         let url = format_url_serial(
-            &format_url(base_url, chan_name, "r"),
+            &format_url(base_url, chan_conf.name(), "r"),
             u64::from_ne_bytes(secure_random()),
         );
         let mut req = client
@@ -480,9 +471,8 @@ pub enum HttunClientMode {
 }
 
 pub struct HttunClient {
-    conf: Arc<Config>,
     base_url: String,
-    chan_name: String,
+    chan_conf: ConfigChannel,
     r: Arc<DirectionR>,
     w: Arc<DirectionW>,
     user_agent: String,
@@ -492,36 +482,57 @@ pub struct HttunClient {
 impl HttunClient {
     pub async fn connect(
         base_url: &str,
+        res_mode: ResMode,
         chan_name: &str,
         mode: HttunClientMode,
         user_agent: &str,
         conf: Arc<Config>,
     ) -> ah::Result<Self> {
-        let Some(chan) = conf.channel_with_url(base_url, chan_name) else {
+        let Some(chan_conf) = conf.channel_with_url(base_url, chan_name) else {
             return Err(err!(
                 "Did not find a configuration for URL '{base_url}' channel '{chan_name}'.",
             ));
         };
-        let key = chan.shared_secret();
+
+        // Try to resolve the server-url domain name (if any) into an IP address.
+        let mut base_url = Url::parse(base_url).context("Parse server URL")?;
+        if let Some(Host::Domain(domain)) = base_url.host() {
+            // Resolve the domain with the given settings.
+            let server_ip = resolve(
+                domain,
+                &ResConf {
+                    mode: res_mode,
+                    ..Default::default()
+                },
+            )
+            .await
+            .context("Resolve server URL domain")?;
+
+            // Replace the host part of the URL.
+            if let Err(e) = base_url.set_ip_host(server_ip) {
+                return Err(err!(
+                    "Replace server-url domain with IP address failed: {e:?}"
+                ));
+            }
+        }
 
         Ok(Self {
-            conf: Arc::clone(&conf),
             base_url: base_url.to_string(),
-            chan_name: chan_name.to_string(),
+            chan_conf: chan_conf.clone(),
             r: Arc::new(DirectionR::new(
                 Arc::clone(&conf),
-                base_url,
-                chan_name,
+                chan_conf.clone(),
+                base_url.as_str(),
                 mode,
             )),
             w: Arc::new(DirectionW::new(
                 Arc::clone(&conf),
-                base_url,
-                chan_name,
+                chan_conf.clone(),
+                base_url.as_str(),
                 mode,
             )),
             user_agent: user_agent.to_string(),
-            key: Arc::new(key),
+            key: Arc::new(chan_conf.shared_secret()),
         })
     }
 
@@ -530,14 +541,8 @@ impl HttunClient {
         comm.wait_for_restart_request().await;
 
         loop {
-            let session_secret = get_session(
-                &self.conf,
-                &self.base_url,
-                &self.chan_name,
-                &self.user_agent,
-                &self.key,
-            )
-            .await?;
+            let session_secret =
+                get_session(&self.chan_conf, &self.base_url, &self.user_agent, &self.key).await?;
             log::debug!("Initialized new session.");
 
             comm.clear().await;

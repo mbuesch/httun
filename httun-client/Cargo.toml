@@ -25,6 +25,7 @@ httun-util = { workspace = true }
 log = { workspace = true }
 reqwest = { workspace = true, features = [ "http2", "rustls-tls", "gzip", "brotli", "zstd", "deflate", "charset", "hickory-dns" ] }
 tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros", "tracing" ] }
+url = { workspace = true }
 
 [target.'cfg(any(target_os="linux", target_os="android"))'.dependencies]
 httun-tun = { workspace = true }

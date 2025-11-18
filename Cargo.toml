@@ -52,6 +52,7 @@ tokio = "1"
 tokio-fastcgi = "1"
 tokio-tun = "0.15"
 toml = "0.9"
+url = "2"
 
 httun-conf = { path = "./httun-conf", version = "0.1" }
 httun-protocol = { path = "./httun-protocol", version = "0.1" }

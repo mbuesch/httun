@@ -182,12 +182,11 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let mut sigint = register_signal!(interrupt);
     let mut sighup = register_signal!(hangup);
 
+    // Get the resolver mode from the options.
     let res_mode = match (opts.resolve_ipv6, opts.resolve_ipv4) {
         (true, false) | (true, true) => ResMode::Ipv6,
         (false, false) | (false, true) => ResMode::Ipv4,
     };
-
-    //TODO resolve server_url host name.
 
     let client_mode = match &opts.mode {
         Some(Mode::Tun { .. }) => HttunClientMode::L3,
@@ -198,6 +197,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 
     let mut client = HttunClient::connect(
         opts.server_url.as_ref().unwrap(),
+        res_mode,
         &opts.channel,
         client_mode,
         &opts.user_agent,
