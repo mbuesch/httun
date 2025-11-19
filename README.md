@@ -158,7 +158,7 @@ The installation scripts will install example configuration files to these locat
 The client configuration is mainly composed of one or more `[[channels]]` sections.
 Each channel represents a tunnel connection.
 
-### Client `[[channels]]` fields
+### Main client `[[channels]]` fields
 
 - `urls`:
    A list of URLs for the httun server endpoint.
@@ -176,11 +176,13 @@ Each channel represents a tunnel connection.
    If you are using HTTPS with a self-signed certificate, you can set this to `true` to ignore TLS errors.
    This does not affect the security of the httun tunnel itself, as it uses its own end-to-end encryption.
 
+For a full documentation see the comments with each option from the example configuration file.
+
 ## Server Configuration (`server.conf`)
 
 The server configuration also uses `[[channels]]` sections to define the available tunnels.
 
-### Key `server.conf` options:
+### Main server `[[channels]]` fields
 
 - `name`:
    The name of the channel.
@@ -198,6 +200,8 @@ The server configuration also uses `[[channels]]` sections to define the availab
    - `disabled`: Set to `false` to enable L7 tunneling.
    - `bind-to-interface`: (Optional) Bind outgoing L7 tunnel connections to a specific network interface.
    - `address-denylist` and `address-allowlist`: These lists control which destination IP addresses are allowed for L7 tunnels. It is highly recommended to configure these to restrict access and enhance security. The allowlist has precedence over the denylist.
+
+For a full documentation see the comments with each option from the example configuration file.
 
 ### Generating a Shared Secret
 
