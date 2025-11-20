@@ -67,6 +67,7 @@ panic = "abort"
 [profile.release]
 lto = "fat"
 panic = "abort"
+strip = "symbols"
 overflow-checks = true
 codegen-units = 1
 
