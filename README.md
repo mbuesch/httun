@@ -45,13 +45,7 @@ I try to keep breakages minimal, but I currently can't guarantee long-term stabi
 
 ## Security
 
-Strong AES-GCM AEAD encryption and authentication is always used for all packets sent over the tunnel.
-The use of HTTPs is not required for secure communication.
-The protocol is completely decoupled from HTTP(s) and it merely uses HTTP(s) as a dumb transport layer.
-
-Currently only symmetric encryption is supported.
-That means the client and the server machine share a common secret.
-This is known to be not ideal and future plans include the introduction of some kind of asymmetric key handling in addition to the symmetric key handling.
+For more information about security and reporting vulnerabilities, please see the [security documentation](SECURITY.md).
 
 ## Performance
 
