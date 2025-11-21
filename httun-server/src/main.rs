@@ -18,11 +18,11 @@ use crate::{
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::Parser;
-use httun_conf::Config;
+use httun_conf::{Config, ConfigVariant};
 use nix::unistd::{Group, User, setgid, setuid};
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
-    path::Path,
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{self, AtomicU32},
@@ -82,14 +82,9 @@ fn get_webserver_uid_gid(opts: &Opts) -> ah::Result<()> {
 
 #[derive(Parser, Debug, Clone)]
 struct Opts {
-    /// Path to the configuration file.
-    #[arg(
-        long,
-        short = 'C',
-        id = "PATH",
-        default_value = "/opt/httun/etc/httun/server.conf"
-    )]
-    config: String,
+    /// Override the default path to the configuration file.
+    #[arg(long, short = 'C', id = "PATH")]
+    config: Option<PathBuf>,
 
     /// Do not drop root privileges after startup.
     #[arg(long)]
@@ -146,6 +141,15 @@ struct Opts {
 }
 
 impl Opts {
+    /// Get the configuration path from command line or default.
+    pub fn get_config(&self) -> PathBuf {
+        if let Some(config) = &self.config {
+            config.clone()
+        } else {
+            Config::get_default_path(ConfigVariant::Server)
+        }
+    }
+
     pub fn get_http_listen(&self) -> ah::Result<Option<SocketAddr>> {
         const DEFAULT_ADDR: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
         const DEFAULT_PORT: u16 = 80;
@@ -178,8 +182,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let mut sigint = signal(SignalKind::interrupt()).unwrap();
     let mut sighup = signal(SignalKind::hangup()).unwrap();
 
-    let conf =
-        Arc::new(Config::new_parse_file(Path::new(&opts.config)).context("Parse configuration")?);
+    let conf = Arc::new(Config::new_parse_file(&opts.get_config()).context("Parse configuration")?);
 
     let mut http_srv = None;
     let mut unix_sock = None;

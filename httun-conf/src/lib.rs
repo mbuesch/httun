@@ -5,10 +5,35 @@
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Key;
 use serde::Deserialize;
-use std::{num::NonZeroUsize, path::Path};
+use std::{
+    num::NonZeroUsize,
+    path::{Path, PathBuf},
+};
 use subtle::ConstantTimeEq as _;
 
 //TODO rewrite this. This is a mess.
+
+/// The default server configuration path, relative to the install prefix.
+#[cfg(not(target_os = "windows"))]
+const SERVER_CONF_PATH: &str = "etc/httun/server.conf";
+#[cfg(target_os = "windows")]
+const SERVER_CONF_PATH: &str = "server.conf";
+
+/// The default client configuration path, relative to the install prefix.
+#[cfg(not(target_os = "windows"))]
+const CLIENT_CONF_PATH: &str = "etc/httun/client.conf";
+#[cfg(target_os = "windows")]
+const CLIENT_CONF_PATH: &str = "client.conf";
+
+/// Configuration variant.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum ConfigVariant {
+    /// Parse the configuration as a server configuration.
+    #[default]
+    Server,
+    /// Parse the configuration as a client configuration.
+    Client,
+}
 
 #[derive(Debug, Clone, Eq, Deserialize)]
 pub struct HttpAuth {
@@ -193,6 +218,33 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn get_default_path(variant: ConfigVariant) -> PathBuf {
+        // The build-time environment variable HTTUN_CONF_PREFIX can be
+        // used to give an additional prefix.
+        let prefix = match option_env!("HTTUN_CONF_PREFIX") {
+            Some(env_prefix) => env_prefix,
+            None => {
+                #[cfg(not(target_os = "windows"))]
+                let prefix = "/";
+                #[cfg(target_os = "windows")]
+                let prefix = "";
+                prefix
+            }
+        };
+
+        let mut path = PathBuf::new();
+        path.push(prefix);
+        match variant {
+            ConfigVariant::Client => {
+                path.push(CLIENT_CONF_PATH);
+            }
+            ConfigVariant::Server => {
+                path.push(SERVER_CONF_PATH);
+            }
+        }
+        path
+    }
+
     pub fn new_parse_file(path: &Path) -> ah::Result<Self> {
         let data = std::fs::read_to_string(path).context("Read configuration file")?;
         let this: Self = toml::from_str(&data).context("Parse configuration file")?;

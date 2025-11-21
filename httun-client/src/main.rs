@@ -18,8 +18,8 @@ use crate::{
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::{Parser, Subcommand};
-use httun_conf::Config;
-use std::{path::Path, sync::Arc, time::Duration};
+use httun_conf::{Config, ConfigVariant};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{runtime, sync::mpsc, task, time};
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -53,14 +53,9 @@ struct Opts {
     #[arg(short = '6')]
     resolve_ipv6: bool,
 
-    /// Path to the configuration file.
-    #[arg(
-        long,
-        short = 'C',
-        id = "PATH",
-        default_value = "/opt/httun/etc/httun/client.conf"
-    )]
-    config: String,
+    /// Override the default path to the configuration file.
+    #[arg(long, short = 'C', id = "PATH")]
+    config: Option<PathBuf>,
 
     /// Enable `tokio-console` tracing support.
     ///
@@ -74,6 +69,17 @@ struct Opts {
 
     #[command(subcommand)]
     mode: Option<Mode>,
+}
+
+impl Opts {
+    /// Get the configuration path from command line or default.
+    pub fn get_config(&self) -> PathBuf {
+        if let Some(config) = &self.config {
+            config.clone()
+        } else {
+            Config::get_default_path(ConfigVariant::Client)
+        }
+    }
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -170,8 +176,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         ));
     }
 
-    let conf =
-        Arc::new(Config::new_parse_file(Path::new(&opts.config)).context("Parse configuration")?);
+    let conf = Arc::new(Config::new_parse_file(&opts.get_config()).context("Parse configuration")?);
 
     // Create async IPC channels.
     let (exit_tx, mut exit_rx) = mpsc::channel(1);

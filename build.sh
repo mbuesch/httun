@@ -8,6 +8,7 @@ basedir="$(realpath "$0" | xargs dirname)"
 [ -f "$basedir/Cargo.toml" ] || die "basedir sanity check failed"
 
 cd "$basedir" || die "cd basedir failed."
+export HTTUN_CONF_PREFIX="/opt/httun"
 cargo build || die "Cargo build (debug) failed."
 cargo test || die "Cargo test failed."
 if which cargo-auditable >/dev/null 2>&1; then
