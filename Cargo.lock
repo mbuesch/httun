@@ -878,7 +878,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "httun-client"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "httun-conf"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "httun-protocol",
@@ -909,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "httun-fcgi"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "httun-protocol",
@@ -922,7 +922,7 @@ dependencies = [
 
 [[package]]
 name = "httun-protocol"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "httun-server"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "httun-tun"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "httun-protocol",
@@ -968,7 +968,7 @@ dependencies = [
 
 [[package]]
 name = "httun-unix-protocol"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -977,7 +977,7 @@ dependencies = [
 
 [[package]]
 name = "httun-util"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "log",

@@ -35,14 +35,6 @@ This powerful tool comes with great benefits if used correctly and it comes with
 Like with any other tunnelling/VPN tool.
 Please read the httun documentation to understand both the potential and the risk of httun tunnelling.
 
-## Maturity
-
-This project is not stable, yet.
-Breaking protocol and API changes can happen at any time.
-
-This project is usable in its current state, but it is work in progress.
-I try to keep breakages minimal, but I currently can't guarantee long-term stability, yet.
-
 ## Security
 
 For more information about security and reporting vulnerabilities, please see the [security documentation](SECURITY.md).
