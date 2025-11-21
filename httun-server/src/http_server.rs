@@ -143,12 +143,16 @@ async fn recv_http(stream: &TcpStream) -> ah::Result<RecvBuf> {
 async fn send_http_reply(
     stream: &TcpStream,
     payload: &[u8],
+    extra_headers: &[(&str, &str)],
     status: &str,
     mime: &str,
 ) -> ah::Result<()> {
     let mut headers = String::with_capacity(BUF_SIZE);
     write!(&mut headers, "HTTP/1.1 {status}\r\n")?;
     write!(&mut headers, "Cache-Control: no-store\r\n")?;
+    for (name, value) in extra_headers {
+        write!(&mut headers, "{}: {}\r\n", name, value)?;
+    }
     if !payload.is_empty() {
         write!(&mut headers, "Content-Length: {}\r\n", payload.len())?;
         write!(&mut headers, "Content-Type: {mime}\r\n")?;
@@ -164,19 +168,33 @@ async fn send_http_reply(
 async fn send_http_reply_ok(stream: &TcpStream, payload: &[u8]) -> ah::Result<()> {
     let status = "200 Ok";
     let mime = "application/octet-stream";
-    send_http_reply(stream, payload, status, mime).await
+    send_http_reply(stream, payload, &[], status, mime).await
 }
 
 async fn send_http_reply_timeout(stream: &TcpStream, message: &str) -> ah::Result<()> {
     let status = "408 Request Timeout";
     let mime = "text/plain";
-    send_http_reply(stream, message.as_bytes(), status, mime).await
+    send_http_reply(
+        stream,
+        message.as_bytes(),
+        &[("Connection", "close")],
+        status,
+        mime,
+    )
+    .await
 }
 
 async fn send_http_reply_badrequest(stream: &TcpStream, message: &str) -> ah::Result<()> {
     let status = "400 Bad Request";
     let mime = "text/plain";
-    send_http_reply(stream, message.as_bytes(), status, mime).await
+    send_http_reply(
+        stream,
+        message.as_bytes(),
+        &[("Connection", "close")],
+        status,
+        mime,
+    )
+    .await
 }
 
 fn next_hdr(buf: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -366,11 +384,6 @@ async fn rx_task(
         }
     }
 }
-
-//TODO: The connection could be re-used for a different channel.
-// This is not supported, yet.
-// But this should only happen, if a http proxy routes two different httun
-// connections at the same time and it reuses the server side connection.
 
 #[derive(Debug)]
 pub struct HttpConn {
