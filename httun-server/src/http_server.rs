@@ -151,7 +151,7 @@ async fn send_http_reply(
     write!(&mut headers, "HTTP/1.1 {status}\r\n")?;
     write!(&mut headers, "Cache-Control: no-store\r\n")?;
     for (name, value) in extra_headers {
-        write!(&mut headers, "{}: {}\r\n", name, value)?;
+        write!(&mut headers, "{name}: {value}\r\n")?;
     }
     if !payload.is_empty() {
         write!(&mut headers, "Content-Length: {}\r\n", payload.len())?;
