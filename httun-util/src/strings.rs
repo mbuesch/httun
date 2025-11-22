@@ -4,6 +4,7 @@
 
 use anyhow::{self as ah, format_err as err};
 use memchr::memchr;
+use std::fmt::Write as _;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Direction {
@@ -61,6 +62,14 @@ pub fn parse_path(path: &[u8]) -> ah::Result<(String, Direction)> {
     };
 
     Ok((chan_name, direction))
+}
+
+pub fn hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        write!(&mut s, "{b:02X}").expect("write! on String failed");
+    }
+    s
 }
 
 // vim: ts=4 sw=4 expandtab

@@ -4,12 +4,12 @@
 
 use anyhow as ah;
 use httun_protocol::{Key, secure_random};
+use httun_util::strings::hex;
 
 /// Generate a new truly random and secure key.
 pub async fn run_mode_genkey() -> ah::Result<()> {
     let key: Key = secure_random();
-    let key: Vec<String> = key.iter().map(|b| format!("{b:02X}")).collect();
-    let key: String = key.join("");
+    let key = hex(&key);
     println!("shared-secret = \"{key}\"");
     Ok(())
 }

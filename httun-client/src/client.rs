@@ -523,7 +523,7 @@ impl HttunClient {
         }
 
         let user_agent = Arc::new(user_agent.to_string());
-        let key = Arc::new(chan_conf.shared_secret());
+        let key = Arc::new(*chan_conf.shared_secret());
 
         Ok(Self {
             base_url: base_url.to_string(),

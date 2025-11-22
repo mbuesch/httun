@@ -4,6 +4,7 @@
 
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Key;
+use httun_util::strings::hex;
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
@@ -232,7 +233,7 @@ pub struct ConfigChannel {
     enable_test: Option<bool>,
     urls: Option<Vec<String>>,
     name: String,
-    shared_secret: String,
+    shared_secret: Key,
     tun: Option<String>,
     l7_tunnel: Option<ConfigL7Tunnel>,
     http_basic_auth: Option<HttpAuth>,
@@ -246,7 +247,7 @@ impl TryFrom<&toml::Value> for ConfigChannel {
     fn try_from(value: &toml::Value) -> Result<Self, Self::Error> {
         let table = value
             .as_table()
-            .ok_or_else(|| err!("ConfigChannel: Expected a table"))?;
+            .ok_or_else(|| err!("channel: Expected a table"))?;
 
         let disabled = table.get("disabled").and_then(|v| v.as_bool());
 
@@ -260,17 +261,24 @@ impl TryFrom<&toml::Value> for ConfigChannel {
 
         let name = table
             .get("name")
-            .ok_or_else(|| err!("ConfigChannel: Missing 'name'"))?
+            .ok_or_else(|| err!("channel: Missing 'name'"))?
             .as_str()
-            .ok_or_else(|| err!("ConfigChannel: 'name' must be a string"))?
+            .ok_or_else(|| err!("channel: 'name' must be a string"))?
             .to_string();
 
         let shared_secret = table
             .get("shared-secret")
-            .ok_or_else(|| err!("ConfigChannel: Missing 'shared-secret'"))?
+            .ok_or_else(|| err!("channel: Missing 'shared-secret'"))?
             .as_str()
-            .ok_or_else(|| err!("ConfigChannel: 'shared-secret' must be a string"))?
-            .to_string();
+            .ok_or_else(|| err!("channel: 'shared-secret' must be a string"))?;
+        let shared_secret = match parse_hex(shared_secret) {
+            Err(e) => {
+                return Err(err!(
+                    "channel: The value of shared-secret = \"{shared_secret}\" is invalid: {e}"
+                ));
+            }
+            Ok(s) => s,
+        };
 
         let tun = table.get("tun").and_then(|v| v.as_str()).map(String::from);
 
@@ -338,8 +346,8 @@ impl ConfigChannel {
         false
     }
 
-    pub fn shared_secret(&self) -> Key {
-        parse_hex(&self.shared_secret).expect("Invalid key format")
+    pub fn shared_secret(&self) -> &Key {
+        &self.shared_secret
     }
 
     pub fn tun(&self) -> Option<&str> {
@@ -442,20 +450,11 @@ impl Config {
     fn check(&self) -> ah::Result<()> {
         // Validate all keys
         for chan in self.channels_iter() {
-            let shared_secret: ah::Result<Key> = parse_hex(&chan.shared_secret);
-            if let Err(e) = shared_secret {
-                return Err(err!(
-                    "The value of shared-secret = \"{}\" is invalid: {}",
-                    chan.shared_secret,
-                    e
-                ));
-            }
-
             // Compare shared-secret to http-password.
             if let Some(http_basic_auth) = chan.http_basic_auth()
                 && let Some(password) = http_basic_auth.password()
                 && !password.is_empty()
-                && password.trim().to_lowercase() == chan.shared_secret.trim().to_lowercase()
+                && password.trim().to_lowercase() == hex(&chan.shared_secret).trim().to_lowercase()
             {
                 return Err(err!(
                     "The values of shared-secret and http_basic_auth.password \

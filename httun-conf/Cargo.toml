@@ -15,5 +15,6 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 httun-protocol = { workspace = true }
+httun-util = { workspace = true }
 subtle = { workspace = true }
 toml = { workspace = true }

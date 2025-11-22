@@ -54,7 +54,7 @@ impl Channel {
         name: &str,
         l3: Option<TunHandler>,
         l7: Option<L7State>,
-        key: Key,
+        key: &Key,
         test_enabled: bool,
     ) -> Self {
         let window_length = conf.parameters().receive().window_length();
@@ -68,7 +68,7 @@ impl Channel {
             name: name.to_string(),
             l3,
             l7,
-            key,
+            key: *key,
             test_enabled,
             ping: PingState::new(),
             session: StdMutex::new(session),
