@@ -65,7 +65,7 @@ static CONNECTIONS: OnceLock<Mutex<HashMap<ConnectionsKey, Connection>>> = OnceL
 async fn get_connections<'a>() -> MutexGuard<'a, HashMap<ConnectionsKey, Connection>> {
     CONNECTIONS
         .get()
-        .expect("CONNECTIONS obj not init")
+        .expect("CONNECTIONS object is not initialized")
         .lock()
         .await
 }
@@ -292,7 +292,7 @@ async fn async_main() -> ah::Result<()> {
 
     CONNECTIONS
         .set(Mutex::new(HashMap::new()))
-        .expect("Connections init failed");
+        .map_err(|_| err!("Initialization of CONNECTIONS object failed"))?;
 
     let fcgi = Fcgi::new(std::io::stdin().as_raw_fd()).context("Create FCGI")?;
 
