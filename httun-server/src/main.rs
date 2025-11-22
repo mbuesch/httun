@@ -178,9 +178,9 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let exit_tx = Arc::new(exit_tx);
 
     // Register unix signal handlers.
-    let mut sigterm = signal(SignalKind::terminate()).unwrap();
-    let mut sigint = signal(SignalKind::interrupt()).unwrap();
-    let mut sighup = signal(SignalKind::hangup()).unwrap();
+    let mut sigterm = signal(SignalKind::terminate()).context("Register SIGTERM")?;
+    let mut sigint = signal(SignalKind::interrupt()).context("Register SIGINT")?;
+    let mut sighup = signal(SignalKind::hangup()).context("Register SIGHUP")?;
 
     let conf = Arc::new(Config::new_parse_file(&opts.get_config()).context("Parse configuration")?);
 
