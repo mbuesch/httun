@@ -35,6 +35,10 @@ This powerful tool comes with great benefits if used correctly and it comes with
 Like with any other tunnelling/VPN tool.
 Please read the httun documentation to understand both the potential and the risk of httun tunnelling.
 
+## Block diagram
+
+![httun block diagram](doc/httun-block-diagram.svg)
+
 ## Security
 
 For more information about security and reporting vulnerabilities, please see the [security documentation](SECURITY.md).
