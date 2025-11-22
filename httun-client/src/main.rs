@@ -22,7 +22,7 @@ use httun_conf::{Config, ConfigVariant};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{runtime, sync::mpsc, task, time};
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(not(target_os = "windows"))]
 use tokio::signal::unix::{SignalKind, signal};
 
 #[derive(Parser, Debug, Clone)]
@@ -123,35 +123,36 @@ pub async fn error_delay() {
     time::sleep(Duration::from_millis(100)).await;
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(not(target_os = "windows"))]
 macro_rules! register_signal {
     ($kind:ident) => {
         signal(SignalKind::$kind())
     };
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(target_os = "windows")]
 macro_rules! register_signal {
-    ($kind:ident) => {
-        ()
-    };
+    ($kind:ident) => {{
+        let result: ah::Result<u32> = Ok(0_u32);
+        result
+    }};
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(not(target_os = "windows"))]
 macro_rules! recv_signal {
     ($sig:ident) => {
         $sig.recv()
     };
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-async fn signal_dummy(_: &mut ()) {
+#[cfg(target_os = "windows")]
+async fn signal_dummy(_: &mut u32) {
     loop {
         time::sleep(Duration::MAX).await;
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(target_os = "windows")]
 macro_rules! recv_signal {
     ($sig:ident) => {
         signal_dummy(&mut $sig)
