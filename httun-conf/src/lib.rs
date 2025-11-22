@@ -369,7 +369,7 @@ impl ConfigChannel {
     }
 
     pub fn https_ignore_tls_errors(&self) -> bool {
-        self.https_ignore_tls_errors.unwrap_or(false)
+        self.https_ignore_tls_errors.unwrap_or(true)
     }
 }
 
