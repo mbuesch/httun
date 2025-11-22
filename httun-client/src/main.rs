@@ -126,7 +126,7 @@ pub async fn error_delay() {
 #[cfg(any(target_os = "linux", target_os = "android"))]
 macro_rules! register_signal {
     ($kind:ident) => {
-        signal(SignalKind::$kind()).unwrap()
+        signal(SignalKind::$kind())
     };
 }
 
@@ -163,18 +163,18 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         return run_mode_genkey().await;
     }
 
-    if opts.mode.is_none() {
+    let Some(mode) = &opts.mode else {
         return Err(err!(
             "'httun-client' requires a subcommand but one was not provided. \
             Please run 'httun --help' for more information."
         ));
-    }
-    if opts.server_url.is_none() {
+    };
+    let Some(server_url) = &opts.server_url else {
         return Err(err!(
             "'httun-client' requires the SERVER_URL argument. \
             Please run 'httun --help' for more information."
         ));
-    }
+    };
 
     let conf = Arc::new(Config::new_parse_file(&opts.get_config()).context("Parse configuration")?);
 
@@ -183,9 +183,9 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let exit_tx = Arc::new(exit_tx);
 
     // Register unix signal handlers.
-    let mut sigterm = register_signal!(terminate);
-    let mut sigint = register_signal!(interrupt);
-    let mut sighup = register_signal!(hangup);
+    let mut sigterm = register_signal!(terminate).context("Register SIGTERM")?;
+    let mut sigint = register_signal!(interrupt).context("Register SIGINT")?;
+    let mut sighup = register_signal!(hangup).context("Register SIGHUP")?;
 
     // Get the resolver mode from the options.
     let res_mode = match (opts.resolve_ipv6, opts.resolve_ipv4) {
@@ -193,15 +193,15 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         (false, false) | (false, true) => ResMode::Ipv4,
     };
 
-    let client_mode = match &opts.mode {
-        Some(Mode::Tun { .. }) => HttunClientMode::L3,
-        Some(Mode::Socket { .. }) => HttunClientMode::L7,
-        Some(Mode::Test {}) => HttunClientMode::Test,
-        None | Some(Mode::Genkey {}) => unreachable!(),
+    let client_mode = match mode {
+        Mode::Tun { .. } => HttunClientMode::L3,
+        Mode::Socket { .. } => HttunClientMode::L7,
+        Mode::Test {} => HttunClientMode::Test,
+        Mode::Genkey {} => unreachable!(),
     };
 
     let mut client = HttunClient::connect(
-        opts.server_url.as_ref().unwrap(),
+        server_url,
         res_mode,
         &opts.channel,
         client_mode,
