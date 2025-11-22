@@ -4,7 +4,7 @@
 
 #![forbid(unsafe_code)]
 
-use anyhow as ah;
+use anyhow::{self as ah, format_err as err};
 use bincode::serde::{decode_from_slice, encode_to_vec};
 use serde::{Deserialize, Serialize};
 
@@ -25,16 +25,22 @@ pub struct UnMessageHeader {
 }
 
 impl UnMessageHeader {
+    const SIZE: usize = 4;
+
     pub fn header_size() -> usize {
-        UnMessageHeader::new(0).serialize().len()
+        debug_assert_eq!(
+            UnMessageHeader::new(0).unwrap().serialize().unwrap().len(),
+            Self::SIZE
+        );
+        Self::SIZE
     }
 
-    pub fn new(body_size: usize) -> Self {
-        Self {
+    pub fn new(body_size: usize) -> ah::Result<Self> {
+        Ok(Self {
             body_size: body_size
                 .try_into()
-                .expect("UnMessageHeader: Body size is too big"),
-        }
+                .map_err(|_| err!("UnMessageHeader: Body size is too big"))?,
+        })
     }
 
     pub fn body_size(&self) -> usize {
@@ -43,8 +49,8 @@ impl UnMessageHeader {
             .expect("UnMessageHeader: Internal size error")
     }
 
-    pub fn serialize(&self) -> Vec<u8> {
-        encode_to_vec(self, cfg()).expect("UnMessageHeader serialize failed")
+    pub fn serialize(&self) -> ah::Result<Vec<u8>> {
+        Ok(encode_to_vec(self, cfg())?)
     }
 
     pub fn deserialize(buf: &[u8]) -> ah::Result<Self> {
@@ -140,8 +146,8 @@ impl UnMessage {
         self.payload
     }
 
-    pub fn serialize(&self) -> Vec<u8> {
-        encode_to_vec(self, cfg()).expect("UnMessage serialize failed")
+    pub fn serialize(&self) -> ah::Result<Vec<u8>> {
+        Ok(encode_to_vec(self, cfg())?)
     }
 
     pub fn deserialize(buf: &[u8]) -> ah::Result<Self> {

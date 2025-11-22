@@ -7,7 +7,7 @@ use std::time::SystemTime;
 pub fn now() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("Get epoch")
+        .expect("Failed to get the system time (seconds since unix epoch)")
         .as_secs()
 }
 

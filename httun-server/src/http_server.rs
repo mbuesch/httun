@@ -502,7 +502,7 @@ impl HttpConn {
         let closed;
 
         let ret = tokio::select! {
-            req = rx_r.as_mut().expect("RX thread not running").recv() => {
+            req = rx_r.as_mut().context("RX thread not running")?.recv() => {
                 closed = self.closed.load(atomic::Ordering::Relaxed);
                 drop((rx_r, rx_w)); // drop locks
 
@@ -513,7 +513,7 @@ impl HttpConn {
                     Err(err!("RX channel closed"))
                 }
             }
-            req = rx_w.as_mut().expect("RX thread not running").recv() => {
+            req = rx_w.as_mut().context("RX thread not running")?.recv() => {
                 closed = self.closed.load(atomic::Ordering::Relaxed);
                 drop((rx_r, rx_w)); // drop locks
 

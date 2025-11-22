@@ -81,8 +81,8 @@ impl ServerUnixConn {
     }
 
     async fn send_msg(&self, msg: UnMessage) -> ah::Result<()> {
-        let msg = msg.serialize();
-        let hdr = UnMessageHeader::new(msg.len()).serialize();
+        let msg = msg.serialize()?;
+        let hdr = UnMessageHeader::new(msg.len())?.serialize()?;
         self.do_send(&hdr).await?;
         self.do_send(&msg).await
     }
