@@ -180,12 +180,20 @@ impl Message {
         self.payload
     }
 
-    pub fn serialize(&self, key: &Key, session_secret: Option<SessionSecret>) -> Vec<u8> {
+    pub fn serialize(
+        &self,
+        key: &Key,
+        session_secret: Option<SessionSecret>,
+    ) -> ah::Result<Vec<u8>> {
         let type_: u8 = self.type_.into();
         let nonce = Aes256GcmN16::generate_nonce(&mut OsRng);
         let oper: u8 = self.oper.into();
         let sequence: u64 = self.sequence;
-        let len: u16 = self.payload.len().try_into().expect("Payload too big");
+        let len: u16 = self
+            .payload
+            .len()
+            .try_into()
+            .context("Payload is too big (>0xFFFF)")?;
 
         let mut buf = Vec::with_capacity(MAX_PAYLOAD_LEN + OVERHEAD_LEN);
         buf.extend(&type_.to_be_bytes());
@@ -202,16 +210,20 @@ impl Message {
         let cipher = Aes256GcmN16::new(key.into());
         let authtag = cipher
             .encrypt_in_place_detached(&nonce, &assoc_data, &mut buf[AREA_ASSOC_LEN + NONCE_LEN..])
-            .expect("AEAD encryption failed");
+            .map_err(|_| err!("AEAD encryption of httun message failed"))?;
 
         buf.extend(&authtag);
 
         assert_eq!(buf.len(), self.payload.len() + OVERHEAD_LEN);
-        buf
+        Ok(buf)
     }
 
-    pub fn serialize_b64u(&self, key: &Key, session_secret: Option<SessionSecret>) -> String {
-        Self::encode_b64u(&self.serialize(key, session_secret))
+    pub fn serialize_b64u(
+        &self,
+        key: &Key,
+        session_secret: Option<SessionSecret>,
+    ) -> ah::Result<String> {
+        Ok(Self::encode_b64u(&self.serialize(key, session_secret)?))
     }
 
     pub fn encode_b64u(buf: &[u8]) -> String {
@@ -237,17 +249,14 @@ impl Message {
         assoc_data[1..].copy_from_slice(&session_secret.unwrap_or_default());
 
         let cipher = Aes256GcmN16::new(key.into());
-        if cipher
+        cipher
             .decrypt_in_place_detached(
                 &nonce.into(),
                 &assoc_data,
                 &mut buf[AREA_ASSOC_LEN + NONCE_LEN..buf_len - AUTHTAG_LEN],
                 &authtag.into(),
             )
-            .is_err()
-        {
-            return Err(err!("AEAD decrypt failed."));
-        }
+            .map_err(|_| err!("AEAD decryption of httun message failed."))?;
 
         let oper = u8::from_be_bytes(buf[OFFS_OPER..OFFS_OPER + 1].try_into()?);
         let sequence = u64::from_be_bytes(buf[OFFS_SEQ..OFFS_SEQ + 8].try_into()?);

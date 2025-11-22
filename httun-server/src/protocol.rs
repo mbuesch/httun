@@ -92,7 +92,9 @@ impl ProtocolHandler {
         msg: Message,
         session: Session,
     ) -> ah::Result<()> {
-        let payload = msg.serialize(chan.key(), session.secret);
+        let payload = msg
+            .serialize(chan.key(), session.secret)
+            .context("Serialize httun message")?;
         self.comm.send_reply(payload).await?;
 
         chan.log_activity();

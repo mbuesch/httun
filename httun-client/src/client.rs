@@ -269,7 +269,9 @@ impl DirectionR {
 
                 let mut msg = Message::new(MsgType::Data, oper, vec![])?;
                 msg.set_sequence(tx_sequence_c.next());
-                let msg = msg.serialize_b64u(&self.key, Some(session_secret));
+                let msg = msg
+                    .serialize_b64u(&self.key, Some(session_secret))
+                    .context("httun HTTP-r message serialize")?;
 
                 log::trace!("Requesting from HTTP-r");
 
@@ -314,7 +316,7 @@ impl DirectionR {
                 log::trace!("Received from HTTP-r");
 
                 let msg = Message::deserialize(data, &self.key, Some(session_secret))
-                    .context("Message deserialize")?;
+                    .context("httun HTTP-r message deserialize")?;
                 if msg.type_() != MsgType::Data {
                     return Err(err!("Received invalid message type"));
                 }
@@ -353,7 +355,9 @@ impl DirectionW {
             let mut msg = comm.recv_to_httun().await;
             msg.set_sequence(tx_sequence_b.next());
 
-            let msg = msg.serialize(&self.key, Some(session_secret));
+            let msg = msg
+                .serialize(&self.key, Some(session_secret))
+                .context("httun HTTP-w message serialize")?;
 
             log::trace!("Send to HTTP-w");
 
@@ -417,7 +421,9 @@ async fn get_session(
         let last_try = i == SESSION_INIT_TRIES - 1;
 
         let msg = Message::new(MsgType::Init, Operation::Init, vec![])?;
-        let msg = msg.serialize_b64u(key, None);
+        let msg = msg
+            .serialize_b64u(key, None)
+            .context("httun session message serialize")?;
 
         let url = format_url_serial(
             &format_url(base_url, chan_conf.name(), "r"),
