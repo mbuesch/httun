@@ -171,30 +171,16 @@ async fn send_http_reply_ok(stream: &TcpStream, payload: &[u8]) -> ah::Result<()
     send_http_reply(stream, payload, &[], status, mime).await
 }
 
-async fn send_http_reply_timeout(stream: &TcpStream, message: &str) -> ah::Result<()> {
+async fn send_http_reply_timeout(stream: &TcpStream) -> ah::Result<()> {
     let status = "408 Request Timeout";
     let mime = "text/plain";
-    send_http_reply(
-        stream,
-        message.as_bytes(),
-        &[("Connection", "close")],
-        status,
-        mime,
-    )
-    .await
+    send_http_reply(stream, &[], &[("Connection", "close")], status, mime).await
 }
 
-async fn send_http_reply_badrequest(stream: &TcpStream, message: &str) -> ah::Result<()> {
+async fn send_http_reply_badrequest(stream: &TcpStream) -> ah::Result<()> {
     let status = "400 Bad Request";
     let mime = "text/plain";
-    send_http_reply(
-        stream,
-        message.as_bytes(),
-        &[("Connection", "close")],
-        status,
-        mime,
-    )
-    .await
+    send_http_reply(stream, &[], &[("Connection", "close")], status, mime).await
 }
 
 fn next_hdr(buf: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -372,7 +358,7 @@ async fn rx_task(
                 return Ok(());
             }
             Err(e) => {
-                let _ = send_http_reply_badrequest(stream, "Invalid request").await;
+                let _ = send_http_reply_badrequest(stream).await;
                 return Err(e);
             }
             Ok(r) => r,
@@ -559,11 +545,11 @@ impl HttpConn {
     }
 
     pub async fn send_reply_timeout(&self) -> ah::Result<()> {
-        send_http_reply_timeout(&self.stream, "Timeout").await
+        send_http_reply_timeout(&self.stream).await
     }
 
     pub async fn send_reply_badrequest(&self) -> ah::Result<()> {
-        send_http_reply_badrequest(&self.stream, "Bad request").await
+        send_http_reply_badrequest(&self.stream).await
     }
 }
 
