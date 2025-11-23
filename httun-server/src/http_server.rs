@@ -250,11 +250,7 @@ fn parse_request_header(line: &[u8]) -> ah::Result<(HttpRequest, String, Directi
         }
     };
 
-    let (path, query) = if let Some((p, q)) = split_delim(path_info, b'?') {
-        (p, q)
-    } else {
-        (path_info, b"".as_slice())
-    };
+    let (path, query) = split_delim(path_info, b'?').unwrap_or_else(|| (path_info, b"".as_slice()));
 
     let (chan_name, direction) = parse_path(path)?;
 
