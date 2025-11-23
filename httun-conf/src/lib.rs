@@ -33,7 +33,7 @@ pub enum ConfigVariant {
     Client,
 }
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, Eq, Default)]
 pub struct HttpAuth {
     user: String,
     password: Option<String>,
@@ -56,23 +56,28 @@ impl TryFrom<&toml::Value> for HttpAuth {
     type Error = ah::Error;
 
     fn try_from(value: &toml::Value) -> Result<Self, Self::Error> {
+        let mut this: Self = Default::default();
+
         let table = value
             .as_table()
-            .ok_or_else(|| err!("HttpAuth: Expected a table"))?;
+            .ok_or_else(|| err!("http-basic-auth: Expected a table"))?;
 
-        let user = table
+        this.user = table
             .get("user")
-            .ok_or_else(|| err!("HttpAuth: Missing 'user'"))?
+            .ok_or_else(|| err!("http-basic-auth: Missing 'user'"))?
             .as_str()
-            .ok_or_else(|| err!("HttpAuth: 'user' must be a string"))?
+            .ok_or_else(|| err!("http-basic-auth: 'user' must be a string"))?
             .to_string();
 
-        let password = table
-            .get("password")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        if let Some(v) = table.get("password") {
+            this.password = Some(
+                v.as_str()
+                    .ok_or_else(|| err!("http-basic-auth: 'password' must be a string"))?
+                    .to_string(),
+            );
+        }
 
-        Ok(Self { user, password })
+        Ok(this)
     }
 }
 
@@ -93,45 +98,53 @@ impl PartialEq for HttpAuth {
 
 #[derive(Debug, Clone)]
 pub struct ConfigParametersReceive {
-    window_length: Option<NonZeroUsize>,
+    window_length: NonZeroUsize,
+}
+
+impl Default for ConfigParametersReceive {
+    fn default() -> Self {
+        Self {
+            window_length: 1024.try_into().unwrap(),
+        }
+    }
 }
 
 impl TryFrom<&toml::Value> for ConfigParametersReceive {
     type Error = ah::Error;
 
     fn try_from(value: &toml::Value) -> Result<Self, Self::Error> {
+        let mut this: Self = Default::default();
+
         let table = value
             .as_table()
             .ok_or_else(|| err!("parameters.receive: Expected a table"))?;
 
-        let window_length = table
-            .get("window-length")
-            .map(|v| {
-                v.as_integer()
-                    .ok_or_else(|| err!("parameters.receive: 'window-length' must be an integer"))
-                    .and_then(|i| {
-                        if i <= 0 || i > i16::MAX as i64 {
-                            Err(err!(
-                                "parameters.receive: 'window-length' must between 1 and 0xFFFF"
-                            ))
-                        } else {
-                            Ok(NonZeroUsize::new(i.try_into().unwrap()).unwrap())
-                        }
-                    })
-            })
-            .transpose()?;
+        if let Some(v) = table.get("window-length") {
+            this.window_length = v
+                .as_integer()
+                .ok_or_else(|| err!("parameters.receive: 'window-length' must be an integer"))
+                .and_then(|i| {
+                    if i <= 0 || i > i16::MAX as i64 {
+                        Err(err!(
+                            "parameters.receive: 'window-length' must between 1 and 0xFFFF"
+                        ))
+                    } else {
+                        Ok(NonZeroUsize::new(i.try_into().unwrap()).unwrap())
+                    }
+                })?;
+        }
 
-        Ok(Self { window_length })
+        Ok(this)
     }
 }
 
 impl ConfigParametersReceive {
     pub fn window_length(&self) -> NonZeroUsize {
-        self.window_length.unwrap_or(1024.try_into().unwrap())
+        self.window_length
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ConfigParameters {
     receive: ConfigParametersReceive,
 }
@@ -140,16 +153,17 @@ impl TryFrom<&toml::Value> for ConfigParameters {
     type Error = ah::Error;
 
     fn try_from(value: &toml::Value) -> Result<Self, Self::Error> {
+        let mut this: Self = Default::default();
+
         let table = value
             .as_table()
             .ok_or_else(|| err!("parameters: Expected a table"))?;
 
-        let receive = table
-            .get("receive")
-            .ok_or_else(|| err!("parameters: Missing 'receive' section"))?;
-        let receive = ConfigParametersReceive::try_from(receive)?;
+        if let Some(v) = table.get("receive") {
+            this.receive = ConfigParametersReceive::try_from(v)?;
+        }
 
-        Ok(Self { receive })
+        Ok(this)
     }
 }
 
@@ -159,9 +173,9 @@ impl ConfigParameters {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ConfigL7Tunnel {
-    disabled: Option<bool>,
+    disabled: bool,
     bind_to_interface: Option<String>,
     address_allowlist: Option<Vec<String>>,
     address_denylist: Option<Vec<String>>,
@@ -171,47 +185,69 @@ impl TryFrom<&toml::Value> for ConfigL7Tunnel {
     type Error = ah::Error;
 
     fn try_from(value: &toml::Value) -> Result<Self, Self::Error> {
+        let mut this: Self = Default::default();
+
         let table = value
             .as_table()
-            .ok_or_else(|| err!("ConfigL7Tunnel: Expected a table"))?;
+            .ok_or_else(|| err!("l7-tunnel: Expected a table"))?;
 
-        let disabled = table.get("disabled").and_then(|v| v.as_bool());
+        if let Some(v) = table.get("disabled") {
+            this.disabled = v
+                .as_bool()
+                .ok_or_else(|| err!("l7-tunnel: 'disabled' must be a boolean"))?;
+        }
 
-        let bind_to_interface = table
-            .get("bind-to-interface")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        if let Some(v) = table.get("bind-to-interface") {
+            this.bind_to_interface = Some(
+                v.as_str()
+                    .ok_or_else(|| err!("l7-tunnel: 'bind-to-interface' must be a string"))?
+                    .to_string(),
+            );
+        }
 
-        let address_allowlist = table
-            .get("address-allowlist")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            });
+        if let Some(v) = table.get("address-allowlist") {
+            let mut address_allowlist = vec![];
+            for addr in v
+                .as_array()
+                .ok_or_else(|| err!("l7-tunnel: 'address-allowlist' must be an array"))?
+                .iter()
+            {
+                address_allowlist.push(
+                    addr.as_str()
+                        .ok_or_else(|| {
+                            err!("l7-tunnel: 'address-allowlist' elements must be strings")
+                        })?
+                        .to_string(),
+                );
+            }
+            this.address_allowlist = Some(address_allowlist);
+        }
 
-        let address_denylist = table
-            .get("address-denylist")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            });
+        if let Some(v) = table.get("address-denylist") {
+            let mut address_denylist = vec![];
+            for addr in v
+                .as_array()
+                .ok_or_else(|| err!("l7-tunnel: 'address-denylist' must be an array"))?
+                .iter()
+            {
+                address_denylist.push(
+                    addr.as_str()
+                        .ok_or_else(|| {
+                            err!("l7-tunnel: 'address-denylist' elements must be strings")
+                        })?
+                        .to_string(),
+                );
+            }
+            this.address_denylist = Some(address_denylist);
+        }
 
-        Ok(Self {
-            disabled,
-            bind_to_interface,
-            address_allowlist,
-            address_denylist,
-        })
+        Ok(this)
     }
 }
 
 impl ConfigL7Tunnel {
     fn disabled(&self) -> bool {
-        self.disabled.unwrap_or(false)
+        self.disabled
     }
 
     pub fn bind_to_interface(&self) -> Option<&str> {
@@ -229,37 +265,72 @@ impl ConfigL7Tunnel {
 
 #[derive(Debug, Clone)]
 pub struct ConfigChannel {
-    disabled: Option<bool>,
-    enable_test: Option<bool>,
-    urls: Option<Vec<String>>,
+    disabled: bool,
+    enable_test: bool,
+    urls: Vec<String>,
     name: String,
     shared_secret: Key,
     tun: Option<String>,
     l7_tunnel: Option<ConfigL7Tunnel>,
     http_basic_auth: Option<HttpAuth>,
-    http_allow_compression: Option<bool>,
-    https_ignore_tls_errors: Option<bool>,
+    http_allow_compression: bool,
+    https_ignore_tls_errors: bool,
+}
+
+impl Default for ConfigChannel {
+    fn default() -> Self {
+        Self {
+            disabled: false,
+            enable_test: false,
+            urls: vec![],
+            name: "".to_string(),
+            shared_secret: Default::default(),
+            tun: None,
+            l7_tunnel: None,
+            http_basic_auth: None,
+            http_allow_compression: false,
+            https_ignore_tls_errors: true,
+        }
+    }
 }
 
 impl TryFrom<&toml::Value> for ConfigChannel {
     type Error = ah::Error;
 
     fn try_from(value: &toml::Value) -> Result<Self, Self::Error> {
+        let mut this: Self = Default::default();
+
         let table = value
             .as_table()
             .ok_or_else(|| err!("channel: Expected a table"))?;
 
-        let disabled = table.get("disabled").and_then(|v| v.as_bool());
+        if let Some(v) = table.get("disabled") {
+            this.disabled = v
+                .as_bool()
+                .ok_or_else(|| err!("channel: 'disabled' must be a boolean"))?;
+        }
 
-        let enable_test = table.get("enable-test").and_then(|v| v.as_bool());
+        if let Some(v) = table.get("enable-test") {
+            this.enable_test = v
+                .as_bool()
+                .ok_or_else(|| err!("channel: 'enable-test' must be a boolean"))?;
+        }
 
-        let urls = table.get("urls").and_then(|v| v.as_array()).map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        });
+        if let Some(v) = table.get("urls") {
+            for url in v
+                .as_array()
+                .ok_or_else(|| err!("channel: 'urls' must be an array"))?
+                .iter()
+            {
+                this.urls.push(
+                    url.as_str()
+                        .ok_or_else(|| err!("channel: 'urls' elements must be strings"))?
+                        .to_string(),
+                );
+            }
+        }
 
-        let name = table
+        this.name = table
             .get("name")
             .ok_or_else(|| err!("channel: Missing 'name'"))?
             .as_str()
@@ -271,7 +342,7 @@ impl TryFrom<&toml::Value> for ConfigChannel {
             .ok_or_else(|| err!("channel: Missing 'shared-secret'"))?
             .as_str()
             .ok_or_else(|| err!("channel: 'shared-secret' must be a string"))?;
-        let shared_secret = match parse_hex(shared_secret) {
+        this.shared_secret = match parse_hex(shared_secret) {
             Err(e) => {
                 return Err(err!(
                     "channel: The value of shared-secret = \"{shared_secret}\" is invalid: {e}"
@@ -280,56 +351,53 @@ impl TryFrom<&toml::Value> for ConfigChannel {
             Ok(s) => s,
         };
 
-        let tun = table.get("tun").and_then(|v| v.as_str()).map(String::from);
+        if let Some(v) = table.get("tun") {
+            this.tun = Some(
+                v.as_str()
+                    .ok_or_else(|| err!("channel: 'tun' must be a string"))?
+                    .to_string(),
+            );
+        }
 
-        let l7_tunnel = table
-            .get("l7-tunnel")
-            .map(ConfigL7Tunnel::try_from)
-            .transpose()?;
+        if let Some(v) = table.get("l7-tunnel") {
+            this.l7_tunnel = Some(ConfigL7Tunnel::try_from(v)?);
+        }
 
-        let http_basic_auth = table
-            .get("http-basic-auth")
-            .map(HttpAuth::try_from)
-            .transpose()?;
+        if let Some(v) = table.get("http-basic-auth") {
+            this.http_basic_auth = Some(HttpAuth::try_from(v)?);
+        }
 
-        let http_allow_compression = table
-            .get("http-allow-compression")
-            .and_then(|v| v.as_bool());
+        if let Some(v) = table.get("http-allow-compression") {
+            this.http_allow_compression = v
+                .as_bool()
+                .ok_or_else(|| err!("channel: 'http-allow-compression' must be a boolean"))?;
+        }
 
-        let https_ignore_tls_errors = table
-            .get("https-ignore-tls-errors")
-            .and_then(|v| v.as_bool());
+        if let Some(v) = table.get("https-ignore-tls-errors") {
+            this.https_ignore_tls_errors = v
+                .as_bool()
+                .ok_or_else(|| err!("channel: 'https-ignore-tls-errors' must be a boolean"))?;
+        }
 
-        Ok(Self {
-            disabled,
-            enable_test,
-            urls,
-            name,
-            shared_secret,
-            tun,
-            l7_tunnel,
-            http_basic_auth,
-            http_allow_compression,
-            https_ignore_tls_errors,
-        })
+        Ok(this)
     }
 }
 
 impl ConfigChannel {
     fn disabled(&self) -> bool {
-        self.disabled.unwrap_or(false)
+        self.disabled
     }
 
     pub fn enable_test(&self) -> bool {
-        self.enable_test.unwrap_or(false)
+        self.enable_test
     }
 
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub fn urls(&self) -> Option<&Vec<String>> {
-        self.urls.as_ref()
+    pub fn urls(&self) -> &[String] {
+        &self.urls
     }
 
     pub fn has_url(&self, url: &str) -> bool {
@@ -338,7 +406,7 @@ impl ConfigChannel {
         }
 
         let url = clean(url);
-        for list_url in self.urls().unwrap_or(&vec![]) {
+        for list_url in self.urls() {
             if clean(list_url) == url {
                 return true;
             }
@@ -365,15 +433,15 @@ impl ConfigChannel {
     }
 
     pub fn http_allow_compression(&self) -> bool {
-        self.http_allow_compression.unwrap_or(false)
+        self.http_allow_compression
     }
 
     pub fn https_ignore_tls_errors(&self) -> bool {
-        self.https_ignore_tls_errors.unwrap_or(true)
+        self.https_ignore_tls_errors
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Config {
     parameters: ConfigParameters,
     channels: Vec<ConfigChannel>,
@@ -383,26 +451,24 @@ impl TryFrom<&toml::Value> for Config {
     type Error = ah::Error;
 
     fn try_from(value: &toml::Value) -> Result<Self, Self::Error> {
+        let mut this: Self = Default::default();
+
         let table = value.as_table().ok_or_else(|| err!("Expected a table"))?;
 
-        let parameters = table
-            .get("parameters")
-            .ok_or_else(|| err!("Missing 'parameters' section"))?;
-        let parameters = ConfigParameters::try_from(parameters)?;
+        if let Some(v) = table.get("parameters") {
+            this.parameters = ConfigParameters::try_from(v)?;
+        }
 
-        let channels = table
-            .get("channels")
-            .ok_or_else(|| err!("Missing 'channels' section"))?
-            .as_array()
-            .ok_or_else(|| err!("'channels' must be an array"))?
-            .iter()
-            .map(ConfigChannel::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
+        if let Some(v) = table.get("channels") {
+            this.channels = v
+                .as_array()
+                .ok_or_else(|| err!("'channels' must be an array"))?
+                .iter()
+                .map(ConfigChannel::try_from)
+                .collect::<Result<Vec<_>, _>>()?;
+        }
 
-        Ok(Self {
-            parameters,
-            channels,
-        })
+        Ok(this)
     }
 }
 
