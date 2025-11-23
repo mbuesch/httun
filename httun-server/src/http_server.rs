@@ -174,13 +174,27 @@ async fn send_http_reply_ok(stream: &TcpStream, payload: &[u8]) -> ah::Result<()
 async fn send_http_reply_timeout(stream: &TcpStream) -> ah::Result<()> {
     let status = "408 Request Timeout";
     let mime = "text/plain";
-    send_http_reply(stream, &[], &[("Connection", "close")], status, mime).await
+    send_http_reply(
+        stream,
+        status.as_bytes(),
+        &[("Connection", "close")],
+        status,
+        mime,
+    )
+    .await
 }
 
 async fn send_http_reply_badrequest(stream: &TcpStream) -> ah::Result<()> {
     let status = "400 Bad Request";
     let mime = "text/plain";
-    send_http_reply(stream, &[], &[("Connection", "close")], status, mime).await
+    send_http_reply(
+        stream,
+        status.as_bytes(),
+        &[("Connection", "close")],
+        status,
+        mime,
+    )
+    .await
 }
 
 fn next_hdr(buf: &[u8]) -> Option<(&[u8], &[u8])> {
