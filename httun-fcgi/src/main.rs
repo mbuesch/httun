@@ -178,7 +178,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
     let Some(method) = req.get_param("request_method") else {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: No request_method.").await;
     };
-    let Some(query) = req.get_str_param("query_string") else {
+    let Some(query) = req.get_param("query_string") else {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: No query_string.").await;
     };
     let Some(path_info) = req.get_param("path_info") else {
@@ -193,13 +193,14 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
         Ok(p) => p,
     };
 
-    let Ok(query) = query.parse::<Query>() else {
+    let query: Result<Query, _> = query.as_slice().try_into();
+    let Ok(query) = query else {
         return fcgi_response_error(&req, "400 Bad Request", "FCGI: Invalid query string.").await;
     };
 
     let req_payload = match &method[..] {
         b"GET" => {
-            if let Some(msg) = query.get("m") {
+            if let Some(msg) = query.get(b"m") {
                 let Ok(msg) = Message::decode_b64u(msg) else {
                     return fcgi_response_error(
                         &req,

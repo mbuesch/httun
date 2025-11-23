@@ -72,4 +72,8 @@ pub fn hex(bytes: &[u8]) -> String {
     s
 }
 
+pub fn split_delim(buf: &[u8], delim: u8) -> Option<(&[u8], &[u8])> {
+    memchr(delim, buf).map(|pos| (&buf[..pos], &buf[pos + 1..]))
+}
+
 // vim: ts=4 sw=4 expandtab

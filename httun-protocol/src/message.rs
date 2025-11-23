@@ -280,16 +280,16 @@ impl Message {
     }
 
     pub fn deserialize_b64u(
-        buf: &str,
+        buf: &[u8],
         key: &Key,
         session_secret: Option<SessionSecret>,
     ) -> ah::Result<Self> {
         Self::deserialize(&Self::decode_b64u(buf)?, key, session_secret)
     }
 
-    pub fn decode_b64u(buf: &str) -> ah::Result<Vec<u8>> {
+    pub fn decode_b64u(buf: &[u8]) -> ah::Result<Vec<u8>> {
         BASE64_URL_SAFE_NO_PAD
-            .decode(buf.as_bytes())
+            .decode(buf)
             .context("Base64url decode")
     }
 

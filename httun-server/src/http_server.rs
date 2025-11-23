@@ -16,9 +16,9 @@ use httun_util::{
     errors::DisconnectedError,
     net::tcp_send_all,
     query::Query,
-    strings::{Direction, parse_path},
+    strings::{Direction, parse_path, split_delim},
 };
-use memchr::{memchr, memmem::find};
+use memchr::memmem::find;
 use std::{
     fmt::Write as _,
     net::SocketAddr,
@@ -224,10 +224,6 @@ fn split_hdr(h: &[u8]) -> Option<(&[u8], &[u8])> {
     split_delim(h, b':').map(|(n, v)| (n.trim_ascii(), v))
 }
 
-fn split_delim(buf: &[u8], delim: u8) -> Option<(&[u8], &[u8])> {
-    memchr(delim, buf).map(|pos| (&buf[..pos], &buf[pos + 1..]))
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HttpRequest {
     Get,
@@ -254,10 +250,8 @@ fn parse_request_header(line: &[u8]) -> ah::Result<(HttpRequest, String, Directi
 
     let (chan_name, direction) = parse_path(path)?;
 
-    let query = String::from_utf8(query.to_vec())
-        .context("Convert query to string")?
-        .parse::<Query>()
-        .context("Parse query string")?;
+    let query: Result<Query, _> = query.try_into();
+    let query = query.context("Parse query string")?;
 
     Ok((request, chan_name, direction, query))
 }
@@ -294,7 +288,7 @@ impl HttunHttpReq {
         // In case of a GET request, the httun client puts
         // the body into a b64 encoded query named 'm'.
         if self.request == HttpRequest::Get
-            && let Some(qmsg) = self.query.get("m")
+            && let Some(qmsg) = self.query.get(b"m")
             && let Ok(qmsg) = Message::decode_b64u(qmsg)
         {
             self.body = qmsg;
