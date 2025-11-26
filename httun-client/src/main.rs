@@ -19,12 +19,14 @@ use crate::{
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::{Parser, Subcommand};
 use httun_conf::{Config, ConfigVariant};
+use httun_util::header::HttpHeader;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{runtime, sync::mpsc, task, time};
 
 #[cfg(not(target_os = "windows"))]
 use tokio::signal::unix::{SignalKind, signal};
 
+/// Connect to a httun tunnel server.
 #[derive(Parser, Debug, Clone)]
 struct Opts {
     /// URL of the httun HTTP server.
@@ -36,12 +38,24 @@ struct Opts {
     server_url: Option<String>,
 
     /// The httun channel to use for communication.
-    #[arg(long, short = 'c', default_value = "a")]
+    #[arg(long, short = 'c', default_value = "a", value_name = "NAME")]
     channel: String,
 
     /// The User-Agent header to use for the HTTP connection.
-    #[arg(long, default_value = "")]
+    ///
+    /// By default no User-Agent header will be sent.
+    #[arg(long, default_value = "", value_name = "UA")]
     user_agent: String,
+
+    /// Pass an arbitrary extra HTTP header with every sent request on the HTTP connection.
+    ///
+    /// This option must be formatted as a colon separated name:value pair:
+    ///
+    /// MYHEADER:MYVALUE
+    ///
+    /// This option can be specified multiple times to add multiple headers.
+    #[arg(long, value_name = "HEADER:VALUE")]
+    extra_header: Vec<HttpHeader>,
 
     /// Resolve host names to IPv4 addresses.
     #[arg(short = '4')]
@@ -54,7 +68,7 @@ struct Opts {
     resolve_ipv6: bool,
 
     /// Override the default path to the configuration file.
-    #[arg(long, short = 'C', id = "PATH")]
+    #[arg(long, short = 'C', value_name = "PATH")]
     config: Option<PathBuf>,
 
     /// Enable `tokio-console` tracing support.
@@ -89,7 +103,12 @@ enum Mode {
     /// This requires root privileges.
     Tun {
         /// Name of the tun interface to create.
-        #[arg(long, short = 't', id = "INTERFACE-NAME", default_value = "httun-c-0")]
+        #[arg(
+            long,
+            short = 't',
+            value_name = "INTERFACE-NAME",
+            default_value = "httun-c-0"
+        )]
         tun: String,
     },
 
@@ -98,11 +117,11 @@ enum Mode {
         /// Tunnel target socket address.
         ///
         /// This can either be in the format IPADDR:PORT or HOSTNAME:PORT.
-        #[arg(id = "TARGETHOSTNAME:PORT")]
+        #[arg(value_name = "TARGETHOSTNAME:PORT")]
         target: String,
 
         /// The port that httun-client listens on localhost.
-        #[arg(long, short = 'p', id = "PORT", default_value = "8080")]
+        #[arg(long, short = 'p', value_name = "PORT", default_value = "8080")]
         local_port: u16,
     },
 
@@ -207,6 +226,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         &opts.channel,
         client_mode,
         &opts.user_agent,
+        (&*opts.extra_header).into(),
         Arc::clone(&conf),
     )
     .await

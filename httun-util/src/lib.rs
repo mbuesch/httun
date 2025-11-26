@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 pub mod errors;
+pub mod header;
 pub mod net;
 pub mod query;
 pub mod strings;

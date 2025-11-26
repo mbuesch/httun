@@ -9,8 +9,14 @@ use httun_protocol::{
     Key, Message, MsgType, Operation, SequenceGenerator, SequenceType, SequenceValidator,
     SessionSecret, secure_random,
 };
-use httun_util::timeouts::{HTTP_R_TIMEOUT, HTTP_W_TIMEOUT};
-use reqwest::{Client, StatusCode};
+use httun_util::{
+    header::HttpHeader,
+    timeouts::{HTTP_R_TIMEOUT, HTTP_W_TIMEOUT},
+};
+use reqwest::{
+    Client, StatusCode,
+    header::{HeaderMap, HeaderName, HeaderValue},
+};
 use std::{
     sync::{
         Arc,
@@ -149,6 +155,7 @@ impl HttunComm {
 
 fn make_client(
     user_agent: &str,
+    extra_headers: &[HttpHeader],
     timeout: Duration,
     chan_conf: &ConfigChannel,
 ) -> ah::Result<Client> {
@@ -157,6 +164,7 @@ fn make_client(
     if !user_agent.trim().is_empty() {
         c = c.user_agent(user_agent);
     }
+
     c = c.referer(false);
     c = c.timeout(timeout);
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
@@ -175,6 +183,15 @@ fn make_client(
     // Allow proxies (or any other MiM) to manipulate the TLS connection.
     c = c.danger_accept_invalid_hostnames(chan_conf.https_ignore_tls_errors());
     c = c.danger_accept_invalid_certs(chan_conf.https_ignore_tls_errors());
+
+    let mut header_map = HeaderMap::new();
+    for extra_header in extra_headers {
+        header_map.insert(
+            HeaderName::from_bytes(extra_header.name()).context("Convert extra-headers name")?,
+            HeaderValue::from_bytes(extra_header.value()).context("Convert extra-headers value")?,
+        );
+    }
+    c = c.default_headers(header_map);
 
     Ok(c.build()?)
 }
@@ -201,6 +218,7 @@ macro_rules! define_direction {
             #[allow(dead_code)]
             mode: HttunClientMode,
             user_agent: Arc<String>,
+            extra_headers: Arc<[HttpHeader]>,
             key: Arc<Key>,
             serial: AtomicU64,
         }
@@ -212,6 +230,7 @@ macro_rules! define_direction {
                 base_url: &str,
                 mode: HttunClientMode,
                 user_agent: Arc<String>,
+                extra_headers: Arc<[HttpHeader]>,
                 key: Arc<Key>,
             ) -> Self {
                 let url = format_url(base_url, chan_conf.name(), $urlpath);
@@ -221,6 +240,7 @@ macro_rules! define_direction {
                     url,
                     mode,
                     user_agent,
+                    extra_headers,
                     key,
                     serial: AtomicU64::new(0),
                 }
@@ -246,8 +266,13 @@ impl DirectionR {
         let window_length = self.conf.parameters().receive().window_length();
         let mut rx_validator_a = SequenceValidator::new(SequenceType::A, window_length);
 
-        let client = make_client(&self.user_agent, HTTP_R_TIMEOUT, &self.chan_conf)
-            .context("httun HTTP-r build HTTP client")?;
+        let client = make_client(
+            &self.user_agent,
+            &self.extra_headers,
+            HTTP_R_TIMEOUT,
+            &self.chan_conf,
+        )
+        .context("httun HTTP-r build HTTP client")?;
 
         let http_auth = self.chan_conf.http_basic_auth().clone();
 
@@ -345,8 +370,13 @@ impl DirectionW {
 
         let tx_sequence_b = SequenceGenerator::new(SequenceType::B);
 
-        let client = make_client(&self.user_agent, HTTP_W_TIMEOUT, &self.chan_conf)
-            .context("httun HTTP-w build HTTP client")?;
+        let client = make_client(
+            &self.user_agent,
+            &self.extra_headers,
+            HTTP_W_TIMEOUT,
+            &self.chan_conf,
+        )
+        .context("httun HTTP-w build HTTP client")?;
 
         let http_auth = self.chan_conf.http_basic_auth().clone();
 
@@ -410,9 +440,10 @@ async fn get_session(
     chan_conf: &ConfigChannel,
     base_url: &str,
     user_agent: &str,
+    extra_headers: &[HttpHeader],
     key: &Key,
 ) -> ah::Result<SessionSecret> {
-    let client = make_client(user_agent, Duration::from_secs(5), chan_conf)
+    let client = make_client(user_agent, extra_headers, Duration::from_secs(5), chan_conf)
         .context("httun session build HTTP client")?;
 
     let http_auth = chan_conf.http_basic_auth().clone();
@@ -488,6 +519,7 @@ pub struct HttunClient {
     r: Arc<DirectionR>,
     w: Arc<DirectionW>,
     user_agent: Arc<String>,
+    extra_headers: Arc<[HttpHeader]>,
     key: Arc<Key>,
 }
 
@@ -498,6 +530,7 @@ impl HttunClient {
         chan_name: &str,
         mode: HttunClientMode,
         user_agent: &str,
+        extra_headers: Arc<[HttpHeader]>,
         conf: Arc<Config>,
     ) -> ah::Result<Self> {
         let Some(chan_conf) = conf.channel_with_url(base_url, chan_name) else {
@@ -540,6 +573,7 @@ impl HttunClient {
                 base_url.as_str(),
                 mode,
                 Arc::clone(&user_agent),
+                Arc::clone(&extra_headers),
                 Arc::clone(&key),
             )),
             w: Arc::new(DirectionW::new(
@@ -548,9 +582,11 @@ impl HttunClient {
                 base_url.as_str(),
                 mode,
                 Arc::clone(&user_agent),
+                Arc::clone(&extra_headers),
                 Arc::clone(&key),
             )),
             user_agent: Arc::clone(&user_agent),
+            extra_headers: Arc::clone(&extra_headers),
             key: Arc::clone(&key),
         })
     }
@@ -560,8 +596,14 @@ impl HttunClient {
         comm.wait_for_restart_request().await;
 
         loop {
-            let session_secret =
-                get_session(&self.chan_conf, &self.base_url, &self.user_agent, &self.key).await?;
+            let session_secret = get_session(
+                &self.chan_conf,
+                &self.base_url,
+                &self.user_agent,
+                &self.extra_headers,
+                &self.key,
+            )
+            .await?;
             log::debug!("Initialized new session.");
 
             comm.clear().await;
