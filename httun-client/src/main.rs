@@ -47,7 +47,7 @@ struct Opts {
     #[arg(long, default_value = "", value_name = "UA")]
     user_agent: String,
 
-    /// Pass an arbitrary extra HTTP header with every sent request on the HTTP connection.
+    /// Pass an arbitrary extra HTTP header with every request sent on the HTTP connection.
     ///
     /// This option must be formatted as a colon separated name:value pair:
     ///
