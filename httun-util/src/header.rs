@@ -3,9 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use anyhow::{self as ah, format_err as err};
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct HttpHeader {
     name: Vec<u8>,
     value: Vec<u8>,
@@ -30,6 +31,13 @@ impl FromStr for HttpHeader {
 }
 
 impl HttpHeader {
+    pub fn new(name: &[u8], value: &[u8]) -> Self {
+        Self {
+            name: name.to_vec(),
+            value: value.to_vec(),
+        }
+    }
+
     pub fn name(&self) -> &[u8] {
         &self.name
     }
