@@ -54,8 +54,8 @@ struct Opts {
     /// MYHEADER:MYVALUE
     ///
     /// This option can be specified multiple times to add multiple headers.
-    #[arg(long, value_name = "HEADER:VALUE")]
-    extra_header: Vec<HttpHeader>,
+    #[arg(long = "extra-header", value_name = "HEADER:VALUE")]
+    extra_headers: Vec<HttpHeader>,
 
     /// Resolve host names to IPv4 addresses.
     #[arg(short = '4')]
@@ -226,7 +226,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         &opts.channel,
         client_mode,
         &opts.user_agent,
-        (&*opts.extra_header).into(),
+        (&*opts.extra_headers).into(),
         Arc::clone(&conf),
     )
     .await
