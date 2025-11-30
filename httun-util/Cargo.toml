@@ -16,5 +16,5 @@ publish = false
 anyhow = { workspace = true }
 log = { workspace = true }
 memchr = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, features = [ "derive" ] }
 tokio = { workspace = true, features = [ "net" ] }
