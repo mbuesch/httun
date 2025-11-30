@@ -14,13 +14,14 @@ use httun_conf::{Config, HttpAuth};
 use httun_protocol::Message;
 use httun_util::{
     errors::DisconnectedError,
+    header::HttpHeader,
     net::tcp_send_all,
     query::Query,
     strings::{Direction, parse_path, split_delim},
 };
 use memchr::memmem::find;
 use std::{
-    fmt::Write as _,
+    io::Write as _,
     net::SocketAddr,
     sync::{
         Arc, OnceLock as StdOnceLock,
@@ -143,58 +144,60 @@ async fn recv_http(stream: &TcpStream) -> ah::Result<RecvBuf> {
 async fn send_http_reply(
     stream: &TcpStream,
     payload: &[u8],
-    extra_headers: &[(&str, &str)],
+    extra_headers: &[HttpHeader],
     status: &str,
     mime: &str,
 ) -> ah::Result<()> {
-    let mut headers = String::with_capacity(BUF_SIZE);
-    write!(&mut headers, "HTTP/1.1 {status}\r\n")?;
-    write!(&mut headers, "Cache-Control: no-store\r\n")?;
-    for (name, value) in extra_headers {
-        write!(&mut headers, "{name}: {value}\r\n")?;
+    let mut buf: Vec<u8> = Vec::with_capacity(BUF_SIZE);
+    write!(&mut buf, "HTTP/1.1 {status}\r\n")?;
+    write!(&mut buf, "Cache-Control: no-store\r\n")?;
+    for hdr in extra_headers {
+        buf.extend_from_slice(hdr.name());
+        write!(&mut buf, ": ")?;
+        buf.extend_from_slice(hdr.value());
+        write!(&mut buf, "\r\n")?;
     }
     if !payload.is_empty() {
-        write!(&mut headers, "Content-Length: {}\r\n", payload.len())?;
-        write!(&mut headers, "Content-Type: {mime}\r\n")?;
+        write!(&mut buf, "Content-Length: {}\r\n", payload.len())?;
+        write!(&mut buf, "Content-Type: {mime}\r\n")?;
     }
-    write!(&mut headers, "\r\n")?;
+    write!(&mut buf, "\r\n")?;
 
-    let mut buf = headers.into_bytes();
     buf.extend_from_slice(payload);
 
     tcp_send_all(stream, &buf).await
 }
 
-async fn send_http_reply_ok(stream: &TcpStream, payload: &[u8]) -> ah::Result<()> {
+async fn send_http_reply_ok(
+    stream: &TcpStream,
+    payload: &[u8],
+    extra_headers: &[HttpHeader],
+) -> ah::Result<()> {
     let status = "200 Ok";
     let mime = "application/octet-stream";
-    send_http_reply(stream, payload, &[], status, mime).await
+    send_http_reply(stream, payload, extra_headers, status, mime).await
 }
 
-async fn send_http_reply_timeout(stream: &TcpStream) -> ah::Result<()> {
+async fn send_http_reply_timeout(
+    stream: &TcpStream,
+    extra_headers: &[HttpHeader],
+) -> ah::Result<()> {
     let status = "408 Request Timeout";
     let mime = "text/plain";
-    send_http_reply(
-        stream,
-        status.as_bytes(),
-        &[("Connection", "close")],
-        status,
-        mime,
-    )
-    .await
+    let mut extra_headers = extra_headers.to_vec();
+    extra_headers.push(HttpHeader::new(b"Connection", b"close"));
+    send_http_reply(stream, status.as_bytes(), &extra_headers, status, mime).await
 }
 
-async fn send_http_reply_badrequest(stream: &TcpStream) -> ah::Result<()> {
+async fn send_http_reply_badrequest(
+    stream: &TcpStream,
+    extra_headers: &[HttpHeader],
+) -> ah::Result<()> {
     let status = "400 Bad Request";
     let mime = "text/plain";
-    send_http_reply(
-        stream,
-        status.as_bytes(),
-        &[("Connection", "close")],
-        status,
-        mime,
-    )
-    .await
+    let mut extra_headers = extra_headers.to_vec();
+    extra_headers.push(HttpHeader::new(b"Connection", b"close"));
+    send_http_reply(stream, status.as_bytes(), &extra_headers, status, mime).await
 }
 
 fn next_hdr(buf: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -342,6 +345,7 @@ impl HttunHttpReq {
 async fn rx_task(
     id: u32,
     stream: &TcpStream,
+    extra_headers: &[HttpHeader],
     rx_r_sender: &mpsc::Sender<HttunHttpReq>,
     rx_w_sender: &mpsc::Sender<HttunHttpReq>,
     closed: &AtomicBool,
@@ -362,7 +366,7 @@ async fn rx_task(
                 return Ok(());
             }
             Err(e) => {
-                let _ = send_http_reply_badrequest(stream).await;
+                let _ = send_http_reply_badrequest(stream, extra_headers).await;
                 return Err(e);
             }
             Ok(r) => r,
@@ -385,10 +389,15 @@ pub struct HttpConn {
     rx_w: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
     pinned_chan: StdOnceLock<(String, Option<HttpAuth>)>,
     conf: Arc<Config>,
+    extra_headers: Arc<[HttpHeader]>,
 }
 
 impl HttpConn {
-    async fn new(stream: TcpStream, conf: Arc<Config>) -> ah::Result<Self> {
+    async fn new(
+        stream: TcpStream,
+        conf: Arc<Config>,
+        extra_headers: Arc<[HttpHeader]>,
+    ) -> ah::Result<Self> {
         stream.set_nodelay(true)?;
         stream.set_linger(None)?;
         stream.set_ttl(255)?;
@@ -405,6 +414,7 @@ impl HttpConn {
             rx_w: Mutex::new(None),
             pinned_chan: StdOnceLock::new(),
             conf,
+            extra_headers,
         })
     }
 
@@ -414,11 +424,20 @@ impl HttpConn {
 
         let rx_task = task::spawn({
             let stream = Arc::clone(&self.stream);
+            let extra_headers = Arc::clone(&self.extra_headers);
             let closed = Arc::clone(&self.closed);
             let id = self.id;
             async move {
                 while !closed.load(atomic::Ordering::Relaxed) {
-                    if let Err(e) = rx_task(id, &stream, &rx_r_sender, &rx_w_sender, &closed).await
+                    if let Err(e) = rx_task(
+                        id,
+                        &stream,
+                        &extra_headers,
+                        &rx_r_sender,
+                        &rx_w_sender,
+                        &closed,
+                    )
+                    .await
                     {
                         log::info!("Connection {id} receive: {e:?}");
                     }
@@ -545,15 +564,15 @@ impl HttpConn {
     }
 
     pub async fn send_reply_ok(&self, payload: &[u8]) -> ah::Result<()> {
-        send_http_reply_ok(&self.stream, payload).await
+        send_http_reply_ok(&self.stream, payload, &self.extra_headers).await
     }
 
     pub async fn send_reply_timeout(&self) -> ah::Result<()> {
-        send_http_reply_timeout(&self.stream).await
+        send_http_reply_timeout(&self.stream, &self.extra_headers).await
     }
 
     pub async fn send_reply_badrequest(&self) -> ah::Result<()> {
-        send_http_reply_badrequest(&self.stream).await
+        send_http_reply_badrequest(&self.stream, &self.extra_headers).await
     }
 }
 
@@ -567,19 +586,33 @@ impl Drop for HttpConn {
 pub struct HttpServer {
     listener: TcpListener,
     conf: Arc<Config>,
+    extra_headers: Arc<[HttpHeader]>,
 }
 
 impl HttpServer {
-    pub async fn new(addr: SocketAddr, conf: Arc<Config>) -> ah::Result<Self> {
+    pub async fn new(
+        addr: SocketAddr,
+        conf: Arc<Config>,
+        extra_headers: Arc<[HttpHeader]>,
+    ) -> ah::Result<Self> {
         let listener = TcpListener::bind(addr)
             .await
             .context("HTTP server listener")?;
-        Ok(Self { listener, conf })
+        Ok(Self {
+            listener,
+            conf,
+            extra_headers,
+        })
     }
 
     pub async fn accept(&self) -> ah::Result<HttpConn> {
         let (stream, _addr) = self.listener.accept().await.context("HTTP accept")?;
-        HttpConn::new(stream, Arc::clone(&self.conf)).await
+        HttpConn::new(
+            stream,
+            Arc::clone(&self.conf),
+            Arc::clone(&self.extra_headers),
+        )
+        .await
     }
 }
 

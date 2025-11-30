@@ -16,44 +16,57 @@ pub enum CommRxMsg {
 }
 
 #[derive(Debug)]
+pub struct CommBackendUnix {
+    conn: UnixConn,
+}
+
+#[derive(Debug)]
+pub struct CommBackendHttp {
+    conn: HttpConn,
+}
+
+#[derive(Debug)]
 pub enum CommBackend {
-    Unix(Box<UnixConn>),
-    Http(Box<HttpConn>),
+    Unix(Box<CommBackendUnix>),
+    Http(Box<CommBackendHttp>),
 }
 
 impl CommBackend {
     pub fn new_unix(conn: UnixConn) -> Self {
-        Self::Unix(Box::new(conn))
+        Self::Unix(Box::new(CommBackendUnix { conn }))
     }
 
     pub fn new_http(conn: HttpConn) -> Self {
-        Self::Http(Box::new(conn))
+        Self::Http(Box::new(CommBackendHttp { conn }))
     }
 
     pub fn chan_name(&self) -> Option<String> {
         match self {
-            Self::Unix(conn) => Some(conn.chan_name().to_string()),
-            Self::Http(conn) => conn.chan_name(),
+            Self::Unix(b) => Some(b.conn.chan_name().to_string()),
+            Self::Http(b) => b.conn.chan_name(),
         }
     }
 
     pub async fn recv(&self) -> ah::Result<CommRxMsg> {
         match self {
-            Self::Unix(conn) => {
-                let umsg = conn.recv().await.context("Unix socket receive")?;
+            Self::Unix(b) => {
+                let umsg = b.conn.recv().await.context("Unix socket receive")?;
                 match umsg.op() {
                     UnOperation::ToSrv => Ok(CommRxMsg::ToSrv(umsg.into_payload())),
                     UnOperation::ReqFromSrv => Ok(CommRxMsg::ReqFromSrv(umsg.into_payload())),
                     UnOperation::Keepalive => Ok(CommRxMsg::Keepalive),
-                    UnOperation::Init | UnOperation::FromSrv | UnOperation::Close => {
+                    UnOperation::ToSrvInit
+                    | UnOperation::FromSrvInit
+                    | UnOperation::FromSrv
+                    | UnOperation::Close => {
                         Err(err!("Received invalid operation: {:?}", umsg.op()))
                     }
                 }
             }
-            Self::Http(conn) => match conn.recv().await {
+            Self::Http(b) => match b.conn.recv().await {
                 Ok(msg) => Ok(msg),
                 Err(e) => {
-                    let _ = conn.send_reply_badrequest().await;
+                    let _ = b.conn.send_reply_badrequest().await;
                     Err(e)
                 }
             },
@@ -62,21 +75,21 @@ impl CommBackend {
 
     pub async fn send_reply(&self, payload: Vec<u8>) -> ah::Result<()> {
         match self {
-            Self::Unix(conn) => {
+            Self::Unix(b) => {
                 let chan_name = self
                     .chan_name()
                     .ok_or_else(|| err!("Channel name is not known, yet"))?;
                 let umsg = UnMessage::new_from_srv(chan_name.to_string(), payload);
-                conn.send(&umsg).await.context("Unix socket send")
+                b.conn.send(&umsg).await.context("Unix socket send")
             }
-            Self::Http(conn) => conn.send_reply_ok(&payload).await,
+            Self::Http(b) => b.conn.send_reply_ok(&payload).await,
         }
     }
 
     pub async fn send_reply_timeout(&self) -> ah::Result<()> {
         match self {
             Self::Unix(_) => Ok(()),
-            Self::Http(conn) => conn.send_reply_timeout().await,
+            Self::Http(b) => b.conn.send_reply_timeout().await,
         }
     }
 
@@ -89,14 +102,14 @@ impl CommBackend {
 
     pub async fn close(&self) -> ah::Result<()> {
         match self {
-            Self::Unix(conn) => {
+            Self::Unix(b) => {
                 let chan_name = self
                     .chan_name()
                     .ok_or_else(|| err!("Channel name is not known, yet"))?;
                 let umsg = UnMessage::new_close(chan_name.to_string());
-                conn.send(&umsg).await.context("Unix socket send")
+                b.conn.send(&umsg).await.context("Unix socket send")
             }
-            Self::Http(conn) => conn.close().await,
+            Self::Http(b) => b.conn.close().await,
         }
     }
 }

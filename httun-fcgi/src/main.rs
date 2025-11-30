@@ -13,14 +13,14 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Message;
 use httun_unix_protocol::UNIX_SOCK;
 use httun_util::{
+    header::HttpHeader,
     query::Query,
     strings::{Direction, parse_path},
     timeouts::{CHAN_R_TIMEOUT, UNIX_TIMEOUT},
 };
 use std::{
     collections::HashMap,
-    fmt::Write as _,
-    io::Read as _,
+    io::{Read as _, Write as _},
     os::fd::AsRawFd as _,
     path::Path,
     sync::{Arc, OnceLock},
@@ -95,10 +95,18 @@ async fn check_connection_timeouts() {
     connections.retain(|_, conn| !conn.is_timed_out(now));
 }
 
-async fn recv_from_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<Vec<u8>> {
+struct FromHttunRet {
+    payload: Vec<u8>,
+    extra_headers: Vec<HttpHeader>,
+}
+
+async fn recv_from_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<FromHttunRet> {
     let conn = get_connection(name, false).await?;
     match conn.recv(req_payload).await {
-        Ok(buf) => Ok(buf),
+        Ok(payload) => Ok(FromHttunRet {
+            payload,
+            extra_headers: conn.extra_headers().to_vec(),
+        }),
         Err(e) => {
             remove_connection(name).await;
             Err(e)
@@ -106,13 +114,19 @@ async fn recv_from_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<
     }
 }
 
-async fn send_to_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<()> {
+struct ToHttunRet {
+    extra_headers: Vec<HttpHeader>,
+}
+
+async fn send_to_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<ToHttunRet> {
     let conn = get_connection(name, true).await?;
     if let Err(e) = conn.send(req_payload).await {
         remove_connection(name).await;
         Err(e)
     } else {
-        Ok(())
+        Ok(ToHttunRet {
+            extra_headers: conn.extra_headers().to_vec(),
+        })
     }
 }
 
@@ -123,19 +137,26 @@ async fn send_keepalive_to_httun_server(name: &str) -> ah::Result<()> {
 async fn fcgi_response(
     req: &FcgiRequest<'_>,
     status: &str,
+    extra_headers: &[HttpHeader],
     body: Option<(&[u8], &str)>,
 ) -> FcgiRequestResult {
-    let mut hdrs = String::with_capacity(256);
+    let mut hdrs: Vec<u8> = Vec::with_capacity(4096);
+    writeln!(&mut hdrs, "Cache-Control: no-store").expect("hdrs write");
+    for hdr in extra_headers {
+        hdrs.extend_from_slice(hdr.name());
+        write!(&mut hdrs, ": ").expect("hdrs write");
+        hdrs.extend_from_slice(hdr.value());
+        writeln!(&mut hdrs).expect("hdrs write");
+    }
     if let Some((_, mime)) = body {
         writeln!(&mut hdrs, "Content-type: {mime}").expect("hdrs write");
     }
-    writeln!(&mut hdrs, "Cache-Control: no-store").expect("hdrs write");
     writeln!(&mut hdrs, "Status: {status}").expect("hdrs write");
     writeln!(&mut hdrs).expect("hdrs write");
 
     let mut f = req.get_stdout();
 
-    match f.write(hdrs.as_bytes()).await {
+    match f.write(&hdrs).await {
         Ok(count) if count == hdrs.len() => (),
         _ => {
             eprintln!("FCGI: Failed to write to fcgi socket.");
@@ -164,9 +185,16 @@ async fn fcgi_response(
 async fn fcgi_response_error(
     req: &FcgiRequest<'_>,
     status: &str,
+    extra_headers: &[HttpHeader],
     message: &str,
 ) -> FcgiRequestResult {
-    fcgi_response(req, status, Some((message.as_bytes(), "text/plain"))).await
+    fcgi_response(
+        req,
+        status,
+        extra_headers,
+        Some((message.as_bytes(), "text/plain")),
+    )
+    .await
 }
 
 async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
@@ -176,26 +204,32 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
     }
 
     let Some(method) = req.get_param("request_method") else {
-        return fcgi_response_error(&req, "400 Bad Request", "FCGI: No request_method.").await;
+        return fcgi_response_error(&req, "400 Bad Request", &[], "FCGI: No request_method.").await;
     };
     let Some(query) = req.get_param("query_string") else {
-        return fcgi_response_error(&req, "400 Bad Request", "FCGI: No query_string.").await;
+        return fcgi_response_error(&req, "400 Bad Request", &[], "FCGI: No query_string.").await;
     };
     let Some(path_info) = req.get_param("path_info") else {
-        return fcgi_response_error(&req, "400 Bad Request", "FCGI: No path_info.").await;
+        return fcgi_response_error(&req, "400 Bad Request", &[], "FCGI: No path_info.").await;
     };
 
     let (chan_name, direction) = match parse_path(path_info) {
         Err(e) => {
-            return fcgi_response_error(&req, "400 Bad Request", &format!("FCGI: path_info: {e}"))
-                .await;
+            return fcgi_response_error(
+                &req,
+                "400 Bad Request",
+                &[],
+                &format!("FCGI: path_info: {e}"),
+            )
+            .await;
         }
         Ok(p) => p,
     };
 
     let query: Result<Query, _> = query.as_slice().try_into();
     let Ok(query) = query else {
-        return fcgi_response_error(&req, "400 Bad Request", "FCGI: Invalid query string.").await;
+        return fcgi_response_error(&req, "400 Bad Request", &[], "FCGI: Invalid query string.")
+            .await;
     };
 
     let req_payload = match &method[..] {
@@ -205,6 +239,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
                     return fcgi_response_error(
                         &req,
                         "400 Bad Request",
+                        &[],
                         "FCGI: Invalid query m= value.",
                     )
                     .await;
@@ -220,6 +255,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
                 return fcgi_response_error(
                     &req,
                     "400 Bad Request",
+                    &[],
                     "FCGI: Failed to read POST body.",
                 )
                 .await;
@@ -231,6 +267,7 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
             return fcgi_response_error(
                 &req,
                 "400 Bad Request",
+                &[],
                 "FCGI: request_method is not GET or POST.",
             )
             .await;
@@ -238,42 +275,56 @@ async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
     };
 
     match direction {
-        Direction::R => match timeout(
-            CHAN_R_TIMEOUT,
-            recv_from_httun_server(&chan_name, req_payload),
-        )
-        .await
-        {
-            Err(_) => {
-                if let Err(e) = send_keepalive_to_httun_server(&chan_name).await {
-                    eprintln!("FCGI: HTTP-r: keepalive to server failed: {e:?}");
+        Direction::R => {
+            let result = timeout(
+                CHAN_R_TIMEOUT,
+                recv_from_httun_server(&chan_name, req_payload),
+            )
+            .await;
+
+            match result {
+                Err(_) => {
+                    if let Err(e) = send_keepalive_to_httun_server(&chan_name).await {
+                        eprintln!("FCGI: HTTP-r: keepalive to server failed: {e:?}");
+                    }
+                    fcgi_response(&req, "408 Request Timeout", &[], None).await
                 }
-                fcgi_response(&req, "408 Request Timeout", None).await
+                Ok(Err(e)) => {
+                    eprintln!("FCGI: HTTP-r: recv from server failed: {e:?}");
+                    fcgi_response_error(
+                        &req,
+                        "503 Service Unavailable",
+                        &[],
+                        "FCGI: HTTP-r: recv from server failed.",
+                    )
+                    .await
+                }
+                Ok(Ok(ret)) => {
+                    fcgi_response(
+                        &req,
+                        "200 Ok",
+                        &ret.extra_headers,
+                        Some((&ret.payload, "application/octet-stream")),
+                    )
+                    .await
+                }
             }
-            Ok(Err(e)) => {
-                eprintln!("FCGI: HTTP-r: recv from server failed: {e:?}");
-                fcgi_response_error(
-                    &req,
-                    "503 Service Unavailable",
-                    "FCGI: HTTP-r: recv from server failed.",
-                )
-                .await
-            }
-            Ok(Ok(data)) => {
-                fcgi_response(&req, "200 Ok", Some((&data, "application/octet-stream"))).await
-            }
-        },
+        }
         Direction::W => {
-            if let Err(e) = send_to_httun_server(&chan_name, req_payload).await {
-                eprintln!("FCGI: HTTP-w: send to server failed: {e:?}");
-                fcgi_response_error(
-                    &req,
-                    "503 Service Unavailable",
-                    "FCGI: HTTP-w: send to server failed.",
-                )
-                .await
-            } else {
-                fcgi_response(&req, "200 Ok", None).await
+            let result = send_to_httun_server(&chan_name, req_payload).await;
+
+            match result {
+                Ok(ret) => fcgi_response(&req, "200 Ok", &ret.extra_headers, None).await,
+                Err(e) => {
+                    eprintln!("FCGI: HTTP-w: send to server failed: {e:?}");
+                    fcgi_response_error(
+                        &req,
+                        "503 Service Unavailable",
+                        &[],
+                        "FCGI: HTTP-w: send to server failed.",
+                    )
+                    .await
+                }
             }
         }
     }

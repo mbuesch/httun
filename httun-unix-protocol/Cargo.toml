@@ -15,4 +15,5 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 bincode = { workspace = true, features = [ "serde" ] }
+httun-util = { workspace = true }
 serde = { workspace = true, features = [ "derive" ] }

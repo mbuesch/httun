@@ -19,6 +19,7 @@ use crate::{
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::Parser;
 use httun_conf::{Config, ConfigVariant};
+use httun_util::header::HttpHeader;
 use nix::unistd::{Group, User, setgid, setuid};
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
@@ -83,7 +84,7 @@ fn get_webserver_uid_gid(opts: &Opts) -> ah::Result<()> {
 #[derive(Parser, Debug, Clone)]
 struct Opts {
     /// Override the default path to the configuration file.
-    #[arg(long, short = 'C', id = "PATH")]
+    #[arg(long, short = 'C', value_name = "PATH")]
     config: Option<PathBuf>,
 
     /// Do not drop root privileges after startup.
@@ -93,13 +94,13 @@ struct Opts {
     /// User name the web server FastCGI runs as.
     ///
     /// This option is only used, if --http-listen is not used.
-    #[arg(long, id = "USER", default_value = "www-data")]
+    #[arg(long, value_name = "USER", default_value = "www-data")]
     webserver_user: String,
 
     /// Group name the web server FastCGI runs as.
     ///
     /// This option is only used, if --http-listen is not used.
-    #[arg(long, id = "GROUP", default_value = "www-data")]
+    #[arg(long, value_name = "GROUP", default_value = "www-data")]
     webserver_group: String,
 
     /// Instead of running as an FastCGI backend run a simple HTTP server.
@@ -120,13 +121,23 @@ struct Opts {
     /// `any` Listen on all IPv4 + IPv6 on port 80
     ///
     /// If you don't specify the port, then it will default to 80.
-    #[arg(long, id = "ADDR:PORT")]
+    #[arg(long, value_name = "ADDR:PORT")]
     http_listen: Option<String>,
+
+    /// Pass an arbitrary extra HTTP header with every request sent on the HTTP connection.
+    ///
+    /// This option must be formatted as a colon separated name:value pair:
+    ///
+    /// MYHEADER:MYVALUE
+    ///
+    /// This option can be specified multiple times to add multiple headers.
+    #[arg(long = "extra-header", value_name = "HEADER:VALUE")]
+    extra_headers: Vec<HttpHeader>,
 
     /// Maximum number of simultaneous connections.
     ///
     /// Note that two simultaneous connections are required per user.
-    #[arg(short, long, id = "NUMBER", default_value = "64")]
+    #[arg(short, long, value_name = "NUMBER", default_value = "64")]
     num_connections: usize,
 
     /// Enable `tokio-console` tracing support.
@@ -188,13 +199,17 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let mut unix_sock = None;
     if let Some(addr) = opts.get_http_listen()? {
         http_srv = Some(
-            HttpServer::new(addr, Arc::clone(&conf))
+            HttpServer::new(addr, Arc::clone(&conf), (&*opts.extra_headers).into())
                 .await
                 .context("HTTP server init")?,
         );
     } else {
         get_webserver_uid_gid(&opts).context("Get web server UID/GID")?;
-        unix_sock = Some(UnixSock::new().await.context("Unix socket init")?);
+        unix_sock = Some(
+            UnixSock::new((&*opts.extra_headers).into())
+                .await
+                .context("Unix socket init")?,
+        );
     }
 
     let channels = Arc::new(

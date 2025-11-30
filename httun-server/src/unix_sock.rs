@@ -5,8 +5,8 @@
 use crate::{WEBSERVER_GID, WEBSERVER_UID, systemd::SystemdSocket};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
-use httun_util::{errors::DisconnectedError, timeouts::UNIX_HANDSHAKE_TIMEOUT};
-use std::sync::atomic;
+use httun_util::{errors::DisconnectedError, header::HttpHeader, timeouts::UNIX_HANDSHAKE_TIMEOUT};
+use std::sync::{Arc, atomic};
 use tokio::{
     net::{UnixListener, UnixStream},
     time::timeout,
@@ -19,27 +19,36 @@ pub struct UnixConn {
 }
 
 impl UnixConn {
-    async fn new(stream: UnixStream) -> ah::Result<Self> {
+    async fn new(stream: UnixStream, extra_headers: &[HttpHeader]) -> ah::Result<Self> {
         let mut this = Self {
             name: "".to_string(),
             stream,
         };
 
+        // Receive the initialization handshake.
         let msg = timeout(UNIX_HANDSHAKE_TIMEOUT, this.recv())
             .await
             .context("Handshake receive timeout")?
             .context("Handshake receive")?;
-        if msg.op() != UnOperation::Init {
+        if msg.op() != UnOperation::ToSrvInit {
             return Err(err!(
                 "UnixConn: Got {:?} but expected {:?}",
                 msg.op(),
-                UnOperation::Init
+                UnOperation::ToSrvInit
             ));
         }
         if msg.chan_name().is_empty() {
             return Err(err!("UnixConn: Got invalid channel name."));
         }
         this.name = msg.chan_name().to_string();
+
+        // Send the initialization handshake reply.
+        this.send(&UnMessage::new_from_srv_init(
+            this.chan_name().to_string(),
+            extra_headers.to_vec(),
+        ))
+        .await
+        .context("Handshake reply")?;
 
         log::debug!("Connected: {}", this.name);
 
@@ -120,10 +129,11 @@ impl UnixConn {
 #[derive(Debug)]
 pub struct UnixSock {
     listener: UnixListener,
+    extra_headers: Arc<[HttpHeader]>,
 }
 
 impl UnixSock {
-    pub async fn new() -> ah::Result<Self> {
+    pub async fn new(extra_headers: Arc<[HttpHeader]>) -> ah::Result<Self> {
         let sockets = SystemdSocket::get_all()?;
         if let Some(SystemdSocket::Unix(socket)) = sockets.into_iter().next() {
             log::info!("Using Unix socket from systemd.");
@@ -134,7 +144,10 @@ impl UnixSock {
             let listener = UnixListener::from_std(socket)
                 .context("Convert std UnixListener to tokio UnixListener")?;
 
-            Ok(Self { listener })
+            Ok(Self {
+                listener,
+                extra_headers,
+            })
         } else {
             Err(err!("Received an unusable socket from systemd."))
         }
@@ -173,7 +186,7 @@ impl UnixSock {
             ));
         }
 
-        UnixConn::new(stream).await
+        UnixConn::new(stream, &self.extra_headers).await
     }
 }
 

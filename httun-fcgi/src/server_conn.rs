@@ -4,13 +4,16 @@
 
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
+use httun_util::{header::HttpHeader, timeouts::UNIX_HANDSHAKE_TIMEOUT};
 use std::{io::ErrorKind, path::Path};
-use tokio::net::UnixStream;
+use tokio::{net::UnixStream, time::timeout};
 
+/// Unix socket connection between this FCGI process and the httun-server.
 #[derive(Debug)]
 pub struct ServerUnixConn {
     stream: UnixStream,
     chan_name: String,
+    extra_headers: Vec<HttpHeader>,
 }
 
 impl ServerUnixConn {
@@ -18,14 +21,39 @@ impl ServerUnixConn {
         let stream = UnixStream::connect(socket_path)
             .await
             .context("Connect to Unix socket")?;
-        let this = Self {
+        let mut this = Self {
             stream,
             chan_name: chan_name.to_string(),
+            extra_headers: vec![],
         };
-        this.send_msg(UnMessage::new_init(chan_name.to_string()))
+
+        // Send initialization handshake.
+        this.send_msg(UnMessage::new_to_srv_init(chan_name.to_string()))
             .await
             .context("Initialize unix connection to httun-server")?;
+
+        // Receive the initialization handshake reply.
+        let msg = timeout(UNIX_HANDSHAKE_TIMEOUT, this.recv_msg())
+            .await
+            .context("Handshake receive timeout")?
+            .context("Handshake receive")?;
+        if msg.op() != UnOperation::FromSrvInit {
+            return Err(err!(
+                "UnixConn: Got {:?} but expected {:?}",
+                msg.op(),
+                UnOperation::FromSrvInit
+            ));
+        }
+        if msg.chan_name() != chan_name {
+            return Err(err!("UnixConn: Got invalid channel name."));
+        }
+        this.extra_headers = msg.into_extra_headers();
+
         Ok(this)
+    }
+
+    pub fn extra_headers(&self) -> &[HttpHeader] {
+        &self.extra_headers
     }
 
     async fn do_send(&self, data: &[u8]) -> ah::Result<()> {
