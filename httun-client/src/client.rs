@@ -173,19 +173,22 @@ fn make_client(
     }
     c = c.tcp_nodelay(true);
 
-    c = c.gzip(chan_conf.http_allow_compression());
-    c = c.deflate(chan_conf.http_allow_compression());
-    c = c.brotli(chan_conf.http_allow_compression());
-    c = c.zstd(chan_conf.http_allow_compression());
+    c = c.gzip(chan_conf.http().allow_compression());
+    c = c.deflate(chan_conf.http().allow_compression());
+    c = c.brotli(chan_conf.http().allow_compression());
+    c = c.zstd(chan_conf.http().allow_compression());
 
     c = c.hickory_dns(true);
 
     // Allow proxies (or any other MiM) to manipulate the TLS connection.
-    c = c.danger_accept_invalid_hostnames(chan_conf.https_ignore_tls_errors());
-    c = c.danger_accept_invalid_certs(chan_conf.https_ignore_tls_errors());
+    c = c.danger_accept_invalid_hostnames(chan_conf.http().ignore_tls_errors());
+    c = c.danger_accept_invalid_certs(chan_conf.http().ignore_tls_errors());
 
     let mut header_map = HeaderMap::new();
-    for extra_header in extra_headers {
+    for extra_header in extra_headers
+        .iter()
+        .chain(chan_conf.http().extra_headers().iter())
+    {
         header_map.insert(
             HeaderName::from_bytes(extra_header.name()).context("Convert extra-headers name")?,
             HeaderValue::from_bytes(extra_header.value()).context("Convert extra-headers value")?,
@@ -274,7 +277,7 @@ impl DirectionR {
         )
         .context("httun HTTP-r build HTTP client")?;
 
-        let http_auth = self.chan_conf.http_basic_auth().clone();
+        let http_auth = self.chan_conf.http().basic_auth().clone();
 
         ready.notify_one();
         loop {
@@ -378,7 +381,7 @@ impl DirectionW {
         )
         .context("httun HTTP-w build HTTP client")?;
 
-        let http_auth = self.chan_conf.http_basic_auth().clone();
+        let http_auth = self.chan_conf.http().basic_auth().clone();
 
         ready.notify_one();
         loop {
@@ -446,7 +449,7 @@ async fn get_session(
     let client = make_client(user_agent, extra_headers, Duration::from_secs(5), chan_conf)
         .context("httun session build HTTP client")?;
 
-    let http_auth = chan_conf.http_basic_auth().clone();
+    let http_auth = chan_conf.http().basic_auth().clone();
 
     for i in 0..SESSION_INIT_TRIES {
         let last_try = i == SESSION_INIT_TRIES - 1;

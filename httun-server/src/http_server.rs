@@ -490,11 +490,11 @@ impl HttpConn {
             .conf
             .channel(&req.chan_name)
             .context("Get channel from configuration")?;
-        self.check_auth(req, chan.http_basic_auth())?;
+        self.check_auth(req, chan.http().basic_auth())?;
 
         let pinned_chan = self
             .pinned_chan
-            .get_or_init(|| (req.chan_name.to_string(), chan.http_basic_auth().clone()));
+            .get_or_init(|| (req.chan_name.to_string(), chan.http().basic_auth().clone()));
 
         if pinned_chan.0 != req.chan_name {
             Err(err!(

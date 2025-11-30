@@ -206,7 +206,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     } else {
         get_webserver_uid_gid(&opts).context("Get web server UID/GID")?;
         unix_sock = Some(
-            UnixSock::new((&*opts.extra_headers).into())
+            UnixSock::new(Arc::clone(&conf), (&*opts.extra_headers).into())
                 .await
                 .context("Unix socket init")?,
         );

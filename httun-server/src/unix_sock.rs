@@ -4,6 +4,7 @@
 
 use crate::{WEBSERVER_GID, WEBSERVER_UID, systemd::SystemdSocket};
 use anyhow::{self as ah, Context as _, format_err as err};
+use httun_conf::Config;
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
 use httun_util::{errors::DisconnectedError, header::HttpHeader, timeouts::UNIX_HANDSHAKE_TIMEOUT};
 use std::sync::{Arc, atomic};
@@ -19,7 +20,11 @@ pub struct UnixConn {
 }
 
 impl UnixConn {
-    async fn new(stream: UnixStream, extra_headers: &[HttpHeader]) -> ah::Result<Self> {
+    async fn new(
+        stream: UnixStream,
+        conf: &Config,
+        extra_headers: &[HttpHeader],
+    ) -> ah::Result<Self> {
         let mut this = Self {
             name: "".to_string(),
             stream,
@@ -43,9 +48,13 @@ impl UnixConn {
         this.name = msg.chan_name().to_string();
 
         // Send the initialization handshake reply.
+        let mut extra_headers = extra_headers.to_vec();
+        if let Some(chan_conf) = conf.channel(this.chan_name()) {
+            extra_headers.extend_from_slice(chan_conf.http().extra_headers());
+        }
         this.send(&UnMessage::new_from_srv_init(
             this.chan_name().to_string(),
-            extra_headers.to_vec(),
+            extra_headers,
         ))
         .await
         .context("Handshake reply")?;
@@ -129,11 +138,12 @@ impl UnixConn {
 #[derive(Debug)]
 pub struct UnixSock {
     listener: UnixListener,
+    conf: Arc<Config>,
     extra_headers: Arc<[HttpHeader]>,
 }
 
 impl UnixSock {
-    pub async fn new(extra_headers: Arc<[HttpHeader]>) -> ah::Result<Self> {
+    pub async fn new(conf: Arc<Config>, extra_headers: Arc<[HttpHeader]>) -> ah::Result<Self> {
         let sockets = SystemdSocket::get_all()?;
         if let Some(SystemdSocket::Unix(socket)) = sockets.into_iter().next() {
             log::info!("Using Unix socket from systemd.");
@@ -146,6 +156,7 @@ impl UnixSock {
 
             Ok(Self {
                 listener,
+                conf,
                 extra_headers,
             })
         } else {
@@ -186,7 +197,7 @@ impl UnixSock {
             ));
         }
 
-        UnixConn::new(stream, &self.extra_headers).await
+        UnixConn::new(stream, &self.conf, &self.extra_headers).await
     }
 }
 

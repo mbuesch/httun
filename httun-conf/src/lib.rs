@@ -4,7 +4,7 @@
 
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Key;
-use httun_util::strings::hex;
+use httun_util::{header::HttpHeader, strings::hex};
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
@@ -264,6 +264,89 @@ impl ConfigL7Tunnel {
 }
 
 #[derive(Debug, Clone)]
+pub struct ConfigChannelHttp {
+    basic_auth: Option<HttpAuth>,
+    allow_compression: bool,
+    ignore_tls_errors: bool,
+    extra_headers: Vec<HttpHeader>,
+}
+
+impl Default for ConfigChannelHttp {
+    fn default() -> Self {
+        Self {
+            basic_auth: None,
+            allow_compression: false,
+            ignore_tls_errors: true,
+            extra_headers: vec![],
+        }
+    }
+}
+
+impl TryFrom<&toml::Value> for ConfigChannelHttp {
+    type Error = ah::Error;
+
+    fn try_from(value: &toml::Value) -> Result<Self, Self::Error> {
+        let mut this: Self = Default::default();
+
+        let table = value
+            .as_table()
+            .ok_or_else(|| err!("channel.http: Expected a table"))?;
+
+        if let Some(v) = table.get("basic-auth") {
+            this.basic_auth = Some(HttpAuth::try_from(v)?);
+        }
+
+        if let Some(v) = table.get("allow-compression") {
+            this.allow_compression = v
+                .as_bool()
+                .ok_or_else(|| err!("channel.http: 'allow-compression' must be a boolean"))?;
+        }
+
+        if let Some(v) = table.get("ignore-tls-errors") {
+            this.ignore_tls_errors = v
+                .as_bool()
+                .ok_or_else(|| err!("channel.http: 'ignore-tls-errors' must be a boolean"))?;
+        }
+
+        if let Some(v) = table.get("extra-headers") {
+            for hdr in v
+                .as_array()
+                .ok_or_else(|| err!("channel.http: 'extra-headers' must be an array"))?
+                .iter()
+            {
+                let hdr = hdr.as_str().ok_or_else(|| {
+                    err!("channel.http: 'extra-headers' elements must be strings")
+                })?;
+                let hdr: HttpHeader = hdr.parse().map_err(|_| {
+                    err!("channel.http: 'extra-headers' elements must be colon separated strings")
+                })?;
+                this.extra_headers.push(hdr);
+            }
+        }
+
+        Ok(this)
+    }
+}
+
+impl ConfigChannelHttp {
+    pub fn basic_auth(&self) -> &Option<HttpAuth> {
+        &self.basic_auth
+    }
+
+    pub fn allow_compression(&self) -> bool {
+        self.allow_compression
+    }
+
+    pub fn ignore_tls_errors(&self) -> bool {
+        self.ignore_tls_errors
+    }
+
+    pub fn extra_headers(&self) -> &[HttpHeader] {
+        &self.extra_headers
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct ConfigChannel {
     disabled: bool,
     enable_test: bool,
@@ -272,26 +355,7 @@ pub struct ConfigChannel {
     shared_secret: Key,
     tun: Option<String>,
     l7_tunnel: Option<ConfigL7Tunnel>,
-    http_basic_auth: Option<HttpAuth>,
-    http_allow_compression: bool,
-    https_ignore_tls_errors: bool,
-}
-
-impl Default for ConfigChannel {
-    fn default() -> Self {
-        Self {
-            disabled: false,
-            enable_test: false,
-            urls: vec![],
-            name: "".to_string(),
-            shared_secret: Default::default(),
-            tun: None,
-            l7_tunnel: None,
-            http_basic_auth: None,
-            http_allow_compression: false,
-            https_ignore_tls_errors: true,
-        }
-    }
+    http: ConfigChannelHttp,
 }
 
 impl TryFrom<&toml::Value> for ConfigChannel {
@@ -363,20 +427,8 @@ impl TryFrom<&toml::Value> for ConfigChannel {
             this.l7_tunnel = Some(ConfigL7Tunnel::try_from(v)?);
         }
 
-        if let Some(v) = table.get("http-basic-auth") {
-            this.http_basic_auth = Some(HttpAuth::try_from(v)?);
-        }
-
-        if let Some(v) = table.get("http-allow-compression") {
-            this.http_allow_compression = v
-                .as_bool()
-                .ok_or_else(|| err!("channel: 'http-allow-compression' must be a boolean"))?;
-        }
-
-        if let Some(v) = table.get("https-ignore-tls-errors") {
-            this.https_ignore_tls_errors = v
-                .as_bool()
-                .ok_or_else(|| err!("channel: 'https-ignore-tls-errors' must be a boolean"))?;
+        if let Some(v) = table.get("http") {
+            this.http = ConfigChannelHttp::try_from(v)?;
         }
 
         Ok(this)
@@ -428,16 +480,8 @@ impl ConfigChannel {
             .and_then(|l| if l.disabled() { None } else { Some(l) })
     }
 
-    pub fn http_basic_auth(&self) -> &Option<HttpAuth> {
-        &self.http_basic_auth
-    }
-
-    pub fn http_allow_compression(&self) -> bool {
-        self.http_allow_compression
-    }
-
-    pub fn https_ignore_tls_errors(&self) -> bool {
-        self.https_ignore_tls_errors
+    pub fn http(&self) -> &ConfigChannelHttp {
+        &self.http
     }
 }
 
@@ -517,7 +561,7 @@ impl Config {
         // Validate all keys
         for chan in self.channels_iter() {
             // Compare shared-secret to http-password.
-            if let Some(http_basic_auth) = chan.http_basic_auth()
+            if let Some(http_basic_auth) = chan.http().basic_auth()
                 && let Some(password) = http_basic_auth.password()
                 && !password.is_empty()
                 && password.trim().to_lowercase() == hex(&chan.shared_secret).trim().to_lowercase()
