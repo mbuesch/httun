@@ -32,7 +32,7 @@ arc-swap = "1"
 atoi = "2"
 base64 = "0.22"
 bincode = "2"
-clap = { version = "4", default-features = false, features = [ "std", "help", "usage", "error-context", "derive" ] }
+clap = { version = "4", features = [ "derive", "wrap_help" ] }
 console-subscriber = "0.5"
 env_logger = "0.11"
 getrandom = "0.3"
