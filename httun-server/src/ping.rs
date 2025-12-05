@@ -2,24 +2,25 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use tokio::sync::{Mutex, Notify};
+use std::sync::Mutex as StdMutex;
+use tokio::sync::Notify;
 
 #[derive(Debug)]
 pub struct PingState {
     notify: Notify,
-    buf: Mutex<Vec<u8>>,
+    buf: StdMutex<Vec<u8>>,
 }
 
 impl PingState {
     pub fn new() -> Self {
         Self {
             notify: Notify::new(),
-            buf: Mutex::new(vec![]),
+            buf: StdMutex::new(vec![]),
         }
     }
 
     pub async fn put(&self, payload: Vec<u8>) {
-        *self.buf.lock().await = payload;
+        *self.buf.lock().expect("Mutex poisoned") = payload;
         self.notify.notify_one();
     }
 
@@ -27,7 +28,7 @@ impl PingState {
         loop {
             self.notify.notified().await;
 
-            let mut buf = self.buf.lock().await;
+            let mut buf = self.buf.lock().expect("Mutex poisoned");
             if !buf.is_empty() {
                 let mut payload: Vec<u8> = "Reply to: ".to_string().into();
                 payload.append(&mut *buf);
