@@ -77,6 +77,12 @@ This gives you the full flexibility to either
 
 See the [installation instructions](doc/INSTALL.md) for more information about how to build and install httun.
 
+# Examples
+
+If you want to set up an IP TUN tunnel, see the [TUN example](doc/EXAMPLE_TUN.md).
+
+IF you want to use a layer 7 socket based tunnel, see the [L7 example](doc/EXAMPLE_L7.md).
+
 # Configuring
 
 See the [configuration documentation](doc/CONFIGURATION.md) for detailled information about how to configure the httun server and client.

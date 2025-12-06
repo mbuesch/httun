@@ -67,11 +67,3 @@ httun-client genkey
 ```
 
 This will output a new key that you can copy into your `client.conf` and `server.conf`.
-
-## Example: Linux TUN based tunnel
-
-TODO
-
-## Example: ISO/OSI layer 7 (socket) tunnel
-
-TODO
