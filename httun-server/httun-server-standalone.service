@@ -6,7 +6,9 @@ StartLimitIntervalSec=0
 [Service]
 Type=notify
 NotifyAccess=main
+ExecStartPre=/opt/httun/etc/httun/server-start-pre.sh
 ExecStart=/opt/httun/bin/httun-server --http-listen any
+ExecStartPost=/opt/httun/etc/httun/server-start-post.sh
 RuntimeDirectory=httun-server
 RuntimeDirectoryMode=0755
 StandardOutput=journal
