@@ -1,7 +1,9 @@
-## Example: Linux TUN based tunnel
+# Example: Linux TUN based tunnel
 
 This example demonstrates how to configure a Layer 3 (IP) tunnel.
 This allows you to route IP traffic between the client and the server.
+
+## Generate a common secret
 
 First, generate a strong shared secret for the channel:
 
@@ -15,7 +17,7 @@ Keep it private at all times.
 
 You will use it in both the server and client configuration files.
 
-### Server Configuration (`server.conf`)
+## Server Configuration (`server.conf`)
 
 On the server, define a channel with a channel `name` and specify the `shared-secret` key and a `tun` device name to create.
 
@@ -31,7 +33,7 @@ Set the `enable-test` option to `true` for initial setup and testing.
 This option enables the possibility to do a basic connection test to this server.
 You may later set this option to `false` after you verified that your setup works properly.
 
-### Client Configuration (`client.conf`)
+## Client Configuration (`client.conf`)
 
 On the client, configure a corresponding channel `name` that points to your server's `url`.
 
@@ -42,7 +44,7 @@ name = "mytun"
 shared-secret = "YOUR_GENERATED_SECRET_KEY_HERE"
 ```
 
-### Running the server
+## Running the server
 
 After (re-)starting the server's systemd unit, it will create a `httun-s-mytun` network interface.
 
@@ -59,7 +61,7 @@ ip addr add 10.1.1.1/24 dev httun-s-mytun
 ip link set httun-s-mytun up
 ```
 
-### Running the client
+## Running the client
 
 The client's TUN interface will be configured automatically.
 The name of the client's TUN interface will default to `httun-c-0`.
