@@ -15,6 +15,27 @@ use tokio::{
     task,
 };
 
+fn split_host_port_string(hostport: &str) -> ah::Result<(&str, u16)> {
+    let Some(pos) = hostport.rfind(':') else {
+        return Err(err!("Invalid address. No colon/port."));
+    };
+    let mut host = &hostport[..pos];
+    if host.starts_with("[") {
+        if !host.ends_with("]") {
+            return Err(err!("Invalid IPv6 address. No closing ]."));
+        }
+        if host.len() <= 2 {
+            return Err(err!("Invalid IPv6 address. Nothing inbetween [ ]."));
+        }
+        host = &host[1..host.len() - 1];
+    }
+    let Ok(port) = hostport[pos + 1..].parse::<u16>() else {
+        return Err(err!("Invalid port number."));
+    };
+
+    Ok((host, port))
+}
+
 pub async fn run_mode_socket(
     exit_tx: Arc<Sender<ah::Result<()>>>,
     httun_comm: Arc<HttunComm>,
@@ -22,13 +43,8 @@ pub async fn run_mode_socket(
     res_mode: ResMode,
     local_port: u16,
 ) -> ah::Result<()> {
-    let Some(pos) = target.find(':') else {
-        return Err(err!("Invalid target address. No colon/port."));
-    };
-    let target_host = &target[..pos];
-    let Ok(target_port) = target[pos + 1..].parse::<u16>() else {
-        return Err(err!("Invalid target address. Invalid port number."));
-    };
+    let (target_host, target_port) =
+        split_host_port_string(target).context("Parse target address")?;
 
     let target_addr = resolve(
         target_host,
