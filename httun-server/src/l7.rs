@@ -88,7 +88,7 @@ impl NetList {
         if log::log_enabled!(log::Level::Info) {
             if let Some(list) = &self.list {
                 let list: String = list.iter().map(|a| format!("\"{a:?}\", ")).collect();
-                log::info!("{name} = [{list}]");
+                log::info!("{name} = [ {list}]");
             } else {
                 log::info!("No {name}");
             }
