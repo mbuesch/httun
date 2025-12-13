@@ -8,23 +8,30 @@ use httun_unix_protocol::{UnMessage, UnOperation};
 use httun_util::timeouts::CHAN_R_TIMEOUT;
 use std::time::Duration;
 
+/// Message received from communication backend.
 #[derive(Debug)]
 pub enum CommRxMsg {
+    /// Data to server.
     ToSrv(Vec<u8>),
+    /// Request for data from server.
     ReqFromSrv(Vec<u8>),
+    /// Keepalive message.
     Keepalive,
 }
 
+/// Communication backend over Unix socket connections.
 #[derive(Debug)]
 pub struct CommBackendUnix {
     conn: UnixConn,
 }
 
+/// Communication backend over HTTP connections.
 #[derive(Debug)]
 pub struct CommBackendHttp {
     conn: HttpConn,
 }
 
+/// Communication backend abstraction over Unix socket and HTTP connections.
 #[derive(Debug)]
 pub enum CommBackend {
     Unix(Box<CommBackendUnix>),
@@ -32,14 +39,17 @@ pub enum CommBackend {
 }
 
 impl CommBackend {
+    /// Create a new Unix socket communication backend.
     pub fn new_unix(conn: UnixConn) -> Self {
         Self::Unix(Box::new(CommBackendUnix { conn }))
     }
 
+    /// Create a new HTTP communication backend.
     pub fn new_http(conn: HttpConn) -> Self {
         Self::Http(Box::new(CommBackendHttp { conn }))
     }
 
+    /// Get the channel name, if known.
     pub fn chan_name(&self) -> Option<String> {
         match self {
             Self::Unix(b) => Some(b.conn.chan_name().to_string()),
@@ -47,6 +57,7 @@ impl CommBackend {
         }
     }
 
+    /// Receive a message from the communication backend.
     pub async fn recv(&self) -> ah::Result<CommRxMsg> {
         match self {
             Self::Unix(b) => {
@@ -73,6 +84,7 @@ impl CommBackend {
         }
     }
 
+    /// Send a reply to the communication backend.
     pub async fn send_reply(&self, payload: Vec<u8>) -> ah::Result<()> {
         match self {
             Self::Unix(b) => {
@@ -86,20 +98,29 @@ impl CommBackend {
         }
     }
 
+    /// Send a reply timeout notification to the communication backend.
     pub async fn send_reply_timeout(&self) -> ah::Result<()> {
         match self {
-            Self::Unix(_) => Ok(()),
+            Self::Unix(_) => {
+                // Timeouts are handled at the FastCGI/Webserver level.
+                Ok(())
+            }
             Self::Http(b) => b.conn.send_reply_timeout().await,
         }
     }
 
+    /// Get the reply timeout duration for the communication backend.
     pub fn get_reply_timeout_duration(&self) -> Option<Duration> {
         match self {
-            Self::Unix(_) => None,
+            Self::Unix(_) => {
+                // Timeouts are handled at the FastCGI/Webserver level.
+                None
+            }
             Self::Http(_) => Some(CHAN_R_TIMEOUT),
         }
     }
 
+    /// Close the communication backend.
     pub async fn close(&self) -> ah::Result<()> {
         match self {
             Self::Unix(b) => {
