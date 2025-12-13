@@ -406,7 +406,7 @@ impl TryFrom<u32> for HttpError {
             PEER_DISCONNECTED => Ok(HttpError::PeerDisconnected),
             PROTOCOL_ERROR => Ok(HttpError::ProtocolError),
             ABORT => Ok(HttpError::Abort),
-            _ => Err(err!("Invalid HttpError value: {}", value)),
+            _ => Err(err!("Invalid HttpError value: {value}")),
         }
     }
 }
