@@ -37,9 +37,12 @@ use tokio::{
     task,
 };
 
+/// The web server's UID (for FastCGI socket ownership).
 static WEBSERVER_UID: AtomicU32 = AtomicU32::new(u32::MAX);
+/// The web server's GID (for FastCGI socket ownership).
 static WEBSERVER_GID: AtomicU32 = AtomicU32::new(u32::MAX);
 
+/// Drop root privileges.
 fn drop_privileges() -> ah::Result<()> {
     log::info!("Dropping root privileges.");
 
@@ -81,6 +84,7 @@ fn get_webserver_uid_gid(opts: &Opts) -> ah::Result<()> {
     Ok(())
 }
 
+/// Command line options.
 #[derive(Parser, Debug, Clone)]
 struct Opts {
     /// Override the default path to the configuration file.
@@ -218,6 +222,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 
     let conf = Arc::new(Config::new_parse_file(&opts.get_config()).context("Parse configuration")?);
 
+    // Either start simple standalone HTTP server or Unix socket for FastCGI.
     let mut http_srv = None;
     let mut unix_sock = None;
     if let Some(addr) = opts.get_http_listen()? {
@@ -236,20 +241,24 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         );
     }
 
+    // Initialize channel manager.
     let channels = Arc::new(
         Channels::new(Arc::clone(&conf))
             .await
             .context("Initialize channels")?,
     );
 
+    // Drop root privileges because we are done with privileged operations.
     if opts.no_drop_root {
         log::warn!("Not dropping root privileges as requested (--no-drop-root).");
     } else {
         drop_privileges().context("Drop root privileges")?;
     }
 
+    // Initialize the httun protocol manager.
     let protman = ProtocolManager::new();
 
+    // Notify systemd that we are ready.
     systemd_notify_ready()?;
 
     // Spawn task: Periodic task.
@@ -265,7 +274,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         }
     });
 
-    // Spawn task: Unix socket handler (from/to FCGI).
+    // Spawn task: Unix socket handler (from/to FastCGI).
     if let Some(unix_sock) = unix_sock {
         task::spawn({
             let opts = Arc::clone(&opts);
@@ -358,23 +367,28 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 }
 
 fn main() -> ah::Result<()> {
+    // Initialize logging.
     env_logger::init_from_env(
         env_logger::Env::new()
             .filter_or("HTTUN_LOG", "info")
             .write_style_or("HTTUN_LOG_STYLE", "auto"),
     );
 
+    // Parse command line options.
     let opts = Arc::new(Opts::parse());
 
+    // Initialize tokio-console for debugging if requested.
     if opts.tokio_console {
         console_subscriber::init();
     }
 
+    // Show version and exit if requested.
     if opts.version {
         println!("httun-server version {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
+    // Build Tokio runtime and run the async main function.
     const WORKER_THREADS: usize = 6;
     runtime::Builder::new_multi_thread()
         .thread_keep_alive(Duration::from_millis(5000))
