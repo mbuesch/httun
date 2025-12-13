@@ -132,7 +132,15 @@ enum Mode {
     /// (via HTTP httun-fcgi).
     ///
     /// The transferred test data is not encrypted.
-    Test {},
+    Test {
+        /// Delay time between test messages.
+        ///
+        /// By default test messages are sent as fast as possible.
+        /// But this options lets you reduce the test message frequency
+        /// by increasing the period.
+        #[arg(long, short, default_value = "0.0")]
+        period: f32,
+    },
 
     /// Generate a new truly random key.
     Genkey {},
@@ -216,7 +224,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let client_mode = match mode {
         Mode::Tun { .. } => HttunClientMode::L3,
         Mode::Socket { .. } => HttunClientMode::L7,
-        Mode::Test {} => HttunClientMode::Test,
+        Mode::Test { .. } => HttunClientMode::Test,
         Mode::Genkey {} => unreachable!(),
     };
 
@@ -267,8 +275,8 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             )
             .await?;
         }
-        Some(Mode::Test {}) => {
-            run_mode_test(Arc::clone(&exit_tx), Arc::clone(&httun_comm)).await?;
+        Some(Mode::Test { period }) => {
+            run_mode_test(Arc::clone(&exit_tx), Arc::clone(&httun_comm), *period).await?;
         }
         None | Some(Mode::Genkey {}) => unreachable!(),
     }

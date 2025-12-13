@@ -5,12 +5,13 @@
 use crate::{client::HttunComm, error_delay};
 use anyhow::{self as ah, format_err as err};
 use httun_protocol::{Message, MsgType, Operation};
-use std::{num::Wrapping, sync::Arc};
-use tokio::{sync::mpsc::Sender, task};
+use std::{num::Wrapping, sync::Arc, time::Duration};
+use tokio::{sync::mpsc::Sender, task, time::interval};
 
 pub async fn run_mode_test(
     exit_tx: Arc<Sender<ah::Result<()>>>,
     httun_comm: Arc<HttunComm>,
+    period_secs: f32,
 ) -> ah::Result<()> {
     // Spawn task: Test handler.
     task::spawn({
@@ -20,7 +21,17 @@ pub async fn run_mode_test(
             // Connect to the tunnel.
             httun_comm.request_restart().await;
 
+            let mut inter = if period_secs > 0.0 {
+                Some(interval(Duration::from_secs_f32(period_secs)))
+            } else {
+                None
+            };
+
             loop {
+                if let Some(inter) = &mut inter {
+                    inter.tick().await;
+                }
+
                 let testdata = format!("TEST {count:08X}");
                 let expected_reply = format!("Reply to: {testdata}");
                 log::info!("Sending test mode ping: '{testdata}'");
