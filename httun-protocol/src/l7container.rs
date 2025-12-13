@@ -9,7 +9,9 @@ const L7C_OFFS_ADDR: usize = 0;
 const L7C_OFFS_PORT: usize = 16;
 const L7C_OFFS_PAYLOAD: usize = 18;
 
+/// Overhead of the L7Container in bytes.
 const L7C_OVERHEAD_LEN: usize = 16 + 2;
+/// Maximum payload length of the L7Container in bytes.
 pub const L7C_MAX_PAYLOAD_LEN: usize = crate::message::MAX_PAYLOAD_LEN - L7C_OVERHEAD_LEN;
 
 /// # Message container for L7 payload.
@@ -20,7 +22,9 @@ pub const L7C_MAX_PAYLOAD_LEN: usize = crate::message::MAX_PAYLOAD_LEN - L7C_OVE
 /// successfully deliver the L7 payload to the destination.
 #[derive(Clone)]
 pub struct L7Container {
+    /// Destination address for the L7 payload.
     addr: SocketAddr,
+    /// L7 payload data.
     payload: Vec<u8>,
 }
 
@@ -31,22 +35,30 @@ impl std::fmt::Debug for L7Container {
 }
 
 impl L7Container {
+    /// Create a new L7Container.
+    ///
+    /// `addr` is the destination address for the L7 payload.
+    /// `payload` is the L7 payload data.
     pub fn new(addr: SocketAddr, payload: Vec<u8>) -> Self {
         Self { addr, payload }
     }
 
+    /// Get the destination address.
     pub fn addr(&self) -> &SocketAddr {
         &self.addr
     }
 
+    /// Get the L7 payload data.
     pub fn payload(&self) -> &[u8] {
         &self.payload
     }
 
+    /// Consume the container and return the L7 payload data.
     pub fn into_payload(self) -> Vec<u8> {
         self.payload
     }
 
+    /// Serialize the L7Container into a byte vector.
     pub fn serialize(&self) -> Vec<u8> {
         let addr = match self.addr.ip() {
             IpAddr::V4(addr) => addr.to_ipv6_mapped().octets(),
@@ -62,6 +74,7 @@ impl L7Container {
         buf
     }
 
+    /// Deserialize a byte slice into an L7Container.
     pub fn deserialize(buf: &[u8]) -> ah::Result<Self> {
         if buf.len() < L7C_OVERHEAD_LEN {
             return Err(err!("L7Container size is too small."));

@@ -11,14 +11,22 @@ use base64::prelude::*;
 // We should be able to have both, a symmetric user key and an asymmetric user key
 // and use them both at the same time.
 
+/// AES-256-GCM with 16 byte nonce.
 type Aes256GcmN16 = aes_gcm::AesGcm<aes_gcm::aes::Aes256, aes_gcm::aes::cipher::consts::U16>;
+/// Shared key type.
 pub type Key = [u8; 32];
+/// Nonce type.
 type Nonce = [u8; 16];
+/// Nonce length.
 const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
+/// Authentication tag length.
 const AUTHTAG_LEN: usize = 16;
+/// Session secret type.
 pub type SessionSecret = [u8; 16];
+/// Session secret length.
 const SESSION_SECRET_LEN: usize = std::mem::size_of::<SessionSecret>();
 
+/// Maximum httun payload length.
 pub const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
 
 const OFFS_TYPE: usize = 0;
@@ -32,9 +40,15 @@ const AREA_ASSOC_LEN: usize = 1;
 const AREA_CRYPT_LEN: usize = 1 + 8 + 2;
 pub const OVERHEAD_LEN: usize = AREA_ASSOC_LEN + NONCE_LEN + AREA_CRYPT_LEN + AUTHTAG_LEN;
 
+/// Basic message type.
+///
+/// This information will *not* be encrypted.
+/// It will only be authenticated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MsgType {
+    /// Initialization message.
     Init,
+    /// Data message.
     Data,
 }
 
@@ -58,14 +72,22 @@ impl From<MsgType> for u8 {
     }
 }
 
+/// Message operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
+    /// Initialization.
     Init,
+    /// Layer 3 to server.
     L3ToSrv,
+    /// Layer 3 from server.
     L3FromSrv,
+    /// Layer 7 to server.
     L7ToSrv,
+    /// Layer 7 from server.
     L7FromSrv,
+    /// Test message to server.
     TestToSrv,
+    /// Test message from server.
     TestFromSrv,
 }
 
@@ -127,9 +149,13 @@ impl From<Operation> for u8 {
 /// In case of a L7 the payload must be a `L7Container`.
 #[derive(Clone)]
 pub struct Message {
+    /// Message type.
     type_: MsgType,
+    /// Message operation.
     oper: Operation,
+    /// Sequence number and sequence type.
     sequence: u64,
+    /// Message payload.
     payload: Vec<u8>,
 }
 
@@ -144,6 +170,7 @@ impl std::fmt::Debug for Message {
 }
 
 impl Message {
+    /// Create a new message.
     pub fn new(type_: MsgType, oper: Operation, payload: Vec<u8>) -> ah::Result<Self> {
         if payload.len() > MAX_PAYLOAD_LEN {
             return Err(err!("Payload size is too big"));
@@ -156,30 +183,37 @@ impl Message {
         })
     }
 
+    /// Get message type.
     pub fn type_(&self) -> MsgType {
         self.type_
     }
 
+    /// Get message operation.
     pub fn oper(&self) -> Operation {
         self.oper
     }
 
+    /// Get sequence number.
     pub fn sequence(&self) -> u64 {
         self.sequence
     }
 
+    /// Set sequence number.
     pub fn set_sequence(&mut self, sequence: u64) {
         self.sequence = sequence;
     }
 
+    /// Get message payload.
     pub fn payload(&self) -> &[u8] {
         &self.payload
     }
 
+    /// Consume message and return payload.
     pub fn into_payload(self) -> Vec<u8> {
         self.payload
     }
 
+    /// Serialize message into bytes.
     pub fn serialize(
         &self,
         key: &Key,
@@ -218,6 +252,7 @@ impl Message {
         Ok(buf)
     }
 
+    /// Serialize message into base64url encoded string.
     pub fn serialize_b64u(
         &self,
         key: &Key,
@@ -226,10 +261,12 @@ impl Message {
         Ok(Self::encode_b64u(&self.serialize(key, session_secret)?))
     }
 
+    /// Encode bytes into base64url string.
     pub fn encode_b64u(buf: &[u8]) -> String {
         BASE64_URL_SAFE_NO_PAD.encode(buf)
     }
 
+    /// Deserialize message from bytes.
     pub fn deserialize(
         buf: &[u8],
         key: &Key,
@@ -279,6 +316,7 @@ impl Message {
         })
     }
 
+    /// Deserialize message from base64url encoded string.
     pub fn deserialize_b64u(
         buf: &[u8],
         key: &Key,
@@ -287,17 +325,25 @@ impl Message {
         Self::deserialize(&Self::decode_b64u(buf)?, key, session_secret)
     }
 
+    /// Decode base64url string into bytes.
     pub fn decode_b64u(buf: &[u8]) -> ah::Result<Vec<u8>> {
         BASE64_URL_SAFE_NO_PAD
             .decode(buf)
             .context("Base64url decode")
     }
 
+    /// Peek message type (`MsgType`) from raw bytes.
+    ///
+    /// The returned information is not authenticated.
+    /// Use [Message::deserialize] to get authenticated data.
     pub fn peek_type(buf: &[u8]) -> ah::Result<MsgType> {
         Self::basic_length_check(buf)?;
         u8::from_be_bytes(buf[OFFS_TYPE..OFFS_TYPE + 1].try_into()?).try_into()
     }
 
+    /// Basic length check of raw message bytes.
+    ///
+    /// This returns an error if the length is obviously invalid.
     fn basic_length_check(buf: &[u8]) -> ah::Result<()> {
         if buf.len() < OVERHEAD_LEN {
             return Err(err!("Message size is too small."));
