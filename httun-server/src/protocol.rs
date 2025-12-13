@@ -104,7 +104,7 @@ impl ProtocolHandler {
 
     async fn handle_tosrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
-        let session = chan.session();
+        let session = chan.get_session_and_update_tx_sequence();
 
         log::debug!("{}: W direction packet received", chan.name());
 
@@ -156,7 +156,7 @@ impl ProtocolHandler {
 
     async fn handle_fromsrv_init(&self, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
-        let mut session = chan.session();
+        let mut session = chan.get_session_and_update_tx_sequence();
 
         log::debug!("{}: Session init packet received", chan.name());
 
@@ -185,7 +185,7 @@ impl ProtocolHandler {
 
     async fn handle_fromsrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
-        let session = chan.session();
+        let session = chan.get_session_and_update_tx_sequence();
 
         log::debug!("{}: R direction packet received", chan.name());
 

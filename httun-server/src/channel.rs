@@ -22,12 +22,14 @@ use std::{
     },
 };
 
+/// Represents a session for a channel.
 #[derive(Clone, Debug, Default)]
 pub struct Session {
     pub secret: Option<SessionSecret>,
     pub sequence: u64,
 }
 
+/// Internal state for a channel's session.
 #[derive(Debug)]
 struct SessionState {
     session: Session,
@@ -36,19 +38,29 @@ struct SessionState {
     rx_validator_c: SequenceValidator,
 }
 
+/// Represents a single configured channel.
 #[derive(Debug)]
 pub struct Channel {
+    /// Name of the channel.
     name: String,
+    /// Layer 3 (TUN) handler, if any.
     l3: Option<TunHandler>,
+    /// Layer 7 (socket) handler, if any.
     l7: Option<L7State>,
+    /// Shared secret key.
     key: Key,
+    /// Whether test messages are enabled.
     test_enabled: bool,
+    /// Ping state, for connectivity testing.
     ping: PingState,
+    /// Session state.
     session: StdMutex<SessionState>,
+    /// Timestamp of last activity, in seconds since epoch.
     last_activity: AtomicU64,
 }
 
 impl Channel {
+    /// Create new Channel instance.
     fn new(
         conf: &Config,
         name: &str,
@@ -76,27 +88,36 @@ impl Channel {
         }
     }
 
+    /// Get channel name.
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Get shared secret key.
     pub fn key(&self) -> &Key {
         &self.key
     }
 
+    /// Whether test messages are enabled.
     pub fn test_enabled(&self) -> bool {
         self.test_enabled
     }
 
-    pub fn session(&self) -> Session {
+    /// Get current session, updating its TX sequence counter.
+    pub fn get_session_and_update_tx_sequence(&self) -> Session {
         let mut s = self.session.lock().expect("Mutex poisoned");
         s.session.sequence = s.tx_sequence_a.next();
         s.session.clone()
     }
 
+    /// Create a new session, resetting sequence counters.
+    ///
+    /// This invalidates any previous session.
     pub fn create_new_session(&self) -> SessionSecret {
+        // Securely generate a new session secret.
         let session_secret: SessionSecret = secure_random();
 
+        // Store the new session state, overwriting any previous session.
         {
             let mut s = self.session.lock().expect("Mutex poisoned");
 
@@ -110,9 +131,14 @@ impl Channel {
             }
         }
 
+        // Return the new session secret.
         session_secret
     }
 
+    /// Check received message's sequence number.
+    ///
+    /// Returns an error if the sequence number
+    /// is invalid or not in order or not in the receive window.
     pub async fn check_rx_sequence(
         &self,
         msg: &Message,
@@ -129,22 +155,28 @@ impl Channel {
             .context("Message sequence validation")
     }
 
+    /// Log activity on this channel.
     pub fn log_activity(&self) {
         self.last_activity.store(now(), atomic::Ordering::Relaxed);
     }
 
+    /// Check whether the channel has timed out due to inactivity.
     pub fn activity_timed_out(&self) -> bool {
         tdiff(now(), self.last_activity.load(atomic::Ordering::Relaxed)) > CHAN_ACTIVITY_TIMEOUT_S
     }
 
+    /// Store the ping payload that was received.
+    /// This will be sent back as pong payload.
     pub async fn put_ping(&self, payload: Vec<u8>) {
         self.ping.put(payload).await;
     }
 
+    /// Generate the pong payload to send.
     pub async fn get_pong(&self) -> Vec<u8> {
         self.ping.get().await
     }
 
+    /// Send data to the TUN interface.
     pub async fn l3send(&self, data: &[u8]) -> ah::Result<()> {
         if let Some(l3) = &self.l3 {
             l3.send(data).await.context("TUN/L3 send")
@@ -157,6 +189,7 @@ impl Channel {
         }
     }
 
+    /// Receive data from the TUN interface.
     pub async fn l3recv(&self) -> ah::Result<Vec<u8>> {
         if let Some(l3) = &self.l3 {
             l3.recv().await.context("TUN/L3 receive")
@@ -169,6 +202,7 @@ impl Channel {
         }
     }
 
+    /// Send data to the L7 socket.
     pub async fn l7send(&self, data: &[u8]) -> ah::Result<()> {
         if let Some(l7) = &self.l7 {
             l7.send(data).await.context("L7 socket send")
@@ -181,6 +215,7 @@ impl Channel {
         }
     }
 
+    /// Receive data from the L7 socket.
     pub async fn l7recv(&self) -> ah::Result<Vec<u8>> {
         if let Some(l7) = &self.l7 {
             l7.recv().await.context("L7 socket receive")
@@ -193,6 +228,7 @@ impl Channel {
         }
     }
 
+    /// Perform periodic work, such as checking for timeouts.
     pub async fn periodic_work(&self) {
         if let Some(l7) = &self.l7 {
             l7.check_timeout().await;
@@ -200,12 +236,15 @@ impl Channel {
     }
 }
 
+/// Manager of all configured channels.
 #[derive(Debug)]
 pub struct Channels {
+    /// Map of channel name -> Channel
     channels: StdMutex<HashMap<String, Arc<Channel>>>,
 }
 
 impl Channels {
+    /// Create Channels manager from configuration.
     pub async fn new(conf: Arc<Config>) -> ah::Result<Self> {
         let mut channels = HashMap::new();
 
@@ -242,6 +281,7 @@ impl Channels {
         })
     }
 
+    /// Get channel by name.
     pub fn get(&self, name: &str) -> Option<Arc<Channel>> {
         self.channels
             .lock()
