@@ -91,6 +91,12 @@ See the [configuration documentation](doc/CONFIGURATION.md) for detailled inform
 
 If you want to package the software for distribution, please see the [distribution packaging hints](doc/DISTRO_PACKAGING.md).
 
+# Systemd
+
+Currently systemd it required for the operation of the `httun-server`.
+This is not a fundamental limitation, but merely an implementation detail of the current implementation.
+If you need support for non-systemd systems, please open an Issue or a PullRequest.
+
 # License
 
 Copyright (c) 2025 Michael Büsch <m@bues.ch>

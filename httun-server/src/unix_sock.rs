@@ -13,13 +13,21 @@ use tokio::{
     time::timeout,
 };
 
+/// A connection on the Unix socket.
+///
+/// This is where the FastCGI requests are received from the httun FastCGI daemon.
 #[derive(Debug)]
 pub struct UnixConn {
+    /// The channel name.
     name: String,
+    /// The underlying Unix stream.
     stream: UnixStream,
 }
 
 impl UnixConn {
+    /// Create a new UnixConn from an accepted UnixStream.
+    ///
+    /// This performs the initialization handshake.
     async fn new(
         stream: UnixStream,
         conf: &Config,
@@ -64,10 +72,12 @@ impl UnixConn {
         Ok(this)
     }
 
+    /// Get the channel name.
     pub fn chan_name(&self) -> &str {
         &self.name
     }
 
+    /// Receive raw data from the Unix socket.
     async fn do_recv(&self, size: usize) -> ah::Result<Vec<u8>> {
         let mut count = 0;
         let mut data = vec![0_u8; size];
@@ -95,6 +105,7 @@ impl UnixConn {
         }
     }
 
+    /// Receive a message from the Unix socket.
     pub async fn recv(&self) -> ah::Result<UnMessage> {
         let hdr = self.do_recv(UnMessageHeader::header_size()).await?;
         let hdr = UnMessageHeader::deserialize(&hdr)?;
@@ -106,6 +117,7 @@ impl UnixConn {
         Ok(msg)
     }
 
+    /// Send raw data on the Unix socket.
     async fn do_send(&self, data: &[u8]) -> ah::Result<()> {
         let mut count = 0;
         loop {
@@ -127,6 +139,7 @@ impl UnixConn {
         }
     }
 
+    /// Send a message on the Unix socket.
     pub async fn send(&self, msg: &UnMessage) -> ah::Result<()> {
         let msg = msg.serialize()?;
         let hdr = UnMessageHeader::new(msg.len())?.serialize()?;
@@ -135,14 +148,21 @@ impl UnixConn {
     }
 }
 
+/// The Unix socket server.
+///
+/// This listens for connections from the httun FastCGI daemon.
 #[derive(Debug)]
 pub struct UnixSock {
+    /// The Unix listener.
     listener: UnixListener,
+    /// The server configuration.
     conf: Arc<Config>,
+    /// Extra HTTP headers to add to each request.
     extra_headers: Arc<[HttpHeader]>,
 }
 
 impl UnixSock {
+    /// Create a new Unix socket server from the systemd socket.
     pub async fn new(conf: Arc<Config>, extra_headers: Arc<[HttpHeader]>) -> ah::Result<Self> {
         let sockets = SystemdSocket::get_all()?;
         if let Some(SystemdSocket::Unix(socket)) = sockets.into_iter().next() {
