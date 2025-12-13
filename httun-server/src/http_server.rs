@@ -25,7 +25,7 @@ use std::{
     net::SocketAddr,
     sync::{
         Arc, OnceLock as StdOnceLock,
-        atomic::{self, AtomicBool, AtomicU32},
+        atomic::{AtomicU32, Ordering},
     },
 };
 use tokio::{
@@ -316,6 +316,7 @@ impl HttunHttpReq {
             };
             tail = t;
             if h.is_empty() {
+                // The remaining data is the body.
                 break tail;
             }
 
@@ -325,8 +326,7 @@ impl HttunHttpReq {
             {
                 authorization = decode_auth_header(v);
             }
-        }
-        .to_vec();
+        };
 
         let mut req = HttunHttpReq {
             request,
@@ -334,7 +334,7 @@ impl HttunHttpReq {
             direction,
             query,
             authorization,
-            body,
+            body: body.to_vec(),
         };
         req.extract_body();
 
@@ -345,15 +345,14 @@ impl HttunHttpReq {
 async fn rx_task(
     id: u32,
     stream: &TcpStream,
-    extra_headers: &[HttpHeader],
     rx_r_sender: &mpsc::Sender<HttunHttpReq>,
     rx_w_sender: &mpsc::Sender<HttunHttpReq>,
-    closed: &AtomicBool,
+    error: &AtomicU32,
 ) -> ah::Result<()> {
     loop {
         let buf = match recv_http(stream).await.context("HTTP recv") {
             Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
-                closed.store(true, atomic::Ordering::Relaxed);
+                error.store(HttpError::PeerDisconnected.into(), Ordering::Relaxed);
                 return Ok(());
             }
             Err(e) => return Err(e),
@@ -362,11 +361,11 @@ async fn rx_task(
 
         let req = match HttunHttpReq::parse(id, &buf.buf).await {
             Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
-                closed.store(true, atomic::Ordering::Relaxed);
+                error.store(HttpError::PeerDisconnected.into(), Ordering::Relaxed);
                 return Ok(());
             }
             Err(e) => {
-                let _ = send_http_reply_badrequest(stream, extra_headers).await;
+                error.store(HttpError::ProtocolError.into(), Ordering::Relaxed);
                 return Err(e);
             }
             Ok(r) => r,
@@ -379,11 +378,44 @@ async fn rx_task(
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum HttpError {
+    NoError = 0,
+    PeerDisconnected,
+    ProtocolError,
+    Abort,
+}
+
+impl From<HttpError> for u32 {
+    fn from(value: HttpError) -> Self {
+        value as _
+    }
+}
+
+impl TryFrom<u32> for HttpError {
+    type Error = ah::Error;
+
+    fn try_from(value: u32) -> ah::Result<Self> {
+        const NO_ERROR: u32 = HttpError::NoError as _;
+        const PEER_DISCONNECTED: u32 = HttpError::PeerDisconnected as _;
+        const PROTOCOL_ERROR: u32 = HttpError::ProtocolError as _;
+        const ABORT: u32 = HttpError::Abort as _;
+
+        match value {
+            NO_ERROR => Ok(HttpError::NoError),
+            PEER_DISCONNECTED => Ok(HttpError::PeerDisconnected),
+            PROTOCOL_ERROR => Ok(HttpError::ProtocolError),
+            ABORT => Ok(HttpError::Abort),
+            _ => Err(err!("Invalid HttpError value: {}", value)),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct HttpConn {
     id: u32,
     stream: Arc<TcpStream>,
-    closed: Arc<AtomicBool>,
+    error: Arc<AtomicU32>,
     rx_task: StdOnceLock<JoinHandle<()>>,
     rx_r: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
     rx_w: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
@@ -402,13 +434,13 @@ impl HttpConn {
         stream.set_linger(None)?;
         stream.set_ttl(255)?;
 
-        let id = NEXT_CONN_ID.fetch_add(1, atomic::Ordering::Relaxed);
+        let id = NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed);
         log::debug!("New connection: {id}");
 
         Ok(Self {
             id,
             stream: Arc::new(stream),
-            closed: Arc::new(AtomicBool::new(false)),
+            error: Arc::new(AtomicU32::new(HttpError::NoError.into())),
             rx_task: StdOnceLock::new(),
             rx_r: Mutex::new(None),
             rx_w: Mutex::new(None),
@@ -424,21 +456,11 @@ impl HttpConn {
 
         let rx_task = task::spawn({
             let stream = Arc::clone(&self.stream);
-            let extra_headers = Arc::clone(&self.extra_headers);
-            let closed = Arc::clone(&self.closed);
+            let error = Arc::clone(&self.error);
             let id = self.id;
             async move {
-                while !closed.load(atomic::Ordering::Relaxed) {
-                    if let Err(e) = rx_task(
-                        id,
-                        &stream,
-                        &extra_headers,
-                        &rx_r_sender,
-                        &rx_w_sender,
-                        &closed,
-                    )
-                    .await
-                    {
+                while error.load(Ordering::Relaxed) == HttpError::NoError as u32 {
+                    if let Err(e) = rx_task(id, &stream, &rx_r_sender, &rx_w_sender, &error).await {
                         log::info!("Connection {id} receive: {e:?}");
                     }
                 }
@@ -508,11 +530,11 @@ impl HttpConn {
     pub async fn recv(&self) -> ah::Result<CommRxMsg> {
         let mut rx_r = self.rx_r.lock().await;
         let mut rx_w = self.rx_w.lock().await;
-        let closed;
+        let error: HttpError;
 
         let ret = tokio::select! {
             req = rx_r.as_mut().context("RX thread not running")?.recv() => {
-                closed = self.closed.load(atomic::Ordering::Relaxed);
+                error = self.error.load(Ordering::Relaxed).try_into().expect("HttpError conversion");
                 drop((rx_r, rx_w)); // drop locks
 
                 if let Some(req) = req {
@@ -523,7 +545,7 @@ impl HttpConn {
                 }
             }
             req = rx_w.as_mut().context("RX thread not running")?.recv() => {
-                closed = self.closed.load(atomic::Ordering::Relaxed);
+                error = self.error.load(Ordering::Relaxed).try_into().expect("HttpError conversion");
                 drop((rx_r, rx_w)); // drop locks
 
                 if let Some(req) = req {
@@ -536,15 +558,16 @@ impl HttpConn {
             }
         };
 
-        if closed {
-            return Err(DisconnectedError.into());
+        match error {
+            HttpError::NoError => ret,
+            HttpError::PeerDisconnected => Err(DisconnectedError.into()),
+            HttpError::ProtocolError => Err(err!("Fatal http protocol error")),
+            HttpError::Abort => Err(err!("Http connection aborted")),
         }
-
-        ret
     }
 
     fn abort_rx_task(&self) {
-        self.closed.store(true, atomic::Ordering::Relaxed);
+        self.error.store(HttpError::Abort.into(), Ordering::Relaxed);
         if let Some(rx_task) = self.rx_task.get() {
             rx_task.abort();
         }
