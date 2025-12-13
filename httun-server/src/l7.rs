@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use crate::time::{now, timed_out_now};
+use crate::{
+    net_list::{NetList, NetListCheck},
+    time::{now, timed_out_now},
+};
 use anyhow::{self as ah, Context as _, format_err as err};
 use arc_swap::ArcSwapOption;
 use httun_conf::ConfigL7Tunnel;
@@ -11,11 +14,10 @@ use httun_util::{
     net::{tcp_recv_until_blocking, tcp_send_all},
     timeouts::{L7_TIMEOUT_S, L7_TX_TIMEOUT},
 };
-use ipnet::IpNet;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     ffi::CString,
-    net::{IpAddr, SocketAddr, TcpStream as StdTcpStream},
+    net::{SocketAddr, TcpStream as StdTcpStream},
     sync::{
         Arc,
         atomic::{self, AtomicU64},
@@ -23,92 +25,22 @@ use std::{
 };
 use tokio::{net::TcpStream, sync::Notify, time::timeout};
 
+/// Size of the receive buffer.
 const RX_BUF_SIZE: usize = L7C_MAX_PAYLOAD_LEN;
 
-#[derive(Debug)]
-struct NetList {
-    list: Option<Vec<IpNet>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NetListCheck {
-    NoList,
-    Contains,
-    Absent,
-}
-
-impl NetList {
-    pub fn new(nets: Option<&[String]>) -> ah::Result<Self> {
-        if let Some(nets) = nets {
-            let mut list = Vec::with_capacity(nets.len());
-            for net in nets {
-                let net = net.trim();
-                match net.parse::<IpAddr>() {
-                    Ok(addr) => {
-                        let prefix_len = match addr {
-                            IpAddr::V4(_) => 32,
-                            IpAddr::V6(_) => 128,
-                        };
-                        list.push(IpNet::new(addr, prefix_len)?);
-                    }
-                    Err(_) => match net.parse::<IpNet>() {
-                        Ok(net) => {
-                            list.push(net);
-                        }
-                        Err(e) => {
-                            return Err(err!(
-                                "Can't parse net address '{net}' from address list: {e}"
-                            ));
-                        }
-                    },
-                }
-            }
-            Ok(Self { list: Some(list) })
-        } else {
-            Ok(Self { list: None })
-        }
-    }
-
-    #[must_use]
-    pub fn check(&self, sock_addr: &SocketAddr) -> NetListCheck {
-        if let Some(list) = &self.list {
-            let addr = sock_addr.ip();
-            for net in list {
-                if net.contains(&addr) {
-                    return NetListCheck::Contains;
-                }
-            }
-            NetListCheck::Absent
-        } else {
-            NetListCheck::NoList
-        }
-    }
-
-    pub fn log(&self, name: &str) {
-        if log::log_enabled!(log::Level::Info) {
-            if let Some(list) = &self.list {
-                let list: String = list.iter().map(|a| format!("\"{a:?}\", ")).collect();
-                log::info!("{name} = [ {list}]");
-            } else {
-                log::info!("No {name}");
-            }
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.list
-            .as_ref()
-            .map(|list| list.is_empty())
-            .unwrap_or(true)
-    }
-}
-
+/// L7 socket.
+///
+/// Used to connect to a remote TCP address with optional binding to a specific
+/// network interface.
+///
+/// Converts into a non-blocking tokio [TcpStream].
 #[derive(Debug)]
 struct L7Socket {
     socket: Socket,
 }
 
 impl L7Socket {
+    /// Connect to the remote address, optionally binding to a specific network interface.
     pub fn connect(bind_device: Option<&str>, remote_addr: &SocketAddr) -> ah::Result<Self> {
         let domain = if remote_addr.is_ipv4() {
             Domain::IPV4
@@ -139,6 +71,7 @@ impl L7Socket {
 impl TryFrom<L7Socket> for TcpStream {
     type Error = ah::Error;
 
+    /// Convert L7Socket into a non-blocking tokio TcpStream.
     fn try_from(socket: L7Socket) -> ah::Result<Self> {
         let stream: StdTcpStream = socket.socket.into();
         stream
@@ -149,26 +82,37 @@ impl TryFrom<L7Socket> for TcpStream {
     }
 }
 
+/// L7 socket stream.
+///
+/// Used to send and receive data to/from a remote TCP address.
+/// This is used by the tunnel endpoint to connect to the target server.
 #[derive(Debug)]
 struct L7Stream {
+    /// Remote socket address.
     remote: SocketAddr,
+    /// TCP stream.
     stream: TcpStream,
 }
 
 impl L7Stream {
+    /// Connect to the remote address.
     pub fn connect(conf: &ConfigL7Tunnel, remote: SocketAddr) -> ah::Result<Self> {
-        let stream = L7Socket::connect(conf.bind_to_interface(), &remote)?.try_into()?;
+        let socket = L7Socket::connect(conf.bind_to_interface(), &remote)?;
+        let stream = socket.try_into()?;
         Ok(Self { remote, stream })
     }
 
+    /// Get the remote socket address.
     pub fn remote(&self) -> &SocketAddr {
         &self.remote
     }
 
+    /// Send all data to the remote.
     pub async fn send_all(&self, data: &[u8]) -> ah::Result<()> {
         tcp_send_all(&self.stream, data).await
     }
 
+    /// Receive data from the remote.
     pub async fn recv(&self) -> ah::Result<Vec<u8>> {
         tcp_recv_until_blocking(&self.stream, RX_BUF_SIZE).await
     }
@@ -176,18 +120,28 @@ impl L7Stream {
 
 const NO_ACTIVITY: u64 = i64::MAX as u64;
 
+/// State of an L7 (socket) tunnel connection.
 #[derive(Debug)]
 pub struct L7State {
+    /// Configuration of the L7 tunnel.
     conf: ConfigL7Tunnel,
+    /// Current L7 stream (socket) connection.
+    /// This is used by the tunnel endpoint to send and receive data to/from the remote target.
     stream: ArcSwapOption<L7Stream>,
+    /// Timestamp of the last activity on the L7 stream.
     last_activity: AtomicU64,
+    /// Notify for new connections.
     connect_notify: Notify,
+    /// Notify for disconnections.
     disconnect_notify: Notify,
+    /// Address allowlist.
     allowlist: NetList,
+    /// Address denylist.
     denylist: NetList,
 }
 
 impl L7State {
+    /// Create a new L7 tunnel state from the configuration.
     pub fn new(conf: &ConfigL7Tunnel) -> ah::Result<Self> {
         let allowlist = NetList::new(conf.address_allowlist())
             .context("Parse config l7-tunnel.address-allowlist")?;
@@ -222,10 +176,12 @@ impl L7State {
         })
     }
 
+    /// Do the actions required to create a new httun session.
     pub fn create_new_session(&self) {
         self.disconnect(false);
     }
 
+    /// Disconnect the current L7 stream to/from the remote target.
     fn disconnect(&self, quiet: bool) {
         if !quiet
             && log::log_enabled!(log::Level::Trace)
@@ -237,10 +193,12 @@ impl L7State {
         self.disconnect_notify.notify_one();
     }
 
+    /// Send data to the remote target.
     pub async fn send(&self, data: &[u8]) -> ah::Result<()> {
         let cont = L7Container::deserialize(data).context("Unpack L7 control data")?;
         let addr = cont.addr();
 
+        // Check if the target address is allowed.
         match self.denylist.check(addr) {
             NetListCheck::NoList | NetListCheck::Absent => {
                 // No denylist or address is not in denylist.
@@ -266,12 +224,17 @@ impl L7State {
             self.disconnect(false);
         } else {
             let mut stream = self.stream.load();
+
+            // Need to connect, if no stream or remote address changed.
             let mut connect = stream.is_none();
             if let Some(stream) = stream.as_ref()
                 && stream.remote() != addr
             {
+                // Remote address changed. Need to reconnect.
                 connect = true;
             }
+
+            // (Re-)connect if needed.
             if connect {
                 drop(stream);
                 self.disconnect(false);
@@ -282,6 +245,7 @@ impl L7State {
                 stream = self.stream.load();
             }
 
+            // Send the payload to the remote target.
             if let Some(stream) = stream.as_ref() {
                 log::trace!("Sending {} bytes to {}", cont.payload().len(), addr);
 
@@ -300,7 +264,9 @@ impl L7State {
             }
             drop(stream);
 
+            // Update last activity timestamp.
             self.last_activity.store(now(), atomic::Ordering::Relaxed);
+            // Notify receivers about the new connection.
             if connect {
                 self.connect_notify.notify_one();
             }
@@ -308,15 +274,19 @@ impl L7State {
         Ok(())
     }
 
+    /// Receive data from the remote target.
     pub async fn recv(&self) -> ah::Result<Vec<u8>> {
         'a: loop {
             let stream = self.stream.load();
+
+            // There is no connection yet. Wait for a connection.
             if stream.is_none() {
                 drop(stream);
                 self.connect_notify.notified().await;
                 continue 'a;
             }
 
+            // Try to receive data from the remote target.
             let buf;
             let remote_addr;
             if let Some(stream) = stream.as_ref() {
@@ -350,6 +320,7 @@ impl L7State {
             };
             drop(stream);
 
+            // Check if the remote disconnected (the receive buffer is empty).
             if buf.is_empty() {
                 log::trace!("Remote {remote_addr} disconnected.");
                 self.disconnect(true);
@@ -357,8 +328,10 @@ impl L7State {
                 log::trace!("Received {} bytes from {}.", buf.len(), remote_addr);
             }
 
+            // Update last activity timestamp.
             self.last_activity.store(now(), atomic::Ordering::Relaxed);
 
+            // Pack the received data into an L7 container.
             let cont = L7Container::new(remote_addr, buf);
             let data = cont.serialize();
 
@@ -366,6 +339,7 @@ impl L7State {
         }
     }
 
+    /// Check for timeout and disconnect if timed out.
     pub async fn check_timeout(&self) {
         if timed_out_now(
             self.last_activity.load(atomic::Ordering::Relaxed),

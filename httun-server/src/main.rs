@@ -6,6 +6,7 @@ mod channel;
 mod comm_backend;
 mod http_server;
 mod l7;
+mod net_list;
 mod ping;
 mod protocol;
 mod systemd;
