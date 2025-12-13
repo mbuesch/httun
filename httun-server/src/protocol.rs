@@ -19,16 +19,23 @@ use tokio::{
     time::timeout,
 };
 
+/// Httun protocol handler on the server.
 #[derive(Debug)]
 pub struct ProtocolHandler {
+    /// Protocol manager.
     protman: Arc<ProtocolManager>,
+    /// Communication backend.
     comm: CommBackend,
+    /// Shared channel manager.
     channels: Arc<Channels>,
+    /// Pinned session secret, if yet assigned.
     pinned_session: StdRwLock<Option<SessionSecret>>,
+    /// Is the protocol handler dead?
     dead: AtomicBool,
 }
 
 impl ProtocolHandler {
+    /// Create a new protocol handler.
     pub async fn new(
         protman: Arc<ProtocolManager>,
         comm: CommBackend,
@@ -43,26 +50,39 @@ impl ProtocolHandler {
         }
     }
 
+    /// Get the channel name for this protocol handler.
+    ///
+    /// Returns an error if the channel name is not yet known.
     pub fn chan_name(&self) -> ah::Result<String> {
         self.comm
             .chan_name()
             .ok_or_else(|| err!("Channel name is not known, yet."))
     }
 
+    /// Get the channel.
+    ///
+    /// Returns an error if the channel is not configured.
     fn chan(&self) -> ah::Result<Arc<Channel>> {
         self.channels
             .get(&self.chan_name()?)
             .ok_or_else(|| err!("Channel is not configured."))
     }
 
+    /// Get the pinned session secret, if any.
     pub fn pinned_session(&self) -> Option<SessionSecret> {
         *self.pinned_session.read().expect("RwLock poisoned")
     }
 
+    /// Pin the given session secret.
     fn pin_session(&self, session_secret: &SessionSecret) {
         *self.pinned_session.write().expect("RwLock poisoned") = Some(*session_secret);
     }
 
+    /// Create a new session for the given channel.
+    ///
+    /// Pins the new session secret and kills old sessions.
+    ///
+    /// `chan`: Channel to create the new session for.
     async fn create_new_session(&self, chan: &Channel) -> SessionSecret {
         let session_secret = chan.create_new_session();
         self.pin_session(&session_secret);
@@ -72,6 +92,11 @@ impl ProtocolHandler {
         session_secret
     }
 
+    /// Check the received message's sequence number.
+    ///
+    /// `chan`: Channel.
+    /// `msg`: Received message.
+    /// `sequence_type`: Sequence type of the received message.
     async fn check_rx_sequence(
         &self,
         chan: &Channel,
@@ -81,11 +106,17 @@ impl ProtocolHandler {
         chan.check_rx_sequence(msg, sequence_type).await
     }
 
+    /// Close this protocol handler.
     async fn close(&self) -> ah::Result<()> {
         self.set_dead();
         self.comm.close().await
     }
 
+    /// Send a reply message.
+    ///
+    /// `chan`: Channel to send the message on.
+    /// `msg`: Message to send.
+    /// `session`: Session to use for sending.
     async fn send_reply_msg(
         &self,
         chan: &Channel,
@@ -102,6 +133,7 @@ impl ProtocolHandler {
         Ok(())
     }
 
+    /// Handle data communication from client to server.
     async fn handle_tosrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
         let session = chan.get_session_and_update_tx_sequence();
@@ -147,6 +179,7 @@ impl ProtocolHandler {
         Ok(())
     }
 
+    /// Handle communication from client to server.
     async fn handle_tosrv(&self, payload: Vec<u8>) -> ah::Result<()> {
         match Message::peek_type(&payload)? {
             MsgType::Init => Err(err!("Received invalid ToSrv + MsgType::Init")),
@@ -154,6 +187,7 @@ impl ProtocolHandler {
         }
     }
 
+    /// Handle session initialization from server to client.
     async fn handle_fromsrv_init(&self, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
         let mut session = chan.get_session_and_update_tx_sequence();
@@ -183,6 +217,7 @@ impl ProtocolHandler {
         Ok(())
     }
 
+    /// Handle data communication from server to client.
     async fn handle_fromsrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
         let session = chan.get_session_and_update_tx_sequence();
@@ -229,6 +264,7 @@ impl ProtocolHandler {
         Ok(())
     }
 
+    /// Handle communication from server to client.
     async fn handle_fromsrv(&self, payload: Vec<u8>) -> ah::Result<()> {
         match Message::peek_type(&payload)? {
             MsgType::Init => self.handle_fromsrv_init(payload).await,
@@ -236,6 +272,7 @@ impl ProtocolHandler {
         }
     }
 
+    /// Inner protocol handler function.
     async fn do_run(&self) -> ah::Result<()> {
         match self.comm.recv().await? {
             CommRxMsg::ToSrv(payload) => self.handle_tosrv(payload).await,
@@ -258,6 +295,10 @@ impl ProtocolHandler {
         }
     }
 
+    /// Run the httun protocol handler.
+    ///
+    /// This function processes all incoming httun messages
+    /// and performs the necessary actions and replies.
     pub async fn run(&self) -> ah::Result<()> {
         if let Err(e) = self.do_run().await {
             let _ = self.close().await;
@@ -267,10 +308,12 @@ impl ProtocolHandler {
         }
     }
 
+    /// Mark the protocol handler as dead.
     fn set_dead(&self) {
         self.dead.store(true, atomic::Ordering::Relaxed);
     }
 
+    /// Check if the protocol handler is dead or channel activity has timed out.
     fn is_dead(&self) -> bool {
         self.dead.load(atomic::Ordering::Relaxed)
             || self
@@ -279,6 +322,7 @@ impl ProtocolHandler {
                 .unwrap_or_default()
     }
 
+    /// Perform periodic work for this protocol handler.
     pub async fn periodic_work(&self) {
         if let Ok(chan) = self.chan() {
             chan.periodic_work().await;
@@ -286,13 +330,17 @@ impl ProtocolHandler {
     }
 }
 
+/// A protocol instance on the server.
 #[derive(Debug)]
 struct ProtocolInstance {
+    // Handle to the protocol task.
     handle: task::JoinHandle<()>,
+    // Protocol handler.
     prot: Arc<ProtocolHandler>,
 }
 
 impl ProtocolInstance {
+    /// Create a new protocol instance.
     fn new(handle: task::JoinHandle<()>, prot: Arc<ProtocolHandler>) -> Self {
         Self { handle, prot }
     }
@@ -300,22 +348,32 @@ impl ProtocolInstance {
 
 impl Drop for ProtocolInstance {
     fn drop(&mut self) {
+        // Abort the protocol task when dropping the instance.
         self.handle.abort();
     }
 }
 
+/// Httun protocol manager.
+///
+/// This manager handles all protocol instances on the server.
 #[derive(Debug)]
 pub struct ProtocolManager {
     insts: Mutex<Vec<ProtocolInstance>>,
 }
 
 impl ProtocolManager {
+    /// Create a new protocol manager.
     pub fn new() -> Arc<Self> {
         Arc::new(ProtocolManager {
             insts: Mutex::new(Vec::with_capacity(8)),
         })
     }
 
+    /// Spawn a new protocol handler instance task.
+    ///
+    /// `comm`: Communication backend for this protocol instance.
+    /// `channels`: Shared channel manager.
+    /// `permit`: Semaphore permit to limit the number of concurrent protocol instances.
     pub async fn spawn(
         self: &Arc<Self>,
         comm: CommBackend,
@@ -326,6 +384,7 @@ impl ProtocolManager {
 
         let mut insts = self.insts.lock().await;
 
+        // Spawn the protocol handler task.
         let handle = task::spawn({
             let this = Arc::clone(self);
             let prot = Arc::clone(&prot);
@@ -340,8 +399,10 @@ impl ProtocolManager {
                         break;
                     }
                 }
+                // The protocol handler is done.
                 prot.set_dead();
                 this.periodic_work().await;
+                // Release the protocol instance permit.
                 drop(permit);
             }
         });
@@ -349,6 +410,11 @@ impl ProtocolManager {
         insts.push(ProtocolInstance::new(handle, prot));
     }
 
+    /// Kill old sessions for the given channel name.
+    /// Keeps only the session with the given new session secret.
+    ///
+    /// `chan_name`: Channel name to kill old sessions for.
+    /// `new_session_secret`: Session secret of the new session to keep.
     async fn kill_old_sessions(
         self: &Arc<Self>,
         chan_name: &str,
@@ -371,11 +437,14 @@ impl ProtocolManager {
         });
     }
 
+    /// Perform periodic work for all protocol instances.
     pub async fn periodic_work(self: &Arc<Self>) {
         let mut insts = self.insts.lock().await;
 
+        // Remove dead instances.
         insts.retain(|inst| !inst.prot.is_dead());
 
+        // Perform periodic work for all instances.
         for inst in &*insts {
             inst.prot.periodic_work().await;
         }
