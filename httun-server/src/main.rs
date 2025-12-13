@@ -120,6 +120,10 @@ struct Opts {
     ///
     /// `any` Listen on all IPv4 + IPv6 on port 80
     ///
+    /// `localhost` Listen on 127.0.0.1 port 80
+    ///
+    /// 'ip6-localhost' Listen on ::1 port 80
+    ///
     /// If you don't specify the port, then it will default to 80.
     #[arg(long, value_name = "ADDR:PORT")]
     http_listen: Option<String>,
@@ -161,21 +165,40 @@ impl Opts {
         }
     }
 
+    /// Get the --http-listen option.
     pub fn get_http_listen(&self) -> ah::Result<Option<SocketAddr>> {
         const DEFAULT_ADDR: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
         const DEFAULT_PORT: u16 = 80;
 
         if let Some(http_listen) = &self.http_listen {
-            if ["all", "any"].contains(&http_listen.trim().to_lowercase().as_str()) {
-                Ok(Some(SocketAddr::new(DEFAULT_ADDR, DEFAULT_PORT)))
-            } else if let Ok(addr) = http_listen.parse::<SocketAddr>() {
+            if let Ok(addr) = http_listen.parse::<SocketAddr>() {
                 Ok(Some(addr))
             } else if let Ok(addr) = http_listen.parse::<IpAddr>() {
                 Ok(Some(SocketAddr::new(addr, DEFAULT_PORT)))
             } else {
-                Err(err!(
-                    "Failed to parse the command line option --http-listen"
-                ))
+                let (host, port) = if let Some(p) = http_listen.rfind(':') {
+                    (
+                        &http_listen[..p],
+                        http_listen[p + 1..]
+                            .parse::<u16>()
+                            .context("Parse port number")?,
+                    )
+                } else {
+                    (http_listen.as_str(), DEFAULT_PORT)
+                };
+                let host = host.trim().to_lowercase();
+
+                if ["all", "any"].contains(&host.as_str()) {
+                    Ok(Some(SocketAddr::new(DEFAULT_ADDR, port)))
+                } else if host == "localhost" {
+                    Ok(Some(SocketAddr::new("127.0.0.1".parse().unwrap(), port)))
+                } else if host == "ip6-localhost" {
+                    Ok(Some(SocketAddr::new("::1".parse().unwrap(), port)))
+                } else {
+                    Err(err!(
+                        "Failed to parse the command line option --http-listen"
+                    ))
+                }
             }
         } else {
             Ok(None)
@@ -203,6 +226,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 .await
                 .context("HTTP server init")?,
         );
+        log::info!("HTTP server listening on {addr}");
     } else {
         get_webserver_uid_gid(&opts).context("Get web server UID/GID")?;
         unix_sock = Some(
