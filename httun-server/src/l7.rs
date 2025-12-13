@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use crate::time::{now, tdiff};
+use crate::time::{now, timed_out_now};
 use anyhow::{self as ah, Context as _, format_err as err};
 use arc_swap::ArcSwapOption;
 use httun_conf::ConfigL7Tunnel;
@@ -367,7 +367,10 @@ impl L7State {
     }
 
     pub async fn check_timeout(&self) {
-        if tdiff(now(), self.last_activity.load(atomic::Ordering::Relaxed)) > L7_TIMEOUT_S {
+        if timed_out_now(
+            self.last_activity.load(atomic::Ordering::Relaxed),
+            L7_TIMEOUT_S,
+        ) {
             self.last_activity
                 .store(NO_ACTIVITY, atomic::Ordering::Relaxed);
             log::debug!("Socket timeout.");

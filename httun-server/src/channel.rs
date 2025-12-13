@@ -5,7 +5,7 @@
 use crate::{
     l7::L7State,
     ping::PingState,
-    time::{now, tdiff},
+    time::{now, timed_out_now},
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::Config;
@@ -162,7 +162,10 @@ impl Channel {
 
     /// Check whether the channel has timed out due to inactivity.
     pub fn activity_timed_out(&self) -> bool {
-        tdiff(now(), self.last_activity.load(atomic::Ordering::Relaxed)) > CHAN_ACTIVITY_TIMEOUT_S
+        timed_out_now(
+            self.last_activity.load(atomic::Ordering::Relaxed),
+            CHAN_ACTIVITY_TIMEOUT_S,
+        )
     }
 
     /// Store the ping payload that was received.
