@@ -34,18 +34,26 @@ use tokio::{
     task::{self, JoinHandle},
 };
 
+/// Maximum buffer size for receiving HTTP packets.
 const BUF_SIZE: usize = 1024 * (64 + 8);
+/// Next connection ID.
 static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(0);
 
+/// Receive buffer for HTTP packets.
 #[derive(Debug)]
 struct RecvBuf {
+    /// Received buffer.
     buf: Vec<u8>,
+    /// Number of bytes received.
     count: usize,
+    /// Length of HTTP header section.
     hdr_len: usize,
+    /// Length of HTTP content/body section.
     cont_len: usize,
 }
 
 impl RecvBuf {
+    /// Get the full length of the HTTP packet (headers + body).
     pub fn full_len(&self) -> ah::Result<usize> {
         self.hdr_len
             .checked_add(self.cont_len)
@@ -53,6 +61,7 @@ impl RecvBuf {
     }
 }
 
+/// Receive HTTP headers.
 async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
     let mut buf = RecvBuf {
         buf: vec![0_u8; BUF_SIZE],
@@ -102,6 +111,7 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
     }
 }
 
+/// Receive the rest of the HTTP packet, after headers have been received.
 async fn recv_rest(stream: &TcpStream, mut buf: RecvBuf) -> ah::Result<RecvBuf> {
     let full_len = buf.full_len()?;
     if full_len > buf.buf.len() {
@@ -137,10 +147,18 @@ async fn recv_rest(stream: &TcpStream, mut buf: RecvBuf) -> ah::Result<RecvBuf> 
     Ok(buf)
 }
 
+/// Receive a full HTTP packet, including headers and body.
 async fn recv_http(stream: &TcpStream) -> ah::Result<RecvBuf> {
     recv_rest(stream, recv_headers(stream).await?).await
 }
 
+/// Send an HTTP reply.
+///
+/// `stream` is the TCP stream to send the reply on.
+/// `payload` is the body of the HTTP reply.
+/// `extra_headers` are additional headers to include in the reply.
+/// `mime` is the MIME type of the payload (e.g., "application/octet-stream").
+/// `status` is the HTTP status line (e.g., "200 Ok").
 async fn send_http_reply(
     stream: &TcpStream,
     payload: &[u8],
@@ -168,6 +186,11 @@ async fn send_http_reply(
     tcp_send_all(stream, &buf).await
 }
 
+/// Send an HTTP 200 OK reply.
+///
+/// `stream` is the TCP stream to send the reply on.
+/// `payload` is the body of the HTTP reply.
+/// `extra_headers` are additional headers to include in the reply.
 async fn send_http_reply_ok(
     stream: &TcpStream,
     payload: &[u8],
@@ -178,6 +201,10 @@ async fn send_http_reply_ok(
     send_http_reply(stream, payload, extra_headers, status, mime).await
 }
 
+/// Send an HTTP 408 Request Timeout reply.
+///
+/// `stream` is the TCP stream to send the reply on.
+/// `extra_headers` are additional headers to include in the reply.
 async fn send_http_reply_timeout(
     stream: &TcpStream,
     extra_headers: &[HttpHeader],
@@ -189,6 +216,10 @@ async fn send_http_reply_timeout(
     send_http_reply(stream, status.as_bytes(), &extra_headers, status, mime).await
 }
 
+/// Send an HTTP 400 Bad Request reply.
+///
+/// `stream` is the TCP stream to send the reply on.
+/// `extra_headers` are additional headers to include in the reply.
 async fn send_http_reply_badrequest(
     stream: &TcpStream,
     extra_headers: &[HttpHeader],
@@ -200,6 +231,9 @@ async fn send_http_reply_badrequest(
     send_http_reply(stream, status.as_bytes(), &extra_headers, status, mime).await
 }
 
+/// Get the next HTTP header line from the buffer.
+///
+/// Returns the header line and the remaining buffer as a tuple.
 fn next_hdr(buf: &[u8]) -> Option<(&[u8], &[u8])> {
     split_delim(buf, b'\n').map(|(l, r)| {
         if !l.is_empty() && l[l.len() - 1] == b'\r' {
@@ -210,6 +244,12 @@ fn next_hdr(buf: &[u8]) -> Option<(&[u8], &[u8])> {
     })
 }
 
+/// Find a specific HTTP header in the buffer.
+///
+/// `buf` is the buffer containing HTTP headers.
+/// `name` is the name of the header to find.
+///
+/// Returns the value of the header if found.
 fn find_hdr<'a>(buf: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
     let mut tail = buf;
     while let Some((h, t)) = next_hdr(tail) {
@@ -223,16 +263,29 @@ fn find_hdr<'a>(buf: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
     None
 }
 
+/// Split an HTTP header line into name and value.
+///
+/// `h` is the header line.
+///
+/// Returns the name and value as a tuple.
 fn split_hdr(h: &[u8]) -> Option<(&[u8], &[u8])> {
     split_delim(h, b':').map(|(n, v)| (n.trim_ascii(), v))
 }
 
+/// Http request method.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HttpRequest {
+    /// HTTP GET method.
     Get,
+    /// HTTP POST method.
     Post,
 }
 
+/// Parse the HTTP request header line (first line, e.g., "GET /chan_name/r?m=... HTTP/1.1").
+///
+/// `line` is the HTTP request header line.
+///
+/// Returns the parts of the request as a tuple.
 fn parse_request_header(line: &[u8]) -> ah::Result<(HttpRequest, String, Direction, Query)> {
     let Some((request, tail)) = split_delim(line, b' ') else {
         return Err(err!("No GET/POST request found."));
@@ -259,6 +312,11 @@ fn parse_request_header(line: &[u8]) -> ah::Result<(HttpRequest, String, Directi
     Ok((request, chan_name, direction, query))
 }
 
+/// Decode the HTTP Basic Authorization header.
+///
+/// `value` is the value of the Authorization header.
+///
+/// Returns the decoded HttpAuth if successful.
 fn decode_auth_header(value: &[u8]) -> Option<HttpAuth> {
     let (mode, encoded) = split_delim(value.trim_ascii_start(), b' ')?;
     if !mode.trim_ascii().eq_ignore_ascii_case(b"Basic") {
@@ -276,17 +334,25 @@ fn decode_auth_header(value: &[u8]) -> Option<HttpAuth> {
     Some(HttpAuth::new(user, password))
 }
 
+/// HTTP request received from the client.
 #[derive(Clone, Debug)]
 pub struct HttunHttpReq {
+    /// HTTP request method.
     request: HttpRequest,
+    /// Httun channel name.
     chan_name: String,
+    /// Httun direction (R/W).
     direction: Direction,
+    /// HTTP query parameters.
     query: Query,
+    /// HTTP Basic Authorization (if any).
     authorization: Option<HttpAuth>,
+    /// HTTP body.
     body: Vec<u8>,
 }
 
 impl HttunHttpReq {
+    /// Extract the body from the query parameters if necessary.
     pub fn extract_body(&mut self) {
         // In case of a GET request, the httun client puts
         // the body into a b64 encoded query named 'm'.
@@ -298,6 +364,12 @@ impl HttunHttpReq {
         }
     }
 
+    /// Parse an HTTP request from the given buffer.
+    ///
+    /// `id` is the connection ID.
+    /// `buf` is the buffer containing the HTTP request.
+    ///
+    /// Returns the parsed HTTP request.
     pub async fn parse(id: u32, buf: &[u8]) -> ah::Result<HttunHttpReq> {
         let mut authorization = None;
 
@@ -342,6 +414,13 @@ impl HttunHttpReq {
     }
 }
 
+/// Task to receive HTTP requests from the client.
+///
+/// `id` is the connection ID.
+/// `stream` is the TCP stream to receive from.
+/// `rx_r_sender` is the sender for R direction requests.
+/// `rx_w_sender` is the sender for W direction requests.
+/// `error` is the atomic error code for the connection.
 async fn rx_task(
     id: u32,
     stream: &TcpStream,
@@ -378,15 +457,21 @@ async fn rx_task(
     }
 }
 
+/// Httun HTTP error state.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum HttpError {
+    /// No error occurred.
     NoError = 0,
+    /// Peer disconnected.
     PeerDisconnected,
+    /// Protocol error.
     ProtocolError,
+    /// The server rx task has been aborted.
     Abort,
 }
 
 impl From<HttpError> for u32 {
+    /// Convert HttpError to u32.
     fn from(value: HttpError) -> Self {
         value as _
     }
@@ -395,6 +480,7 @@ impl From<HttpError> for u32 {
 impl TryFrom<u32> for HttpError {
     type Error = ah::Error;
 
+    /// Convert u32 to HttpError.
     fn try_from(value: u32) -> ah::Result<Self> {
         const NO_ERROR: u32 = HttpError::NoError as _;
         const PEER_DISCONNECTED: u32 = HttpError::PeerDisconnected as _;
@@ -411,20 +497,35 @@ impl TryFrom<u32> for HttpError {
     }
 }
 
+/// HTTP connection.
 #[derive(Debug)]
 pub struct HttpConn {
+    /// Connection ID.
     id: u32,
+    /// TCP stream.
     stream: Arc<TcpStream>,
+    /// Connection error state.
     error: Arc<AtomicU32>,
+    /// RX task handle.
     rx_task: StdOnceLock<JoinHandle<()>>,
+    /// Receiver for R direction requests.
     rx_r: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
+    /// Receiver for W direction requests.
     rx_w: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
+    /// Pinned channel name and auth. (None if not pinned yet).
     pinned_chan: StdOnceLock<(String, Option<HttpAuth>)>,
+    /// Server configuration.
     conf: Arc<Config>,
+    /// Extra HTTP headers to include in replies.
     extra_headers: Arc<[HttpHeader]>,
 }
 
 impl HttpConn {
+    /// Wrap a new TCP stream into an HttpConn.
+    ///
+    /// `stream` is the TCP stream.
+    /// `conf` is the server configuration.
+    /// `extra_headers` are additional headers to include in replies.
     async fn new(
         stream: TcpStream,
         conf: Arc<Config>,
@@ -450,6 +551,7 @@ impl HttpConn {
         })
     }
 
+    /// Spawn the RX task for this connection.
     pub async fn spawn_rx_task(&self) {
         let (rx_r_sender, rx_r_receiver) = mpsc::channel(2);
         let (rx_w_sender, rx_w_receiver) = mpsc::channel(4);
@@ -475,10 +577,17 @@ impl HttpConn {
         *self.rx_w.lock().await = Some(rx_w_receiver);
     }
 
+    /// Get the pinned channel name (if any).
     pub fn chan_name(&self) -> Option<String> {
         self.pinned_chan.get().map(|c| &c.0).cloned()
     }
 
+    /// Check HTTP Basic Authorization.
+    ///
+    /// `req` is the HTTP request.
+    /// `conf_auth` is the configured HttpAuth for the channel.
+    ///
+    /// Returns Ok(()) if authorization is successful, Err otherwise.
     fn check_auth(&self, req: &HttunHttpReq, conf_auth: &Option<HttpAuth>) -> ah::Result<()> {
         if let Some(conf_auth) = conf_auth {
             if req.authorization.as_ref() != Some(conf_auth) {
@@ -496,6 +605,11 @@ impl HttpConn {
         Ok(())
     }
 
+    /// Pin the connection to a specific channel.
+    ///
+    /// `req` is the HTTP request.
+    ///
+    /// Returns Ok(()) if pinning is successful, Err otherwise.
     fn pin_channel(&self, req: &HttunHttpReq) -> ah::Result<()> {
         if let Some(pinned_chan) = self.pinned_chan.get() {
             if pinned_chan.0 == req.chan_name {
@@ -527,6 +641,9 @@ impl HttpConn {
         }
     }
 
+    /// Receive a message from the httun client.
+    ///
+    /// Returns the received message.
     pub async fn recv(&self) -> ah::Result<CommRxMsg> {
         let mut rx_r = self.rx_r.lock().await;
         let mut rx_w = self.rx_w.lock().await;
@@ -566,6 +683,7 @@ impl HttpConn {
         }
     }
 
+    /// Abort the RX task.
     fn abort_rx_task(&self) {
         self.error.store(HttpError::Abort.into(), Ordering::Relaxed);
         if let Some(rx_task) = self.rx_task.get() {
@@ -573,6 +691,7 @@ impl HttpConn {
         }
     }
 
+    /// Close the HTTP connection.
     pub async fn close(&self) -> ah::Result<()> {
         let mut rx_r = self.rx_r.lock().await;
         let mut rx_w = self.rx_w.lock().await;
@@ -586,14 +705,19 @@ impl HttpConn {
         Ok(())
     }
 
+    /// Send an HTTP 200 OK reply with the given payload.
+    ///
+    /// `payload` is the body of the HTTP reply.
     pub async fn send_reply_ok(&self, payload: &[u8]) -> ah::Result<()> {
         send_http_reply_ok(&self.stream, payload, &self.extra_headers).await
     }
 
+    /// Send an HTTP 408 Request Timeout reply.
     pub async fn send_reply_timeout(&self) -> ah::Result<()> {
         send_http_reply_timeout(&self.stream, &self.extra_headers).await
     }
 
+    /// Send an HTTP 400 Bad Request reply.
     pub async fn send_reply_badrequest(&self) -> ah::Result<()> {
         send_http_reply_badrequest(&self.stream, &self.extra_headers).await
     }
@@ -601,18 +725,28 @@ impl HttpConn {
 
 impl Drop for HttpConn {
     fn drop(&mut self) {
+        // Abort the RX task on drop.
         self.abort_rx_task();
     }
 }
 
+/// Simple HTTP server for use with httun.
 #[derive(Debug)]
 pub struct HttpServer {
+    /// TCP listener.
     listener: TcpListener,
+    /// Server configuration.
     conf: Arc<Config>,
+    /// Extra HTTP headers to include in replies.
     extra_headers: Arc<[HttpHeader]>,
 }
 
 impl HttpServer {
+    /// Create a new HTTP server.
+    ///
+    /// `addr` is the socket address to bind to.
+    /// `conf` is the server configuration.
+    /// `extra_headers` are additional headers to include in replies.
     pub async fn new(
         addr: SocketAddr,
         conf: Arc<Config>,
@@ -628,6 +762,9 @@ impl HttpServer {
         })
     }
 
+    /// Accept a new HTTP connection.
+    ///
+    /// Returns the accepted HttpConn.
     pub async fn accept(&self) -> ah::Result<HttpConn> {
         let (stream, _addr) = self.listener.accept().await.context("HTTP accept")?;
         HttpConn::new(
