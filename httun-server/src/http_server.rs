@@ -59,6 +59,23 @@ impl RecvBuf {
             .checked_add(self.cont_len)
             .ok_or_else(|| err!("HTTP packet length calculation overflow"))
     }
+
+    /// Interpret the content-length header and set `cont_len`.
+    pub fn extract_content_length(&mut self) -> ah::Result<()> {
+        debug_assert!(self.hdr_len > 0);
+        match find_hdr(&self.buf[..self.hdr_len], b"content-length") {
+            Some(len) => {
+                let Some(len) = atoi::<usize>(len.trim_ascii()) else {
+                    return Err(err!("content-length header number decode error."));
+                };
+                self.cont_len = len;
+            }
+            None => {
+                self.cont_len = 0;
+            }
+        };
+        Ok(())
+    }
 }
 
 /// Receive HTTP headers.
@@ -82,15 +99,7 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
                 // End of headers?
                 if let Some(p) = find(&buf.buf[..buf.count], b"\r\n\r\n") {
                     buf.hdr_len = p + 4;
-                    buf.cont_len = match find_hdr(&buf.buf[..buf.hdr_len], b"content-length") {
-                        Some(cont_len) => {
-                            let Some(cont_len) = atoi::<usize>(cont_len.trim_ascii()) else {
-                                return Err(err!("content-length header number decode error."));
-                            };
-                            cont_len
-                        }
-                        None => 0,
-                    };
+                    buf.extract_content_length()?;
                     return Ok(buf);
                 }
 
