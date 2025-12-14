@@ -82,10 +82,10 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
                 // End of headers?
                 if let Some(p) = find(&buf.buf[..buf.count], b"\r\n\r\n") {
                     buf.hdr_len = p + 4;
-                    buf.cont_len = match find_hdr(&buf.buf[..buf.hdr_len], b"Content-Length") {
+                    buf.cont_len = match find_hdr(&buf.buf[..buf.hdr_len], b"content-length") {
                         Some(cont_len) => {
                             let Some(cont_len) = atoi::<usize>(cont_len.trim_ascii()) else {
-                                return Err(err!("Content-Length header number decode error."));
+                                return Err(err!("content-length header number decode error."));
                             };
                             cont_len
                         }
@@ -168,7 +168,7 @@ async fn send_http_reply(
 ) -> ah::Result<()> {
     let mut buf: Vec<u8> = Vec::with_capacity(BUF_SIZE);
     write!(&mut buf, "HTTP/1.1 {status}\r\n")?;
-    write!(&mut buf, "Cache-Control: no-store\r\n")?;
+    write!(&mut buf, "cache-control: no-store\r\n")?;
     for hdr in extra_headers {
         buf.extend_from_slice(hdr.name());
         write!(&mut buf, ": ")?;
@@ -176,8 +176,8 @@ async fn send_http_reply(
         write!(&mut buf, "\r\n")?;
     }
     if !payload.is_empty() {
-        write!(&mut buf, "Content-Length: {}\r\n", payload.len())?;
-        write!(&mut buf, "Content-Type: {mime}\r\n")?;
+        write!(&mut buf, "content-length: {}\r\n", payload.len())?;
+        write!(&mut buf, "content-type: {mime}\r\n")?;
     }
     write!(&mut buf, "\r\n")?;
 
@@ -212,7 +212,7 @@ async fn send_http_reply_timeout(
     let status = "408 Request Timeout";
     let mime = "text/plain";
     let mut extra_headers = extra_headers.to_vec();
-    extra_headers.push(HttpHeader::new(b"Connection", b"close"));
+    extra_headers.push(HttpHeader::new(b"connection", b"close"));
     send_http_reply(stream, status.as_bytes(), &extra_headers, status, mime).await
 }
 
@@ -227,7 +227,7 @@ async fn send_http_reply_badrequest(
     let status = "400 Bad Request";
     let mime = "text/plain";
     let mut extra_headers = extra_headers.to_vec();
-    extra_headers.push(HttpHeader::new(b"Connection", b"close"));
+    extra_headers.push(HttpHeader::new(b"connection", b"close"));
     send_http_reply(stream, status.as_bytes(), &extra_headers, status, mime).await
 }
 

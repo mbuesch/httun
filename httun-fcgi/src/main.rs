@@ -141,7 +141,7 @@ async fn fcgi_response(
     body: Option<(&[u8], &str)>,
 ) -> FcgiRequestResult {
     let mut hdrs: Vec<u8> = Vec::with_capacity(4096);
-    writeln!(&mut hdrs, "Cache-Control: no-store").expect("hdrs write");
+    writeln!(&mut hdrs, "cache-control: no-store").expect("hdrs write");
     for hdr in extra_headers {
         hdrs.extend_from_slice(hdr.name());
         write!(&mut hdrs, ": ").expect("hdrs write");
@@ -149,9 +149,9 @@ async fn fcgi_response(
         writeln!(&mut hdrs).expect("hdrs write");
     }
     if let Some((_, mime)) = body {
-        writeln!(&mut hdrs, "Content-type: {mime}").expect("hdrs write");
+        writeln!(&mut hdrs, "content-type: {mime}").expect("hdrs write");
     }
-    writeln!(&mut hdrs, "Status: {status}").expect("hdrs write");
+    writeln!(&mut hdrs, "status: {status}").expect("hdrs write");
     writeln!(&mut hdrs).expect("hdrs write");
 
     let mut f = req.get_stdout();
