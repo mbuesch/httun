@@ -98,7 +98,7 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
 
                 // End of headers?
                 if let Some(p) = find(&buf.buf[..buf.count], b"\r\n\r\n") {
-                    buf.hdr_len = p + 4;
+                    buf.hdr_len = p.saturating_add(4);
                     buf.extract_content_length()?;
                     return Ok(buf);
                 }
@@ -403,7 +403,7 @@ impl HttunHttpReq {
 
             // Parse authorization header:
             if let Some((n, v)) = split_hdr(h)
-                && n.eq_ignore_ascii_case(b"Authorization")
+                && n.eq_ignore_ascii_case(b"authorization")
             {
                 authorization = decode_auth_header(v);
             }
