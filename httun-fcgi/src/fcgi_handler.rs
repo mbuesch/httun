@@ -28,13 +28,17 @@ use tokio::{
     time::timeout,
 };
 
+/// Represents an active connection to the `httun-server`.
 #[derive(Debug, Clone)]
 struct Connection {
+    /// Connection to the `httun-server`.
     conn: Arc<ServerUnixConn>,
+    /// Last activity time.
     last_activity: Instant,
 }
 
 impl Connection {
+    /// Create a new connection to the `httun-server`.
     fn new(conn: Arc<ServerUnixConn>) -> Self {
         Self {
             conn,
@@ -42,18 +46,24 @@ impl Connection {
         }
     }
 
+    /// Log activity.
     fn log_activity(&mut self) {
         self.last_activity = Instant::now();
     }
 
+    /// Check if the connection is timed out.
     fn is_timed_out(&self, now: Instant) -> bool {
         self.last_activity.duration_since(now) >= UNIX_TIMEOUT
     }
 }
 
+/// Key for the global connections map.
 type ConnectionsKey = (String, bool);
+/// Global connections map.
+/// This map stores active connections to the `httun-server`.
 static CONNECTIONS: OnceLock<Mutex<HashMap<ConnectionsKey, Connection>>> = OnceLock::new();
 
+/// Get the global connections map.
 async fn get_connections<'a>() -> MutexGuard<'a, HashMap<ConnectionsKey, Connection>> {
     CONNECTIONS
         .get()
@@ -62,6 +72,7 @@ async fn get_connections<'a>() -> MutexGuard<'a, HashMap<ConnectionsKey, Connect
         .await
 }
 
+/// Get a connection for the given channel name and direction.
 async fn get_connection(name: &str, send: bool) -> ah::Result<Arc<ServerUnixConn>> {
     let key = (name.to_string(), send);
     let mut connections = get_connections().await;
@@ -75,23 +86,31 @@ async fn get_connection(name: &str, send: bool) -> ah::Result<Arc<ServerUnixConn
     }
 }
 
+/// Remove a connection.
+///
+/// This removes both the send and receive connections.
 async fn remove_connection(name: &str) {
     let mut connections = get_connections().await;
     connections.remove(&(name.to_string(), false));
     connections.remove(&(name.to_string(), true));
 }
 
+/// Check for and remove timed out connections.
 pub async fn check_connection_timeouts() {
     let mut connections = get_connections().await;
     let now = Instant::now();
     connections.retain(|_, conn| !conn.is_timed_out(now));
 }
 
+/// Return value of request from httun-server.
 struct FromHttunRet {
+    /// Payload from httun-server.
     payload: Vec<u8>,
+    /// Extra HTTP headers from httun-server.
     extra_headers: Vec<HttpHeader>,
 }
 
+/// Send a payload to httun-server and receive a payload from httun-server.
 async fn recv_from_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<FromHttunRet> {
     let conn = get_connection(name, false).await?;
     match conn.recv(req_payload).await {
@@ -106,10 +125,13 @@ async fn recv_from_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<
     }
 }
 
+/// Return value of request sent to httun-server.
 struct ToHttunRet {
+    /// Extra HTTP headers from httun-server.
     extra_headers: Vec<HttpHeader>,
 }
 
+/// Send a payload to httun-server.
 async fn send_to_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<ToHttunRet> {
     let conn = get_connection(name, true).await?;
     if let Err(e) = conn.send(req_payload).await {
@@ -122,16 +144,19 @@ async fn send_to_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<To
     }
 }
 
+/// Send keepalive to httun-server.
 async fn send_keepalive_to_httun_server(name: &str) -> ah::Result<()> {
     get_connection(name, true).await?.send_keepalive().await
 }
 
+/// Send FastCGI response.
 async fn fcgi_response(
     req: &FcgiRequest<'_>,
     status: &str,
     extra_headers: &[HttpHeader],
     body: Option<(&[u8], &str)>,
 ) -> FcgiRequestResult {
+    // Create HTTP response headers.
     let mut hdrs: Vec<u8> = Vec::with_capacity(4096);
     writeln!(&mut hdrs, "cache-control: no-store").expect("hdrs write");
     for hdr in extra_headers {
@@ -146,8 +171,10 @@ async fn fcgi_response(
     writeln!(&mut hdrs, "status: {status}").expect("hdrs write");
     writeln!(&mut hdrs).expect("hdrs write");
 
+    // Get stdout for communication with the FastCGI.
     let mut f = req.get_stdout();
 
+    // Write HTTP response headers to stdout.
     match f.write(&hdrs).await {
         Ok(count) if count == hdrs.len() => (),
         _ => {
@@ -156,6 +183,7 @@ async fn fcgi_response(
         }
     }
 
+    // Write HTTP response body to stdout.
     if let Some((body, _)) = body {
         match f.write(body).await {
             Ok(count) if count == body.len() => (),
@@ -166,6 +194,7 @@ async fn fcgi_response(
         }
     }
 
+    // Flush stdout.
     if f.flush().await.is_err() {
         eprintln!("FCGI: Failed to flush fcgi socket.");
         return FcgiRequestResult::Complete(1);
@@ -174,6 +203,7 @@ async fn fcgi_response(
     FcgiRequestResult::Complete(0)
 }
 
+/// Send FastCGI error response.
 async fn fcgi_response_error(
     req: &FcgiRequest<'_>,
     status: &str,
@@ -189,6 +219,9 @@ async fn fcgi_response_error(
     .await
 }
 
+/// Handle FastCGI requests.
+///
+/// This is the main entry point for the FCGI application.
 pub async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
     if req.role != FcgiRole::Responder {
         eprintln!("FCGI: Only Responder role is supported.");
@@ -322,6 +355,7 @@ pub async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
     }
 }
 
+/// Initialize the FastCGI handler.
 pub fn init_fcgi_handler() -> ah::Result<()> {
     CONNECTIONS
         .set(Mutex::new(HashMap::new()))
