@@ -33,6 +33,7 @@ pub enum ConfigVariant {
     Client,
 }
 
+/// HTTP basic authentication credentials.
 #[derive(Debug, Clone, Eq, Default)]
 pub struct HttpAuth {
     user: String,
@@ -43,6 +44,7 @@ impl HttpAuth {
     pub fn new(user: String, password: Option<String>) -> Self {
         HttpAuth { user, password }
     }
+
     pub fn user(&self) -> &str {
         &self.user
     }
@@ -82,6 +84,9 @@ impl TryFrom<&toml::Value> for HttpAuth {
 }
 
 impl PartialEq for HttpAuth {
+    /// Compares two `HttpAuth` instances in constant time.
+    ///
+    /// Constant time compare is used to avoid timing attacks.
     fn eq(&self, other: &Self) -> bool {
         let self_user = self.user().as_bytes();
         let other_user = other.user().as_bytes();
@@ -89,6 +94,7 @@ impl PartialEq for HttpAuth {
         let self_password = self.password().map(|p| p.as_bytes()).unwrap_or(b"");
         let other_password = other.password().map(|p| p.as_bytes()).unwrap_or(b"");
 
+        // Compare in constant time to avoid timing attacks.
         let user_eq = self_user.ct_eq(other_user);
         let password_eq = self_password.ct_eq(other_password);
 
@@ -96,6 +102,7 @@ impl PartialEq for HttpAuth {
     }
 }
 
+/// Configuration section `[parameters.receive]`.
 #[derive(Debug, Clone)]
 pub struct ConfigParametersReceive {
     window_length: NonZeroUsize,
@@ -144,6 +151,7 @@ impl ConfigParametersReceive {
     }
 }
 
+/// Configuration section `[parameters]`.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigParameters {
     receive: ConfigParametersReceive,
@@ -173,6 +181,7 @@ impl ConfigParameters {
     }
 }
 
+/// Configuration section `[channel.l7-tunnel]`.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigL7Tunnel {
     disabled: bool,
@@ -263,6 +272,7 @@ impl ConfigL7Tunnel {
     }
 }
 
+/// Configuration section `[channel.http]`.
 #[derive(Debug, Clone)]
 pub struct ConfigChannelHttp {
     basic_auth: Option<HttpAuth>,
@@ -346,6 +356,7 @@ impl ConfigChannelHttp {
     }
 }
 
+/// Configuration section `[[channel]]`.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigChannel {
     disabled: bool,
@@ -485,6 +496,7 @@ impl ConfigChannel {
     }
 }
 
+/// Configuration.
 #[derive(Debug, Clone, Default)]
 pub struct Config {
     parameters: ConfigParameters,
@@ -622,11 +634,14 @@ impl<'a> Iterator for ChanIter<'a> {
     }
 }
 
+/// Parse a hex digit.
+/// `s` must be a string of length 1.
 fn parse_hexdigit(s: &str) -> ah::Result<u8> {
     assert_eq!(s.len(), 1);
     Ok(u8::from_str_radix(s, 16)?)
 }
 
+/// Parse a hex string into a byte array.
 fn parse_hex<const SIZE: usize>(s: &str) -> ah::Result<[u8; SIZE]> {
     let s = s.trim();
     if !s.is_ascii() {
