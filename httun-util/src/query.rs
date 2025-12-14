@@ -6,8 +6,10 @@ use crate::strings::split_delim;
 use anyhow::{self as ah, format_err as err};
 use std::collections::HashMap;
 
+/// Maximum number of components in a query string.
 const MAX_NR_COMP: usize = 8;
 
+/// A query string.
 #[derive(Debug, Clone)]
 pub struct Query {
     comps: HashMap<Vec<u8>, Vec<u8>>,
@@ -22,6 +24,7 @@ impl Query {
 impl TryFrom<&[u8]> for Query {
     type Error = ah::Error;
 
+    /// Parses a query string.
     fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
         let mut comps = HashMap::with_capacity(MAX_NR_COMP);
         let data = split_delim(data, b'#').unwrap_or((data, &[])).0;

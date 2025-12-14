@@ -8,13 +8,16 @@ use std::str::FromStr;
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct HttpHeader {
+    /// Header name
     name: Vec<u8>,
+    /// Header value
     value: Vec<u8>,
 }
 
 impl FromStr for HttpHeader {
     type Err = ah::Error;
 
+    /// Creates a new `HttpHeader` from a string slice.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut s = s.split(':');
         let Some(name) = s.next() else {
@@ -31,6 +34,7 @@ impl FromStr for HttpHeader {
 }
 
 impl HttpHeader {
+    /// Creates a new `HttpHeader`.
     pub fn new(name: &[u8], value: &[u8]) -> Self {
         Self {
             name: name.to_vec(),
@@ -38,10 +42,12 @@ impl HttpHeader {
         }
     }
 
+    /// Returns the header name.
     pub fn name(&self) -> &[u8] {
         &self.name
     }
 
+    /// Returns the header value.
     pub fn value(&self) -> &[u8] {
         &self.value
     }

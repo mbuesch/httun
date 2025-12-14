@@ -6,17 +6,21 @@ use anyhow::{self as ah, format_err as err};
 use memchr::memchr;
 use std::fmt::Write as _;
 
+/// Direction of a httun channel.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Direction {
     R,
     W,
 }
 
+/// Checks if a path is valid.
+/// A path can contain alphanumeric characters, '-', '_', and '/'.
 fn path_is_valid(path: &[u8]) -> bool {
     path.iter()
         .all(|c| c.is_ascii_alphanumeric() || [b'-', b'_', b'/'].contains(c))
 }
 
+/// Returns the next path component and the remaining path as a tuple.
 pub fn next_path_comp(mut path: &[u8]) -> Option<(&[u8], &[u8])> {
     loop {
         if path.is_empty() {
@@ -34,6 +38,7 @@ pub fn next_path_comp(mut path: &[u8]) -> Option<(&[u8], &[u8])> {
     }
 }
 
+/// Parses a path into a channel name and direction.
 pub fn parse_path(path: &[u8]) -> ah::Result<(String, Direction)> {
     if !path_is_valid(path) {
         return Err(err!("Invalid characters in path."));
@@ -64,6 +69,9 @@ pub fn parse_path(path: &[u8]) -> ah::Result<(String, Direction)> {
     Ok((chan_name, direction))
 }
 
+/// Converts a byte slice to a hexadecimal string.
+///
+/// Each byte is represented by two uppercase hexadecimal characters.
 pub fn hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
@@ -72,6 +80,7 @@ pub fn hex(bytes: &[u8]) -> String {
     s
 }
 
+/// Splits a byte slice at the first occurrence of a delimiter.
 pub fn split_delim(buf: &[u8], delim: u8) -> Option<(&[u8], &[u8])> {
     memchr(delim, buf).map(|pos| (&buf[..pos], &buf[pos + 1..]))
 }

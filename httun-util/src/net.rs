@@ -5,6 +5,8 @@
 use anyhow as ah;
 use tokio::net::TcpStream;
 
+/// Receives data from a TCP stream until the stream is no longer readable
+/// without blocking, or the buffer is full, or an error occurs.
 pub async fn tcp_recv_until_blocking(stream: &TcpStream, buf_size: usize) -> ah::Result<Vec<u8>> {
     stream.readable().await?;
     let mut count = 0;
@@ -33,6 +35,7 @@ pub async fn tcp_recv_until_blocking(stream: &TcpStream, buf_size: usize) -> ah:
     }
 }
 
+/// Sends all data to a TCP stream.
 pub async fn tcp_send_all(stream: &TcpStream, data: &[u8]) -> ah::Result<()> {
     let mut count = 0;
     loop {
