@@ -46,7 +46,7 @@ nix = { version = "0.30", default-features = false }
 reqwest = { version = "0.12", default-features = false }
 sd-notify = "0.4"
 serde = "1"
-socket2 = { version = "0.6", features = [ "all" ] }
+socket2 = { version = "0.6" }
 subtle = "2"
 tokio = "1"
 tokio-fastcgi = "1"
