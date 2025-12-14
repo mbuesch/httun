@@ -30,9 +30,12 @@ use std::{
 use tokio::{sync::Notify, task, time::sleep};
 use url::{Host, Url};
 
+/// Number of retries for HTTP read/write operations.
 const HTTP_RW_TRIES: usize = 3;
+/// Number of retries for session initialization.
 const SESSION_INIT_TRIES: usize = 5;
 
+/// Creates a new `reqwest::Client` instance for HTTP communication with common settings.
 fn make_client(
     user_agent: &str,
     extra_headers: &[HttpHeader],
@@ -79,11 +82,13 @@ fn make_client(
     Ok(c.build()?)
 }
 
+/// Append the serial to the URL.
 fn format_url_serial(url: &str, serial: u64) -> String {
     let url = url.trim_end_matches('/');
     format!("{}/{:010X}", url, serial & 0x000000FF_FFFFFFFF)
 }
 
+/// Format the URL for a channel and direction.
 fn format_url(base_url: &str, chan_name: &str, direction: &str) -> String {
     let base_url = base_url.trim_end_matches('/');
     let chan_name = chan_name.trim_matches('/');
@@ -136,6 +141,7 @@ define_direction!(DirectionR, "r");
 define_direction!(DirectionW, "w");
 
 impl DirectionR {
+    /// Run the channel read direction ("/r/").
     async fn run(
         &self,
         ready: &Notify,
@@ -242,6 +248,7 @@ impl DirectionR {
 }
 
 impl DirectionW {
+    /// Run the channel write direction ("/w/").
     async fn run(
         &self,
         ready: &Notify,
@@ -319,6 +326,7 @@ impl DirectionW {
     }
 }
 
+/// Initialize a new httun session.
 async fn get_session(
     chan_conf: &ConfigChannel,
     base_url: &str,
@@ -389,6 +397,7 @@ async fn get_session(
     Err(err!("Failed to get session ID from server."))
 }
 
+/// The httun client operating mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttunClientMode {
     L3,
@@ -396,6 +405,10 @@ pub enum HttunClientMode {
     Test,
 }
 
+/// The httun client.
+///
+/// This struct manages the client-side of an httun tunnel. It handles session
+/// establishment, and the read/write directions of the tunnel.
 pub struct HttunClient {
     base_url: String,
     chan_conf: ConfigChannel,
@@ -407,6 +420,7 @@ pub struct HttunClient {
 }
 
 impl HttunClient {
+    /// Connect to a httun server.
     pub async fn connect(
         base_url: &str,
         res_mode: ResMode,
@@ -474,11 +488,14 @@ impl HttunClient {
         })
     }
 
+    /// This function runs the main loop of the client, handling packet transmission and reception.
     pub async fn handle_packets(&mut self, comm: Arc<AsyncTaskComm>) -> ah::Result<()> {
         // Initially wait for the user side to start us.
         comm.wait_for_restart_request().await;
 
+        // Main loop.
         loop {
+            // Initialize a new session.
             let session_secret = get_session(
                 &self.chan_conf,
                 &self.base_url,
@@ -494,6 +511,7 @@ impl HttunClient {
             let r_task_ready = Arc::new(Notify::new());
             let w_task_ready = Arc::new(Notify::new());
 
+            // Spawn the read task ("/r/").
             let mut r_task = task::spawn({
                 let r = Arc::clone(&self.r);
                 let ready = Arc::clone(&r_task_ready);
@@ -505,6 +523,7 @@ impl HttunClient {
                 }
             });
 
+            // Spawn the write task ("/w/").
             let mut w_task = task::spawn({
                 let w = Arc::clone(&self.w);
                 let ready = Arc::clone(&w_task_ready);
