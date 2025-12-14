@@ -68,14 +68,21 @@ fn make_client(
     c = c.danger_accept_invalid_certs(chan_conf.http().ignore_tls_errors());
 
     let mut header_map = HeaderMap::new();
-    for extra_header in extra_headers
+    header_map.insert(
+        HeaderName::from_static("cache-control"),
+        HeaderValue::from_static("no-store"),
+    );
+    for hdr in extra_headers
         .iter()
         .chain(chan_conf.http().extra_headers().iter())
     {
-        header_map.insert(
-            HeaderName::from_bytes(extra_header.name()).context("Convert extra-headers name")?,
-            HeaderValue::from_bytes(extra_header.value()).context("Convert extra-headers value")?,
-        );
+        let name = HeaderName::from_bytes(hdr.name()).context("Convert headers name")?;
+        if hdr.value().is_empty() {
+            header_map.remove(name);
+        } else {
+            let value = HeaderValue::from_bytes(hdr.value()).context("Convert headers value")?;
+            header_map.insert(name, value);
+        }
     }
     c = c.default_headers(header_map);
 
@@ -190,10 +197,7 @@ impl DirectionR {
                 log::trace!("Requesting from HTTP-r");
 
                 let url = format_url_serial(&self.url, self.serial.fetch_add(1, Relaxed));
-                let mut req = client
-                    .get(&url)
-                    .query(&[("m", &msg)])
-                    .header("Cache-Control", "no-store");
+                let mut req = client.get(&url).query(&[("m", &msg)]);
                 if let Some(http_auth) = &http_auth {
                     req = req.basic_auth(http_auth.user(), http_auth.password());
                 }
@@ -291,8 +295,7 @@ impl DirectionW {
                 let url = format_url_serial(&self.url, self.serial.fetch_add(1, Relaxed));
                 let mut req = client
                     .post(&url)
-                    .header("Cache-Control", "no-store")
-                    .header("Content-Type", "application/octet-stream")
+                    .header("content-type", "application/octet-stream")
                     .body(msg.clone());
                 if let Some(http_auth) = &http_auth {
                     req = req.basic_auth(http_auth.user(), http_auth.password());
@@ -351,10 +354,7 @@ async fn get_session(
             &format_url(base_url, chan_conf.name(), "r"),
             u64::from_ne_bytes(secure_random()),
         );
-        let mut req = client
-            .get(&url)
-            .query(&[("m", &msg)])
-            .header("Cache-Control", "no-store");
+        let mut req = client.get(&url).query(&[("m", &msg)]);
         if let Some(http_auth) = &http_auth {
             req = req.basic_auth(http_auth.user(), http_auth.password());
         }
