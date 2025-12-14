@@ -3,7 +3,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
 use crate::{
-    client::HttunComm,
+    async_task_comm::AsyncTaskComm,
     local_listener::LocalListener,
     resolver::{ResConf, ResMode, resolve},
 };
@@ -38,7 +38,7 @@ fn split_host_port_string(hostport: &str) -> ah::Result<(&str, u16)> {
 
 pub async fn run_mode_socket(
     exit_tx: Arc<Sender<ah::Result<()>>>,
-    httun_comm: Arc<HttunComm>,
+    httun_comm: Arc<AsyncTaskComm>,
     target: &str,
     res_mode: ResMode,
     local_port: u16,

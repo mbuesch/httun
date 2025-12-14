@@ -4,13 +4,15 @@
 
 #![forbid(unsafe_code)]
 
+mod async_task_comm;
 mod client;
 mod local_listener;
 mod mode;
 mod resolver;
 
 use crate::{
-    client::{HttunClient, HttunClientMode, HttunComm},
+    async_task_comm::AsyncTaskComm,
+    client::{HttunClient, HttunClientMode},
     mode::{
         genkey::run_mode_genkey, socket::run_mode_socket, test::run_mode_test, tun::run_mode_tun,
     },
@@ -146,6 +148,7 @@ enum Mode {
     Genkey {},
 }
 
+/// Default delay after errors before retrying.
 pub async fn error_delay() {
     time::sleep(Duration::from_millis(100)).await;
 }
@@ -228,6 +231,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         Mode::Genkey {} => unreachable!(),
     };
 
+    // Connect to the httun server.
     let mut client = HttunClient::connect(
         server_url,
         res_mode,
@@ -239,19 +243,21 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     )
     .await
     .context("Connect to httun server (FCGI)")?;
-    let httun_comm = Arc::new(HttunComm::new());
+
+    // Initialize communication between the async tasks.
+    let task_comm = Arc::new(AsyncTaskComm::new());
 
     // Spawn task: httun client handler.
     task::spawn({
         let exit_tx = Arc::clone(&exit_tx);
-        let httun_comm = Arc::clone(&httun_comm);
+        let task_comm = Arc::clone(&task_comm);
 
         async move {
             loop {
                 let _exit_tx = Arc::clone(&exit_tx);
-                let httun_comm = Arc::clone(&httun_comm);
+                let task_comm = Arc::clone(&task_comm);
 
-                if let Err(e) = client.handle_packets(httun_comm).await {
+                if let Err(e) = client.handle_packets(task_comm).await {
                     log::error!("httun client: {e:?}");
                     error_delay().await;
                 } else {
@@ -263,12 +269,12 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 
     match &opts.mode {
         Some(Mode::Tun { tun }) => {
-            run_mode_tun(Arc::clone(&httun_comm), tun).await?;
+            run_mode_tun(Arc::clone(&task_comm), tun).await?;
         }
         Some(Mode::Socket { target, local_port }) => {
             run_mode_socket(
                 Arc::clone(&exit_tx),
-                Arc::clone(&httun_comm),
+                Arc::clone(&task_comm),
                 target,
                 res_mode,
                 *local_port,
@@ -276,7 +282,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             .await?;
         }
         Some(Mode::Test { period }) => {
-            run_mode_test(Arc::clone(&exit_tx), Arc::clone(&httun_comm), *period).await?;
+            run_mode_test(Arc::clone(&exit_tx), Arc::clone(&task_comm), *period).await?;
         }
         None | Some(Mode::Genkey {}) => unreachable!(),
     }

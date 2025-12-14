@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use crate::resolver::{ResConf, ResMode, resolve};
+use crate::{
+    async_task_comm::AsyncTaskComm,
+    resolver::{ResConf, ResMode, resolve},
+};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::{Config, ConfigChannel};
 use httun_protocol::{
@@ -20,138 +23,15 @@ use reqwest::{
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
+        atomic::{AtomicU64, Ordering::Relaxed},
     },
     time::Duration,
 };
-use tokio::{
-    pin,
-    sync::{Mutex, Notify, watch},
-    task,
-    time::sleep,
-};
+use tokio::{sync::Notify, task, time::sleep};
 use url::{Host, Url};
 
-const COMM_DEQUE_SIZE_TO_HTTUN: usize = 1;
-const COMM_DEQUE_SIZE_FROM_HTTUN: usize = 16;
 const HTTP_RW_TRIES: usize = 3;
 const SESSION_INIT_TRIES: usize = 5;
-
-struct CommDeque<T, const SIZE: usize> {
-    deque: Mutex<heapless::Deque<T, SIZE>>,
-    notify: Notify,
-    overflow: AtomicBool,
-}
-
-impl<T, const SIZE: usize> CommDeque<T, SIZE> {
-    pub fn new() -> Self {
-        Self {
-            deque: Mutex::new(heapless::Deque::new()),
-            notify: Notify::new(),
-            overflow: AtomicBool::new(false),
-        }
-    }
-
-    fn clear_notification(&self) {
-        let notified = self.notify.notified();
-        pin!(notified);
-        notified.enable(); // consume the notification.
-    }
-
-    fn notify(&self) {
-        self.notify.notify_one();
-    }
-
-    async fn wait_for_notify(&self) {
-        self.notify.notified().await;
-    }
-
-    pub async fn clear(&self) {
-        self.deque.lock().await.clear();
-        self.clear_notification();
-    }
-
-    pub async fn put(&self, mut value: T) {
-        loop {
-            if let Err(v) = self.deque.lock().await.push_back(value) {
-                value = v;
-            } else {
-                break;
-            }
-            if SIZE > 1 && !self.overflow.swap(true, Relaxed) {
-                log::warn!("Httun communication queue overflow.");
-            }
-            self.wait_for_notify().await;
-        }
-        self.notify();
-    }
-
-    pub async fn get(&self) -> T {
-        let value = loop {
-            if let Some(value) = self.deque.lock().await.pop_front() {
-                break value;
-            }
-            self.wait_for_notify().await;
-        };
-        self.notify();
-        value
-    }
-}
-
-pub struct HttunComm {
-    from_httun: CommDeque<Message, COMM_DEQUE_SIZE_FROM_HTTUN>,
-    to_httun: CommDeque<Message, COMM_DEQUE_SIZE_TO_HTTUN>,
-    restart_watch: watch::Sender<bool>,
-}
-
-impl HttunComm {
-    pub fn new() -> Self {
-        let (restart_watch, _) = watch::channel(true);
-        Self {
-            from_httun: CommDeque::new(),
-            to_httun: CommDeque::new(),
-            restart_watch,
-        }
-    }
-
-    async fn clear(&self) {
-        self.from_httun.clear().await;
-        self.to_httun.clear().await;
-    }
-
-    async fn send_from_httun(&self, msg: Message) {
-        self.from_httun.put(msg).await;
-    }
-
-    pub async fn recv_from_httun(&self) -> Message {
-        self.from_httun.get().await
-    }
-
-    pub async fn send_to_httun(&self, msg: Message) {
-        self.to_httun.put(msg).await;
-    }
-
-    async fn recv_to_httun(&self) -> Message {
-        self.to_httun.get().await
-    }
-
-    pub fn set_restart_request(&self) {
-        self.restart_watch.send_replace(true);
-    }
-
-    pub async fn request_restart(&self) {
-        self.set_restart_request();
-        let _ = self.restart_watch.subscribe().wait_for(|r| !*r).await;
-    }
-
-    async fn wait_for_restart_request(&self) {
-        let _ = self.restart_watch.subscribe().wait_for(|r| *r).await;
-    }
-
-    fn notify_restart_done(&self) {
-        self.restart_watch.send_replace(false);
-    }
-}
 
 fn make_client(
     user_agent: &str,
@@ -259,7 +139,7 @@ impl DirectionR {
     async fn run(
         &self,
         ready: &Notify,
-        comm: &HttunComm,
+        comm: &AsyncTaskComm,
         session_secret: SessionSecret,
     ) -> ah::Result<()> {
         self.serial
@@ -365,7 +245,7 @@ impl DirectionW {
     async fn run(
         &self,
         ready: &Notify,
-        comm: &HttunComm,
+        comm: &AsyncTaskComm,
         session_secret: SessionSecret,
     ) -> ah::Result<()> {
         self.serial
@@ -594,7 +474,7 @@ impl HttunClient {
         })
     }
 
-    pub async fn handle_packets(&mut self, comm: Arc<HttunComm>) -> ah::Result<()> {
+    pub async fn handle_packets(&mut self, comm: Arc<AsyncTaskComm>) -> ah::Result<()> {
         // Initially wait for the user side to start us.
         comm.wait_for_restart_request().await;
 

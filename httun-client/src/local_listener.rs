@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use crate::client::HttunComm;
+use crate::async_task_comm::AsyncTaskComm;
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::{L7C_MAX_PAYLOAD_LEN, L7Container, Message, MsgType, Operation};
 use httun_util::{
@@ -21,7 +21,7 @@ use tokio::{
 const RX_BUF_SIZE: usize = L7C_MAX_PAYLOAD_LEN;
 
 async fn send_close_to_httun(
-    comm: &HttunComm,
+    comm: &AsyncTaskComm,
     target_addr: IpAddr,
     target_port: u16,
 ) -> ah::Result<()> {
@@ -35,7 +35,7 @@ async fn send_close_to_httun(
 
 async fn local_rx(
     stream: Arc<TcpStream>,
-    comm: Arc<HttunComm>,
+    comm: Arc<AsyncTaskComm>,
     target_addr: IpAddr,
     target_port: u16,
 ) -> ah::Result<()> {
@@ -62,7 +62,7 @@ async fn local_rx(
 
 async fn local_tx(
     stream: Arc<TcpStream>,
-    comm: Arc<HttunComm>,
+    comm: Arc<AsyncTaskComm>,
     _target_addr: IpAddr,
     _target_port: u16,
 ) -> ah::Result<()> {
@@ -100,7 +100,7 @@ impl LocalConn {
 
     pub async fn handle_packets(
         &self,
-        comm: Arc<HttunComm>,
+        comm: Arc<AsyncTaskComm>,
         target_addr: IpAddr,
         target_port: u16,
     ) -> ah::Result<()> {

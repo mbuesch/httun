@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use crate::{client::HttunComm, error_delay};
+use crate::{async_task_comm::AsyncTaskComm, error_delay};
 use anyhow::{self as ah, format_err as err};
 use httun_protocol::{Message, MsgType, Operation};
 use std::{num::Wrapping, sync::Arc, time::Duration};
@@ -10,7 +10,7 @@ use tokio::{sync::mpsc::Sender, task, time::interval};
 
 pub async fn run_mode_test(
     exit_tx: Arc<Sender<ah::Result<()>>>,
-    httun_comm: Arc<HttunComm>,
+    httun_comm: Arc<AsyncTaskComm>,
     period_secs: f32,
 ) -> ah::Result<()> {
     // Spawn task: Test handler.
