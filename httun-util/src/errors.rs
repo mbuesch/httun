@@ -17,6 +17,7 @@ macro_rules! define_simple_error {
     };
 }
 
+// Client disconnected.
 define_simple_error!(DisconnectedError);
 
 // vim: ts=4 sw=4 expandtab

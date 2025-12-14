@@ -12,7 +12,7 @@ use httun_conf::ConfigL7Tunnel;
 use httun_protocol::{L7C_MAX_PAYLOAD_LEN, L7Container};
 use httun_util::{
     net::{tcp_recv_until_blocking, tcp_send_all},
-    timeouts::{L7_TIMEOUT_S, L7_TX_TIMEOUT},
+    timeouts::{L7_RX_TIMEOUT, L7_TIMEOUT_S, L7_TX_TIMEOUT},
 };
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
@@ -299,7 +299,7 @@ impl L7State {
                         // disconnected
                         continue 'a;
                     }
-                    res = timeout(L7_TX_TIMEOUT, stream.recv()) => {
+                    res = timeout(L7_RX_TIMEOUT, stream.recv()) => {
                         match res {
                             Err(_) => {
                                 // timeout

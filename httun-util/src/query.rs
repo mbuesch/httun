@@ -16,6 +16,8 @@ pub struct Query {
 }
 
 impl Query {
+    /// Returns the value of a query component, by name.
+    /// Returns `None` if the component does not exist.
     pub fn get(&self, name: &[u8]) -> Option<&[u8]> {
         self.comps.get(name).map(|v| &**v)
     }
