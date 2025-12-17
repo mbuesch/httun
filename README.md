@@ -41,6 +41,12 @@ Please read the httun documentation to understand both the potential benefits an
 
 For more information about security and reporting vulnerabilities, please see the [security documentation](SECURITY.md).
 
+### HTTP/httun/l7 protocols
+
+Please see the
+[httun protocol documentation](doc/PROTOCOL.md)
+for a detailed description of the data formats on the HTTP, httun and L7 layers.
+
 ## Performance
 
 The performance overhead of tunnelling traffic over HTTP is significant.
