@@ -41,7 +41,7 @@ Please read the httun documentation to understand both the potential benefits an
 
 For more information about security and reporting vulnerabilities, please see the [security documentation](SECURITY.md).
 
-### HTTP/httun/l7 protocols
+### HTTP / httun / L7 protocol layers
 
 Please see the
 [httun protocol documentation](doc/PROTOCOL.md)
