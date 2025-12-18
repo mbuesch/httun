@@ -12,7 +12,6 @@ use httun_conf::Config;
 use httun_protocol::{
     Key, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret, secure_random,
 };
-use httun_tun::TunHandler;
 use httun_util::timeouts::CHAN_ACTIVITY_TIMEOUT_S;
 use std::{
     collections::HashMap,
@@ -21,6 +20,9 @@ use std::{
         atomic::{self, AtomicU64},
     },
 };
+
+#[cfg(all(feature = "tun", target_os = "linux"))]
+use httun_tun::TunHandler;
 
 /// Represents a session for a channel.
 #[derive(Clone, Debug, Default)]
@@ -44,6 +46,7 @@ pub struct Channel {
     /// Name of the channel.
     name: String,
     /// Layer 3 (TUN) handler, if any.
+    #[cfg(all(feature = "tun", target_os = "linux"))]
     l3: Option<TunHandler>,
     /// Layer 7 (socket) handler, if any.
     l7: Option<L7State>,
@@ -64,7 +67,7 @@ impl Channel {
     fn new(
         conf: &Config,
         name: &str,
-        l3: Option<TunHandler>,
+        #[cfg(all(feature = "tun", target_os = "linux"))] l3: Option<TunHandler>,
         l7: Option<L7State>,
         key: &Key,
         test_enabled: bool,
@@ -78,6 +81,7 @@ impl Channel {
         };
         Self {
             name: name.to_string(),
+            #[cfg(all(feature = "tun", target_os = "linux"))]
             l3,
             l7,
             key: *key,
@@ -180,6 +184,7 @@ impl Channel {
     }
 
     /// Send data to the TUN interface.
+    #[cfg(all(feature = "tun", target_os = "linux"))]
     pub async fn l3send(&self, data: &[u8]) -> ah::Result<()> {
         if let Some(l3) = &self.l3 {
             l3.send(data).await.context("TUN/L3 send")
@@ -192,7 +197,13 @@ impl Channel {
         }
     }
 
+    #[cfg(not(all(feature = "tun", target_os = "linux")))]
+    pub async fn l3send(&self, _data: &[u8]) -> ah::Result<()> {
+        Err(ah::format_err!("TUN is support is disabled"))
+    }
+
     /// Receive data from the TUN interface.
+    #[cfg(all(feature = "tun", target_os = "linux"))]
     pub async fn l3recv(&self) -> ah::Result<Vec<u8>> {
         if let Some(l3) = &self.l3 {
             l3.recv().await.context("TUN/L3 receive")
@@ -203,6 +214,11 @@ impl Channel {
                 self.name
             ))
         }
+    }
+
+    #[cfg(not(all(feature = "tun", target_os = "linux")))]
+    pub async fn l3recv(&self) -> ah::Result<Vec<u8>> {
+        Err(ah::format_err!("TUN is support is disabled"))
     }
 
     /// Send data to the L7 socket.
@@ -255,6 +271,7 @@ impl Channels {
             let name = chan_conf.name();
             log::info!("Active channel: {name}");
 
+            #[cfg(all(feature = "tun", target_os = "linux"))]
             let tun = if let Some(tun_name) = chan_conf.tun() {
                 Some(
                     TunHandler::new(tun_name)
@@ -264,6 +281,7 @@ impl Channels {
             } else {
                 None
             };
+
             let l7 = if let Some(l7_conf) = chan_conf.l7_tunnel() {
                 Some(L7State::new(l7_conf)?)
             } else {
@@ -272,7 +290,16 @@ impl Channels {
             let key = chan_conf.shared_secret();
             let test_enabled = chan_conf.enable_test();
 
-            let chan = Channel::new(&conf, name, tun, l7, key, test_enabled);
+            let chan = Channel::new(
+                &conf,
+                name,
+                #[cfg(all(feature = "tun", target_os = "linux"))]
+                tun,
+                l7,
+                key,
+                test_enabled,
+            );
+
             channels.insert(name.to_string(), Arc::new(chan));
         }
         if channels.is_empty() {

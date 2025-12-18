@@ -6,7 +6,7 @@ use crate::async_task_comm::AsyncTaskComm;
 use anyhow as ah;
 use std::sync::Arc;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "tun", target_os = "linux"))]
 pub async fn run_mode_tun(httun_comm: Arc<AsyncTaskComm>, tun_name: &str) -> ah::Result<()> {
     use crate::error_delay;
     use anyhow::Context as _;
@@ -72,9 +72,9 @@ pub async fn run_mode_tun(httun_comm: Arc<AsyncTaskComm>, tun_name: &str) -> ah:
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(all(feature = "tun", target_os = "linux")))]
 pub async fn run_mode_tun(_httun_comm: Arc<AsyncTaskComm>, _tun_name: &str) -> ah::Result<()> {
-    Err(ah::format_err!("TUN is only supported on Linux."))
+    Err(ah::format_err!("TUN is support is disabled"))
 }
 
 // vim: ts=4 sw=4 expandtab

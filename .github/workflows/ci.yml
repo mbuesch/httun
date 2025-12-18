@@ -39,10 +39,17 @@ jobs:
       - run: rustup component add clippy
       - if: matrix.toolchain == 'nightly'
         run: rustup component add rustc-codegen-cranelift-preview
+
       - run: cargo build --verbose
       - run: cargo clippy -- --deny warnings
       - run: cargo clippy --tests -- --deny warnings
       - run: cargo test
+
+      - run: cargo build --no-default-features --verbose
+      - run: cargo clippy --no-default-features -- --deny warnings
+      - run: cargo clippy --no-default-features --tests -- --deny warnings
+      - run: cargo test --no-default-features --verbose
+
       - if: matrix.toolchain == 'nightly'
         run: cargo clean
       - if: matrix.toolchain == 'nightly'

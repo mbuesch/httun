@@ -31,10 +31,14 @@ memchr = { workspace = true }
 socket2 = { workspace = true }
 tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros", "tracing" ] }
 
-[target.'cfg(any(target_os="linux", target_os="android"))'.dependencies]
-httun-tun = { workspace = true }
+[target.'cfg(target_os="linux")'.dependencies]
+httun-tun = { workspace = true, optional = true }
 nix = { workspace = true, features = [ "user" ] }
 sd-notify = { workspace = true }
 
 [lints.clippy]
 undocumented_unsafe_blocks = "warn"
+
+[features]
+default = [ "tun" ]
+tun = [ "dep:httun-tun" ]
