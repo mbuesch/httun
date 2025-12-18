@@ -33,6 +33,8 @@ tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "n
 
 [target.'cfg(target_os="linux")'.dependencies]
 httun-tun = { workspace = true, optional = true }
+
+[target.'cfg(any(target_os="linux", target_os="android"))'.dependencies]
 nix = { workspace = true, features = [ "user" ] }
 sd-notify = { workspace = true }
 
