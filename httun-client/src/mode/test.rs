@@ -79,7 +79,9 @@ pub async fn run_mode_test(
                     meas_start = now;
                     num_bytes = 0;
 
-                    let rate = humansize::format_size(rate as u64, humansize::BINARY);
+                    let mut fmt = humansize::BINARY;
+                    fmt.decimal_places = 1;
+                    let rate = humansize::format_size(rate as u64, fmt);
                     log::info!("Test mode data rate {}/s.", rate);
                 }
 
