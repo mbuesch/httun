@@ -4,8 +4,14 @@
 
 use crate::{async_task_comm::AsyncTaskComm, error_delay};
 use anyhow::{self as ah, format_err as err};
-use httun_protocol::{Message, MsgType, Operation};
-use std::{num::Wrapping, sync::Arc, time::Duration};
+use httun_protocol::{Message, MsgType, Operation, secure_random};
+use httun_util::strings::hex;
+use movavg::MovAvg;
+use std::{
+    num::Wrapping,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{sync::mpsc::Sender, task, time::interval};
 
 pub async fn run_mode_test(
@@ -27,14 +33,22 @@ pub async fn run_mode_test(
                 None
             };
 
+            let mut num_bytes = 0;
+            let mut meas_start = Instant::now();
+            let mut avgrate: MovAvg<f32, f32, 3> = MovAvg::new();
+
             loop {
                 if let Some(inter) = &mut inter {
                     inter.tick().await;
                 }
 
-                let testdata = format!("TEST {count:08X}");
-                let expected_reply = format!("Reply to: {testdata}");
-                log::info!("Sending test mode ping: '{testdata}'");
+                let testbase = format!("{count:08X}");
+                let testpayload: [u8; 1024] = secure_random();
+                let testpayload = hex(&testpayload);
+                let testdata = format!("{testbase} {testpayload}");
+                let expected_reply = format!("Pong: {testdata}");
+
+                num_bytes += testdata.len();
 
                 let msg = match Message::new(
                     MsgType::Data,
@@ -51,11 +65,22 @@ pub async fn run_mode_test(
                 httun_comm.send_to_httun(msg).await;
 
                 let msg = httun_comm.recv_from_httun().await;
+
                 let replydata = String::from_utf8_lossy(msg.payload());
-                log::info!("Received test mode pong: '{replydata}'");
                 if replydata != expected_reply {
                     let _ = exit_tx.send(Err(err!("Test RX: Invalid reply."))).await;
                     break;
+                }
+
+                let secs = 1.0;
+                let now = Instant::now();
+                if now >= meas_start + Duration::from_secs_f32(secs) {
+                    let rate = avgrate.feed(num_bytes as f32 / secs);
+                    meas_start = now;
+                    num_bytes = 0;
+
+                    let rate = humansize::format_size(rate as u64, humansize::BINARY);
+                    log::info!("Test mode data rate {}/s.", rate);
                 }
 
                 count += 1;

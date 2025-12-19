@@ -36,7 +36,7 @@ impl PingState {
 
             let mut buf = self.buf.lock().expect("Mutex poisoned");
             if !buf.is_empty() {
-                let mut payload: Vec<u8> = "Reply to: ".to_string().into();
+                let mut payload: Vec<u8> = "Pong: ".to_string().into();
                 payload.append(&mut *buf);
                 return payload;
             }

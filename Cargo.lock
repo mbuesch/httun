@@ -904,7 +904,9 @@ dependencies = [
  "httun-protocol",
  "httun-tun",
  "httun-util",
+ "humansize",
  "log",
+ "movavg",
  "reqwest",
  "tokio",
  "url",
@@ -999,6 +1001,15 @@ dependencies = [
  "memchr",
  "serde",
  "tokio",
+]
+
+[[package]]
+name = "humansize"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cb51c9a029ddc91b07a787f1d86b53ccfa49b0e86688c946ebe8d3555685dd7"
+dependencies = [
+ "libm",
 ]
 
 [[package]]
@@ -1311,6 +1322,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091"
 
 [[package]]
+name = "libm"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1413,6 +1430,16 @@ dependencies = [
  "smallvec",
  "tagptr",
  "uuid",
+]
+
+[[package]]
+name = "movavg"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30c189125d8c0755b71758a81262c41f843f8de42acba3b47c03c6f737cfffe6"
+dependencies = [
+ "autocfg",
+ "num-traits",
 ]
 
 [[package]]

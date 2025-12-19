@@ -38,10 +38,12 @@ env_logger = "0.11"
 getrandom = "0.3"
 heapless = "0.9"
 hickory-resolver = "0.25"
+humansize = "2"
 ipnet = "2"
 libc = "0.2"
 log = "0.4"
 memchr = "2"
+movavg = "2"
 nix = { version = "0.30", default-features = false }
 reqwest = { version = "0.12", default-features = false }
 sd-notify = "0.4"
