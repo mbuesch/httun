@@ -5,26 +5,13 @@
 #![forbid(unsafe_code)]
 
 use anyhow::{self as ah, format_err as err};
-use bincode::serde::{decode_from_slice, encode_to_vec};
 use httun_util::header::HttpHeader;
-use serde::{Deserialize, Serialize};
 
-/// Maximum length of the serialized message.
-const MAX_LEN: usize = u16::MAX as usize * 2;
 /// Path to the Unix domain socket used by httun-server.
 pub const UNIX_SOCK: &str = "/run/httun-server/httun-server.sock";
 
-/// Configuration for bincode serialization/deserialization.
-#[inline]
-fn cfg() -> impl bincode::config::Config {
-    bincode::config::standard()
-        .with_limit::<MAX_LEN>()
-        .with_little_endian()
-        .with_fixed_int_encoding()
-}
-
 /// Header for a Unix domain socket protocol message.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
 pub struct UnMessageHeader {
     /// Size of the message body in bytes.
     body_size: u32,
@@ -60,18 +47,19 @@ impl UnMessageHeader {
 
     /// Serializes the header to a byte vector.
     pub fn serialize(&self) -> ah::Result<Vec<u8>> {
-        Ok(encode_to_vec(self, cfg())?)
+        Ok(rkyv::to_bytes::<rkyv::rancor::Error>(self)?.into_vec())
     }
 
     /// Deserializes the header from a byte slice.
     pub fn deserialize(buf: &[u8]) -> ah::Result<Self> {
-        let (this, _) = decode_from_slice(buf, cfg())?;
-        Ok(this)
+        Ok(rkyv::from_bytes::<UnMessageHeader, rkyv::rancor::Error>(
+            buf,
+        )?)
     }
 }
 
 /// Operation code for the Unix domain socket protocol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
 pub enum UnOperation {
     /// First message to server.
     ToSrvInit,
@@ -99,7 +87,7 @@ pub enum UnOperation {
 ///
 /// The Unix socket is used for communication between
 /// the FastCGI daemon (`httun-fcgi`) and the `httun-server``.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
 pub struct UnMessage {
     /// Operation code.
     op: UnOperation,
@@ -199,13 +187,12 @@ impl UnMessage {
 
     /// Serializes the message to a byte vector.
     pub fn serialize(&self) -> ah::Result<Vec<u8>> {
-        Ok(encode_to_vec(self, cfg())?)
+        Ok(rkyv::to_bytes::<rkyv::rancor::Error>(self)?.into_vec())
     }
 
     /// Deserializes the message from a byte slice.
     pub fn deserialize(buf: &[u8]) -> ah::Result<Self> {
-        let (this, _) = decode_from_slice(buf, cfg())?;
-        Ok(this)
+        Ok(rkyv::from_bytes::<UnMessage, rkyv::rancor::Error>(buf)?)
     }
 }
 
