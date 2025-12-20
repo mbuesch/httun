@@ -4,15 +4,18 @@
 
 use crate::{async_task_comm::AsyncTaskComm, error_delay};
 use anyhow::{self as ah, format_err as err};
-use httun_protocol::{Message, MsgType, Operation, secure_random};
+use httun_protocol::{Message, MsgType, Operation};
 use httun_util::strings::hex;
 use movavg::MovAvg;
+use rand::prelude::*;
 use std::{
     num::Wrapping,
     sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{sync::mpsc::Sender, task, time::interval};
+
+const NR_RAND_BYTES: usize = 1024 * 16;
 
 pub async fn run_mode_test(
     exit_tx: Arc<Sender<ah::Result<()>>>,
@@ -33,27 +36,28 @@ pub async fn run_mode_test(
                 None
             };
 
-            let mut num_bytes = 0;
+            let mut num_bytes_tx = 0;
+            let mut num_bytes_rx = 0;
+            let mut avgrate_tx: MovAvg<f32, f32, 3> = MovAvg::new();
+            let mut avgrate_rx: MovAvg<f32, f32, 3> = MovAvg::new();
             let mut meas_start = Instant::now();
-            let mut avgrate: MovAvg<f32, f32, 3> = MovAvg::new();
 
             loop {
                 if let Some(inter) = &mut inter {
                     inter.tick().await;
                 }
 
-                let testbase = format!("{count:08X}");
-                let testpayload: [u8; 1024 * 16] = secure_random();
-                let testpayload = hex(&testpayload);
-                let testdata = format!("{testbase} {testpayload}");
-                let expected_reply = format!("Pong: {testdata}");
+                let testrand: [u8; NR_RAND_BYTES] = rand::rng().random();
+                let testrand = hex(&testrand);
+                let testpayload = format!("{count:08X} {testrand}");
+                let expected_reply_payload = format!("Pong: {testpayload}");
 
-                num_bytes += testdata.len();
+                num_bytes_tx += testpayload.len();
 
                 let msg = match Message::new(
                     MsgType::Data,
                     Operation::TestToSrv,
-                    testdata.into_bytes(),
+                    testpayload.into_bytes(),
                 ) {
                     Ok(msg) => msg,
                     Err(e) => {
@@ -66,23 +70,30 @@ pub async fn run_mode_test(
 
                 let msg = httun_comm.recv_from_httun().await;
 
-                let replydata = String::from_utf8_lossy(msg.payload());
-                if replydata != expected_reply {
-                    let _ = exit_tx.send(Err(err!("Test RX: Invalid reply."))).await;
+                let reply_payload = String::from_utf8_lossy(msg.payload());
+                if reply_payload != expected_reply_payload {
+                    let _ = exit_tx
+                        .send(Err(err!("Test: Received invalid ping reply payload.")))
+                        .await;
                     break;
                 }
+
+                num_bytes_rx += reply_payload.len();
 
                 let secs = 1.0;
                 let now = Instant::now();
                 if now >= meas_start + Duration::from_secs_f32(secs) {
-                    let rate = avgrate.feed(num_bytes as f32 / secs);
+                    let rate_tx = avgrate_tx.feed(num_bytes_tx as f32 / secs);
+                    let rate_rx = avgrate_rx.feed(num_bytes_rx as f32 / secs);
                     meas_start = now;
-                    num_bytes = 0;
+                    num_bytes_tx = 0;
+                    num_bytes_rx = 0;
 
                     let mut fmt = humansize::BINARY;
                     fmt.decimal_places = 1;
-                    let rate = humansize::format_size(rate as u64, fmt);
-                    log::info!("Test mode data rate {rate}/s.");
+                    let rate_tx = humansize::format_size(rate_tx as u64, fmt);
+                    let rate_rx = humansize::format_size(rate_rx as u64, fmt);
+                    log::info!("Test Ok. Payload data rate tx: {rate_tx}/s, rx: {rate_rx}/s.");
                 }
 
                 count += 1;

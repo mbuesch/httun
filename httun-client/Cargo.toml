@@ -25,6 +25,7 @@ httun-util = { workspace = true }
 humansize = { workspace = true }
 log = { workspace = true }
 movavg = { workspace = true }
+rand = { workspace = true }
 reqwest = { workspace = true, features = [ "http2", "rustls-tls", "gzip", "brotli", "zstd", "deflate", "charset", "hickory-dns" ] }
 tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros", "tracing" ] }
 url = { workspace = true }

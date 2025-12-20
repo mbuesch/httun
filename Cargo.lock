@@ -907,6 +907,7 @@ dependencies = [
  "humansize",
  "log",
  "movavg",
+ "rand",
  "reqwest",
  "tokio",
  "url",
