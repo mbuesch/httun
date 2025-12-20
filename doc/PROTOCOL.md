@@ -114,10 +114,25 @@ If no payload is present, then this field is 0.
 The actual payload data.
 Whether a payload is present depends on the `Operation`.
 
+TODO describe payloads
+
 #### httun Frame Element: Auth tag
 
 The authentication tag is the result of the AES-gcm AEAD encryption and authentication of the frame.
 It is used for verifying the integrity and authenticity of the frame.
+
+#### httun frame en-/decryption: AEAD associated data
+
+The associated data for AES-gcm AEAD encryption and decryption consists of the following fields:
+
+| Byte offs | Name           | Byte size | Description                                |
+|-----------|----------------|-----------|--------------------------------------------|
+| 0         | Type           | 1         | Basic message type. (from httun frame)     |
+| 1         | Session secret | 16        | Per session secret.                        |
+
+During the Init frame from client to server and its corresponding Init reply from server to client, the session secret is not yet available.
+In this case the session secret field in the associated data is filled with zeros.
+All other subsequent frames will use the session secret.
 
 ## L7 container frame
 
