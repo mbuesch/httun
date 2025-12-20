@@ -65,11 +65,11 @@ The frame is composed of four areas:
 | Byte offs | Name        | Byte size | Area  | Description                                |
 |-----------|-------------|-----------|-------|--------------------------------------------|
 | 0         | Type        | 1         | assoc | Basic message type.                        |
-| 1         | Nonce       | 16        | nonce | A randomly generated nonce for encryption. |
-| 17        | Operation   | 1         | crypt | The operation this message performs.       |
-| 18        | Seq counter | 8 (be)    | crypt | A sequence number.                         |
-| 26        | Payload len | 2 (be)    | crypt | Length of the following payload in bytes.  |
-| 28        | Payload     | var       | crypt | Payload data.                              |
+| 1         | Nonce       | 20        | nonce | A randomly generated nonce for encryption. |
+| 21        | Operation   | 1         | crypt | The operation this message performs.       |
+| 22        | Seq counter | 8 (be)    | crypt | A sequence number.                         |
+| 30        | Payload len | 2 (be)    | crypt | Length of the following payload in bytes.  |
+| 32        | Payload     | var       | crypt | Payload data.                              |
 | var       | Auth tag    | 16        | tag   | AES-GCM authentication tag.                |
 
 #### httun Frame Element: Type

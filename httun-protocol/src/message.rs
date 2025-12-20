@@ -11,12 +11,12 @@ use base64::prelude::*;
 // We should be able to have both, a symmetric user key and an asymmetric user key
 // and use them both at the same time.
 
-/// AES-256-GCM with 16 byte nonce.
-type Aes256GcmN16 = aes_gcm::AesGcm<aes_gcm::aes::Aes256, aes_gcm::aes::cipher::consts::U16>;
+/// AES-256-GCM with 160 bit (20 byte) nonce.
+type Aes256GcmN160 = aes_gcm::AesGcm<aes_gcm::aes::Aes256, aes_gcm::aes::cipher::consts::U20>;
 /// Shared key type.
 pub type Key = [u8; 32];
 /// Nonce type.
-type Nonce = [u8; 16];
+type Nonce = [u8; 20];
 /// Nonce length.
 const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
 /// Authentication tag length.
@@ -31,10 +31,10 @@ pub const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
 
 const OFFS_TYPE: usize = 0;
 const OFFS_NONCE: usize = 1;
-const OFFS_OPER: usize = 17;
-const OFFS_SEQ: usize = 18;
-const OFFS_LEN: usize = 26;
-const OFFS_PAYLOAD: usize = 28;
+const OFFS_OPER: usize = 21;
+const OFFS_SEQ: usize = 22;
+const OFFS_LEN: usize = 30;
+const OFFS_PAYLOAD: usize = 32;
 
 const AREA_ASSOC_LEN: usize = 1;
 const AREA_CRYPT_LEN: usize = 1 + 8 + 2;
@@ -220,7 +220,7 @@ impl Message {
         session_secret: Option<SessionSecret>,
     ) -> ah::Result<Vec<u8>> {
         let type_: u8 = self.type_.into();
-        let nonce = Aes256GcmN16::generate_nonce(&mut OsRng);
+        let nonce = Aes256GcmN160::generate_nonce(&mut OsRng);
         let oper: u8 = self.oper.into();
         let sequence: u64 = self.sequence;
         let len: u16 = self
@@ -241,7 +241,7 @@ impl Message {
         assoc_data[0] = type_;
         assoc_data[1..].copy_from_slice(&session_secret.unwrap_or_default());
 
-        let cipher = Aes256GcmN16::new(key.into());
+        let cipher = Aes256GcmN160::new(key.into());
         let authtag = cipher
             .encrypt_in_place_detached(&nonce, &assoc_data, &mut buf[AREA_ASSOC_LEN + NONCE_LEN..])
             .map_err(|_| err!("AEAD encryption of httun message failed"))?;
@@ -285,7 +285,7 @@ impl Message {
         assoc_data[0] = type_;
         assoc_data[1..].copy_from_slice(&session_secret.unwrap_or_default());
 
-        let cipher = Aes256GcmN16::new(key.into());
+        let cipher = Aes256GcmN160::new(key.into());
         cipher
             .decrypt_in_place_detached(
                 &nonce.into(),
