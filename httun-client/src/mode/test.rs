@@ -43,7 +43,7 @@ pub async fn run_mode_test(
                 }
 
                 let testbase = format!("{count:08X}");
-                let testpayload: [u8; 1024] = secure_random();
+                let testpayload: [u8; 1024 * 16] = secure_random();
                 let testpayload = hex(&testpayload);
                 let testdata = format!("{testbase} {testpayload}");
                 let expected_reply = format!("Pong: {testdata}");
