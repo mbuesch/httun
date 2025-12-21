@@ -5,6 +5,7 @@
 use aes_gcm::aead::{AeadCore as _, AeadInPlace as _, KeyInit as _, OsRng};
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
+use rand::prelude::*;
 
 //TODO: Currently we only have a symmetric common secret.
 // Add a way to derive a symmetric key from some sort of asymmetric key handshake.
@@ -47,17 +48,24 @@ pub const OVERHEAD_LEN: usize = AREA_ASSOC_LEN + NONCE_LEN + AREA_CRYPT_LEN + AU
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MsgType {
     /// Initialization message.
-    Init,
+    Init = 0,
     /// Data message.
     Data,
+}
+
+impl MsgType {
+    const MASK: u8 = 0x01;
 }
 
 impl TryFrom<u8> for MsgType {
     type Error = ah::Error;
 
     fn try_from(ty: u8) -> ah::Result<Self> {
+        let ty = ty & Self::MASK;
+
         const INIT: u8 = MsgType::Init as _;
         const DATA: u8 = MsgType::Data as _;
+
         match ty {
             INIT => Ok(MsgType::Init),
             DATA => Ok(MsgType::Data),
@@ -68,7 +76,9 @@ impl TryFrom<u8> for MsgType {
 
 impl From<MsgType> for u8 {
     fn from(ty: MsgType) -> Self {
-        ty as Self
+        let mut unused: u8 = rand::rng().random();
+        unused &= !MsgType::MASK;
+        unused | (ty as Self)
     }
 }
 
@@ -76,7 +86,7 @@ impl From<MsgType> for u8 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
     /// Initialization.
-    Init,
+    Init = 0,
     /// Layer 3 to server.
     L3ToSrv,
     /// Layer 3 from server.
