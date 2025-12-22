@@ -11,7 +11,7 @@ use subtle::ConstantTimeEq as _;
 const KEY_SIZE: usize = 256 / 8;
 
 /// The user provided shared secret.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct UserSharedSecret([u8; KEY_SIZE]);
 
 impl UserSharedSecret {

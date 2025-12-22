@@ -357,7 +357,7 @@ impl ConfigChannelHttp {
 }
 
 /// Configuration section `[[channel]]`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ConfigChannel {
     disabled: bool,
     enable_test: bool,
@@ -367,6 +367,21 @@ pub struct ConfigChannel {
     tun: Option<String>,
     l7_tunnel: Option<ConfigL7Tunnel>,
     http: ConfigChannelHttp,
+}
+
+impl Default for ConfigChannel {
+    fn default() -> Self {
+        Self {
+            disabled: Default::default(),
+            enable_test: Default::default(),
+            urls: Default::default(),
+            name: Default::default(),
+            shared_secret: UserSharedSecret::random(),
+            tun: Default::default(),
+            l7_tunnel: Default::default(),
+            http: Default::default(),
+        }
+    }
 }
 
 impl TryFrom<&toml::Value> for ConfigChannel {
