@@ -8,7 +8,6 @@ use httun_conf::Config;
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
 use httun_util::{errors::DisconnectedError, header::HttpHeader, timeouts::UNIX_HANDSHAKE_TIMEOUT};
 use std::{
-    os::unix::net::UnixListener as StdUnixListener,
     path::Path,
     sync::{Arc, atomic},
 };
@@ -19,6 +18,8 @@ use tokio::{
 
 #[cfg(target_os = "linux")]
 use crate::systemd::SystemdSocket;
+#[cfg(target_os = "linux")]
+use std::os::unix::net::UnixListener as StdUnixListener;
 
 /// A connection on the Unix socket.
 ///
