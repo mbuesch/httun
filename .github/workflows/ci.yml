@@ -19,6 +19,8 @@ jobs:
           - nightly
         os:
           - ubuntu-latest
+          - windows-latest
+          - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
@@ -54,40 +56,5 @@ jobs:
         run: cargo clean
       - if: matrix.toolchain == 'nightly'
         run: sh ./scripts/build-dev-cranelift.sh
-
-  client_only:
-    name: Client only
-    strategy:
-      matrix:
-        toolchain:
-          - 1.88.0 # MSRV
-          - 1.92.0
-        os:
-          - windows-latest
-          - macos-latest
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Cache Rust
-        uses: actions/cache@v5
-        with:
-          path: ~/.rustup
-          key: rustup-${{ runner.os }}-${{ matrix.toolchain }}
-      - name: Cache Cargo
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo
-          key: cargo-${{ runner.os }}-${{ matrix.toolchain }}
-
-      - run: rustup update ${{ matrix.toolchain }}
-      - run: rustup default ${{ matrix.toolchain }}
-      - run: rustup component add clippy
-      - run: cargo build --verbose --package httun-client
-      - run: cargo clippy --package httun-client -- --deny warnings
-      - run: cargo clippy --tests --package httun-client -- --deny warnings
-      - run: cargo test --package httun-client
-      - run: cargo test --package httun-conf
-      - run: cargo test --package httun-protocol
 
 # vim: ts=2 sw=2 expandtab
