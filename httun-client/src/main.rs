@@ -25,7 +25,7 @@ use httun_util::header::HttpHeader;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{runtime, sync::mpsc, task, time};
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_family = "unix")]
 use tokio::signal::unix::{SignalKind, signal};
 
 /// Connect to a httun tunnel server.
@@ -153,14 +153,14 @@ pub async fn error_delay() {
     time::sleep(Duration::from_millis(100)).await;
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_family = "unix")]
 macro_rules! register_signal {
     ($kind:ident) => {
         signal(SignalKind::$kind())
     };
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(not(target_family = "unix"))]
 macro_rules! register_signal {
     ($kind:ident) => {{
         let result: ah::Result<u32> = Ok(0_u32);
@@ -168,21 +168,21 @@ macro_rules! register_signal {
     }};
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_family = "unix")]
 macro_rules! recv_signal {
     ($sig:ident) => {
         $sig.recv()
     };
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(not(target_family = "unix"))]
 async fn signal_dummy(_: &mut u32) {
     loop {
         time::sleep(Duration::MAX).await;
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(not(target_family = "unix"))]
 macro_rules! recv_signal {
     ($sig:ident) => {
         signal_dummy(&mut $sig)
