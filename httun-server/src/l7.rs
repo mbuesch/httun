@@ -16,7 +16,6 @@ use httun_util::{
 };
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
-    ffi::CString,
     net::{SocketAddr, TcpStream as StdTcpStream},
     sync::{
         Arc,
@@ -54,8 +53,8 @@ impl L7Socket {
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             {
                 log::trace!("Binding socket to network interface: {bind_device}");
-                let bind_device =
-                    CString::new(bind_device).context("Convert interface name to C string")?;
+                let bind_device = std::ffi::CString::new(bind_device)
+                    .context("Convert interface name to C string")?;
                 socket
                     .bind_device(Some(bind_device.as_bytes()))
                     .context("Bind socket to network interface")?;

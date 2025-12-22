@@ -28,10 +28,7 @@ use httun_util::header::HttpHeader;
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
     path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{self, AtomicU32},
-    },
+    sync::Arc,
     time::Duration,
 };
 use tokio::{
@@ -48,11 +45,15 @@ use crate::unix_sock::UnixSock;
 #[cfg(target_family = "unix")]
 use nix::unistd::{Group, User, setgid, setuid};
 #[cfg(target_family = "unix")]
+use std::sync::atomic::{self, AtomicU32};
+#[cfg(target_family = "unix")]
 use tokio::signal::unix::{SignalKind, signal};
 
 /// The web server's UID (for FastCGI socket ownership).
+#[cfg(target_family = "unix")]
 static WEBSERVER_UID: AtomicU32 = AtomicU32::new(u32::MAX);
 /// The web server's GID (for FastCGI socket ownership).
+#[cfg(target_family = "unix")]
 static WEBSERVER_GID: AtomicU32 = AtomicU32::new(u32::MAX);
 
 /// Drop root privileges.
@@ -267,6 +268,7 @@ impl Opts {
 async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     // Create async IPC channels.
     let (exit_tx, mut exit_rx) = sync::mpsc::channel::<ah::Result<()>>(1);
+    #[allow(unused_variables)]
     let exit_tx = Arc::new(exit_tx);
 
     // Register unix signal handlers.

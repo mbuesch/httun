@@ -3,13 +3,18 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::http_server::HttpConn;
-use anyhow::{self as ah, Context as _, format_err as err};
-use httun_unix_protocol::{UnMessage, UnOperation};
+use anyhow as ah;
 use httun_util::timeouts::CHAN_R_TIMEOUT;
 use std::time::Duration;
 
 #[cfg(target_family = "unix")]
 use crate::unix_sock::UnixConn;
+
+#[cfg(target_family = "unix")]
+use anyhow::{Context as _, format_err as err};
+
+#[cfg(target_family = "unix")]
+use httun_unix_protocol::{UnMessage, UnOperation};
 
 /// Message received from communication backend.
 #[derive(Debug)]
@@ -19,6 +24,7 @@ pub enum CommRxMsg {
     /// Request for data from server.
     ReqFromSrv(Vec<u8>),
     /// Keepalive message.
+    #[allow(dead_code)]
     Keepalive,
 }
 
