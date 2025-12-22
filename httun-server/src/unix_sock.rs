@@ -2,16 +2,23 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::{WEBSERVER_GID, WEBSERVER_UID, systemd::SystemdSocket};
+use crate::{WEBSERVER_GID, WEBSERVER_UID};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::Config;
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
 use httun_util::{errors::DisconnectedError, header::HttpHeader, timeouts::UNIX_HANDSHAKE_TIMEOUT};
-use std::sync::{Arc, atomic};
+use std::{
+    os::unix::net::UnixListener as StdUnixListener,
+    path::Path,
+    sync::{Arc, atomic},
+};
 use tokio::{
     net::{UnixListener, UnixStream},
     time::timeout,
 };
+
+#[cfg(target_os = "linux")]
+use crate::systemd::SystemdSocket;
 
 /// A connection on the Unix socket.
 ///
@@ -163,25 +170,56 @@ pub struct UnixSock {
 
 impl UnixSock {
     /// Create a new Unix socket server from the systemd socket.
-    pub async fn new(conf: Arc<Config>, extra_headers: Arc<[HttpHeader]>) -> ah::Result<Self> {
-        let sockets = SystemdSocket::get_all()?;
-        if let Some(SystemdSocket::Unix(socket)) = sockets.into_iter().next() {
-            log::info!("Using Unix socket from systemd.");
-
-            socket
-                .set_nonblocking(true)
-                .context("Set socket non-blocking")?;
-            let listener = UnixListener::from_std(socket)
-                .context("Convert std UnixListener to tokio UnixListener")?;
-
-            Ok(Self {
-                listener,
-                conf,
-                extra_headers,
-            })
-        } else {
-            Err(err!("Received an unusable socket from systemd."))
+    #[allow(unreachable_code)]
+    pub async fn new(
+        conf: Arc<Config>,
+        socket_path: Option<&Path>,
+        extra_headers: Arc<[HttpHeader]>,
+    ) -> ah::Result<Self> {
+        if let Some(socket_path) = socket_path {
+            let listener = UnixListener::bind(socket_path).context("Open Unix socket")?;
+            return Self::new_listener(conf, listener, extra_headers).await;
         }
+
+        #[cfg(target_os = "linux")]
+        {
+            let sockets = SystemdSocket::get_all()?;
+            if let Some(SystemdSocket::Unix(socket)) = sockets.into_iter().next() {
+                log::info!("Using Unix socket from systemd.");
+
+                return Self::new_std_listener(conf, socket, extra_headers).await;
+            }
+            return Err(err!("Received an unusable socket from systemd."));
+        }
+
+        Err(err!(
+            "No unix socket path specified. See --unix-socket command line option."
+        ))
+    }
+
+    pub async fn new_listener(
+        conf: Arc<Config>,
+        listener: UnixListener,
+        extra_headers: Arc<[HttpHeader]>,
+    ) -> ah::Result<Self> {
+        Ok(Self {
+            listener,
+            conf,
+            extra_headers,
+        })
+    }
+
+    pub async fn new_std_listener(
+        conf: Arc<Config>,
+        listener: StdUnixListener,
+        extra_headers: Arc<[HttpHeader]>,
+    ) -> ah::Result<Self> {
+        listener
+            .set_nonblocking(true)
+            .context("Set socket non-blocking")?;
+        let listener = UnixListener::from_std(listener)
+            .context("Convert std UnixListener to tokio UnixListener")?;
+        Self::new_listener(conf, listener, extra_headers).await
     }
 
     /// Accept a connection on the Unix socket.

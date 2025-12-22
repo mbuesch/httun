@@ -162,6 +162,13 @@ struct Opts {
     #[arg(long, value_name = "GROUP", default_value = "www-data")]
     webserver_group: String,
 
+    /// Optional path to the socket for communication with httun-fcgi.
+    ///
+    /// If not given and if on Linux, the socket will be fetched from systemd.
+    #[cfg(target_family = "unix")]
+    #[arg(long, value_name = "PATH")]
+    unix_socket: Option<PathBuf>,
+
     /// Instead of running as an FastCGI backend run a simple HTTP server.
     ///
     /// If you don't specify this option, then httun-server will act as FastCGI backend.
@@ -294,9 +301,13 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         {
             get_webserver_uid_gid(&opts).context("Get web server UID/GID")?;
             unix_sock = Some(
-                UnixSock::new(Arc::clone(&conf), (&*opts.extra_headers).into())
-                    .await
-                    .context("Unix socket init")?,
+                UnixSock::new(
+                    Arc::clone(&conf),
+                    opts.unix_socket.as_deref(),
+                    (&*opts.extra_headers).into(),
+                )
+                .await
+                .context("Unix socket init")?,
             );
         }
     }
