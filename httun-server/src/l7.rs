@@ -51,12 +51,22 @@ impl L7Socket {
             Socket::new(domain, Type::STREAM, Some(Protocol::TCP)).context("Create socket")?;
 
         if let Some(bind_device) = bind_device {
-            log::trace!("Binding socket to network interface: {bind_device}");
-            let bind_device =
-                CString::new(bind_device).context("Convert interface name to C string")?;
-            socket
-                .bind_device(Some(bind_device.as_bytes()))
-                .context("Bind socket to network interface")?;
+            #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+            {
+                log::trace!("Binding socket to network interface: {bind_device}");
+                let bind_device =
+                    CString::new(bind_device).context("Convert interface name to C string")?;
+                socket
+                    .bind_device(Some(bind_device.as_bytes()))
+                    .context("Bind socket to network interface")?;
+            }
+            #[cfg(not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
+            {
+                let _ = bind_device;
+                return Err(err!(
+                    "l7-tunnel.bind-to-interface is not supported on this OS."
+                ));
+            }
         }
 
         log::trace!("Connecting socket to remote: {remote_addr}");

@@ -176,7 +176,7 @@ macro_rules! recv_signal {
 }
 
 #[cfg(not(target_family = "unix"))]
-async fn signal_dummy(_: &mut u32) {
+async fn signal_dummy<T>(_: &mut T) {
     loop {
         time::sleep(Duration::MAX).await;
     }

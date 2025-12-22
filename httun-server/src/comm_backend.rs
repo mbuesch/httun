@@ -2,11 +2,14 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::{http_server::HttpConn, unix_sock::UnixConn};
+use crate::http_server::HttpConn;
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_unix_protocol::{UnMessage, UnOperation};
 use httun_util::timeouts::CHAN_R_TIMEOUT;
 use std::time::Duration;
+
+#[cfg(target_family = "unix")]
+use crate::unix_sock::UnixConn;
 
 /// Message received from communication backend.
 #[derive(Debug)]
@@ -20,6 +23,7 @@ pub enum CommRxMsg {
 }
 
 /// Communication backend over Unix socket connections.
+#[cfg(target_family = "unix")]
 #[derive(Debug)]
 pub struct CommBackendUnix {
     conn: UnixConn,
@@ -34,12 +38,14 @@ pub struct CommBackendHttp {
 /// Communication backend abstraction over Unix socket and HTTP connections.
 #[derive(Debug)]
 pub enum CommBackend {
+    #[cfg(target_family = "unix")]
     Unix(Box<CommBackendUnix>),
     Http(Box<CommBackendHttp>),
 }
 
 impl CommBackend {
     /// Create a new Unix socket communication backend.
+    #[cfg(target_family = "unix")]
     pub fn new_unix(conn: UnixConn) -> Self {
         Self::Unix(Box::new(CommBackendUnix { conn }))
     }
@@ -52,6 +58,7 @@ impl CommBackend {
     /// Get the channel name, if known.
     pub fn chan_name(&self) -> Option<String> {
         match self {
+            #[cfg(target_family = "unix")]
             Self::Unix(b) => Some(b.conn.chan_name().to_string()),
             Self::Http(b) => b.conn.chan_name(),
         }
@@ -60,6 +67,7 @@ impl CommBackend {
     /// Receive a message from the communication backend.
     pub async fn recv(&self) -> ah::Result<CommRxMsg> {
         match self {
+            #[cfg(target_family = "unix")]
             Self::Unix(b) => {
                 let umsg = b.conn.recv().await.context("Unix socket receive")?;
                 match umsg.op() {
@@ -87,6 +95,7 @@ impl CommBackend {
     /// Send a reply to the communication backend.
     pub async fn send_reply(&self, payload: Vec<u8>) -> ah::Result<()> {
         match self {
+            #[cfg(target_family = "unix")]
             Self::Unix(b) => {
                 let chan_name = self
                     .chan_name()
@@ -101,6 +110,7 @@ impl CommBackend {
     /// Send a reply timeout notification to the communication backend.
     pub async fn send_reply_timeout(&self) -> ah::Result<()> {
         match self {
+            #[cfg(target_family = "unix")]
             Self::Unix(_) => {
                 // Timeouts are handled at the FastCGI/Webserver level.
                 Ok(())
@@ -112,6 +122,7 @@ impl CommBackend {
     /// Get the reply timeout duration for the communication backend.
     pub fn get_reply_timeout_duration(&self) -> Option<Duration> {
         match self {
+            #[cfg(target_family = "unix")]
             Self::Unix(_) => {
                 // Timeouts are handled at the FastCGI/Webserver level.
                 None
@@ -123,6 +134,7 @@ impl CommBackend {
     /// Close the communication backend.
     pub async fn close(&self) -> ah::Result<()> {
         match self {
+            #[cfg(target_family = "unix")]
             Self::Unix(b) => {
                 let chan_name = self
                     .chan_name()

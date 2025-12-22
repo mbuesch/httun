@@ -9,19 +9,22 @@ mod l7;
 mod net_list;
 mod ping;
 mod protocol;
-mod systemd;
 mod time;
+
+#[cfg(target_os = "linux")]
+mod systemd;
+
+#[cfg(target_family = "unix")]
 mod unix_sock;
 
 use crate::{
     channel::Channels, comm_backend::CommBackend, http_server::HttpServer,
-    protocol::ProtocolManager, systemd::systemd_notify_ready, unix_sock::UnixSock,
+    protocol::ProtocolManager,
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::Parser;
 use httun_conf::{Config, ConfigVariant};
 use httun_util::header::HttpHeader;
-use nix::unistd::{Group, User, setgid, setuid};
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
     path::PathBuf,
@@ -33,10 +36,19 @@ use std::{
 };
 use tokio::{
     runtime,
-    signal::unix::{SignalKind, signal},
     sync::{self, Semaphore},
     task,
 };
+
+#[cfg(target_os = "linux")]
+use crate::systemd::systemd_notify_ready;
+
+#[cfg(target_family = "unix")]
+use crate::unix_sock::UnixSock;
+#[cfg(target_family = "unix")]
+use nix::unistd::{Group, User, setgid, setuid};
+#[cfg(target_family = "unix")]
+use tokio::signal::unix::{SignalKind, signal};
 
 /// The web server's UID (for FastCGI socket ownership).
 static WEBSERVER_UID: AtomicU32 = AtomicU32::new(u32::MAX);
@@ -44,6 +56,7 @@ static WEBSERVER_UID: AtomicU32 = AtomicU32::new(u32::MAX);
 static WEBSERVER_GID: AtomicU32 = AtomicU32::new(u32::MAX);
 
 /// Drop root privileges.
+#[cfg(target_family = "unix")]
 fn drop_privileges() -> ah::Result<()> {
     log::info!("Dropping root privileges.");
 
@@ -64,6 +77,7 @@ fn drop_privileges() -> ah::Result<()> {
 }
 
 /// Get web server UID and GID.
+#[cfg(target_family = "unix")]
 fn get_webserver_uid_gid(opts: &Opts) -> ah::Result<()> {
     let user_name = &opts.webserver_user;
     let group_name = &opts.webserver_group;
@@ -85,6 +99,42 @@ fn get_webserver_uid_gid(opts: &Opts) -> ah::Result<()> {
     Ok(())
 }
 
+#[cfg(target_family = "unix")]
+macro_rules! register_signal {
+    ($kind:ident) => {
+        signal(SignalKind::$kind())
+    };
+}
+
+#[cfg(not(target_family = "unix"))]
+macro_rules! register_signal {
+    ($kind:ident) => {{
+        let result: ah::Result<u32> = Ok(0_u32);
+        result
+    }};
+}
+
+#[cfg(target_family = "unix")]
+macro_rules! recv_signal {
+    ($sig:ident) => {
+        $sig.recv()
+    };
+}
+
+#[cfg(not(target_family = "unix"))]
+async fn signal_dummy<T>(_: &mut T) {
+    loop {
+        tokio::time::sleep(Duration::MAX).await;
+    }
+}
+
+#[cfg(not(target_family = "unix"))]
+macro_rules! recv_signal {
+    ($sig:ident) => {
+        signal_dummy(&mut $sig)
+    };
+}
+
 /// Command line options.
 #[derive(Parser, Debug, Clone)]
 struct Opts {
@@ -93,18 +143,21 @@ struct Opts {
     config: Option<PathBuf>,
 
     /// Do not drop root privileges after startup.
+    #[cfg(target_family = "unix")]
     #[arg(long)]
     no_drop_root: bool,
 
     /// User name the web server FastCGI runs as.
     ///
     /// This option is only used, if --http-listen is not used.
+    #[cfg(target_family = "unix")]
     #[arg(long, value_name = "USER", default_value = "www-data")]
     webserver_user: String,
 
     /// Group name the web server FastCGI runs as.
     ///
     /// This option is only used, if --http-listen is not used.
+    #[cfg(target_family = "unix")]
     #[arg(long, value_name = "GROUP", default_value = "www-data")]
     webserver_group: String,
 
@@ -213,18 +266,19 @@ impl Opts {
 
 async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     // Create async IPC channels.
-    let (exit_tx, mut exit_rx) = sync::mpsc::channel(1);
+    let (exit_tx, mut exit_rx) = sync::mpsc::channel::<ah::Result<()>>(1);
     let exit_tx = Arc::new(exit_tx);
 
     // Register unix signal handlers.
-    let mut sigterm = signal(SignalKind::terminate()).context("Register SIGTERM")?;
-    let mut sigint = signal(SignalKind::interrupt()).context("Register SIGINT")?;
-    let mut sighup = signal(SignalKind::hangup()).context("Register SIGHUP")?;
+    let mut sigterm = register_signal!(terminate).context("Register SIGTERM")?;
+    let mut sigint = register_signal!(interrupt).context("Register SIGINT")?;
+    let mut sighup = register_signal!(hangup).context("Register SIGHUP")?;
 
     let conf = Arc::new(Config::new_parse_file(&opts.get_config()).context("Parse configuration")?);
 
     // Either start simple standalone HTTP server or Unix socket for FastCGI.
     let mut http_srv = None;
+    #[cfg(target_family = "unix")]
     let mut unix_sock = None;
     if let Some(addr) = opts.get_http_listen()? {
         http_srv = Some(
@@ -234,12 +288,15 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         );
         log::info!("HTTP server listening on {addr}");
     } else {
-        get_webserver_uid_gid(&opts).context("Get web server UID/GID")?;
-        unix_sock = Some(
-            UnixSock::new(Arc::clone(&conf), (&*opts.extra_headers).into())
-                .await
-                .context("Unix socket init")?,
-        );
+        #[cfg(target_family = "unix")]
+        {
+            get_webserver_uid_gid(&opts).context("Get web server UID/GID")?;
+            unix_sock = Some(
+                UnixSock::new(Arc::clone(&conf), (&*opts.extra_headers).into())
+                    .await
+                    .context("Unix socket init")?,
+            );
+        }
     }
 
     // Initialize channel manager.
@@ -250,16 +307,20 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     );
 
     // Drop root privileges because we are done with privileged operations.
-    if opts.no_drop_root {
-        log::warn!("Not dropping root privileges as requested (--no-drop-root).");
-    } else {
-        drop_privileges().context("Drop root privileges")?;
+    #[cfg(target_family = "unix")]
+    {
+        if opts.no_drop_root {
+            log::warn!("Not dropping root privileges as requested (--no-drop-root).");
+        } else {
+            drop_privileges().context("Drop root privileges")?;
+        }
     }
 
     // Initialize the httun protocol manager.
     let protman = ProtocolManager::new();
 
     // Notify systemd that we are ready.
+    #[cfg(target_os = "linux")]
     systemd_notify_ready()?;
 
     // Spawn task: Periodic task.
@@ -276,6 +337,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     });
 
     // Spawn task: Unix socket handler (from/to FastCGI).
+    #[cfg(target_family = "unix")]
     if let Some(unix_sock) = unix_sock {
         task::spawn({
             let opts = Arc::clone(&opts);
@@ -346,21 +408,29 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let exitcode;
     loop {
         tokio::select! {
-            _ = sigterm.recv() => {
+            _ = recv_signal!(sigterm) => {
                 log::info!("SIGTERM: Terminating.");
                 exitcode = Ok(());
                 break;
             }
-            _ = sigint.recv() => {
+            _ = recv_signal!(sigint) => {
                 exitcode = Err(err!("Interrupted by SIGINT."));
                 break;
             }
-            _ = sighup.recv() => {
+            _ = recv_signal!(sighup) => {
                 log::info!("SIGHUP: Ignoring.");
             }
-            code = exit_rx.recv() => {
-                exitcode = code.unwrap_or_else(|| Err(err!("Unknown error code.")));
-                break;
+            code = recv_signal!(exit_rx) => {
+                #[cfg(target_family = "unix")]
+                {
+                    exitcode = code.unwrap_or_else(|| Err(err!("Unknown error code.")));
+                    break;
+                }
+                #[cfg(not(target_family = "unix"))]
+                {
+                    let _ = code;
+                    unreachable!();
+                }
             }
         }
     }
