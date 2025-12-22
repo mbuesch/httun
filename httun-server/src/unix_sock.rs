@@ -197,7 +197,7 @@ impl UnixSock {
         ))
     }
 
-    pub async fn new_listener(
+    async fn new_listener(
         conf: Arc<Config>,
         listener: UnixListener,
         extra_headers: Arc<[HttpHeader]>,
@@ -209,7 +209,8 @@ impl UnixSock {
         })
     }
 
-    pub async fn new_std_listener(
+    #[cfg(target_os = "linux")]
+    async fn new_std_listener(
         conf: Arc<Config>,
         listener: StdUnixListener,
         extra_headers: Arc<[HttpHeader]>,
