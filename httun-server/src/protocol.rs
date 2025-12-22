@@ -277,7 +277,7 @@ impl ProtocolHandler {
             Message::new(MsgType::Data, reply_oper, payload).context("Make httun packet")?;
         msg.set_sequence(session.sequence);
 
-        self.send_reply_msg(&chan, msg, &session_key).await?;
+        self.send_reply_msg(&chan, msg, session_key).await?;
 
         Ok(())
     }

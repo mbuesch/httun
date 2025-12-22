@@ -188,7 +188,7 @@ impl DirectionR {
                 let mut msg = Message::new(MsgType::Data, oper, vec![])?;
                 msg.set_sequence(tx_sequence_c.next());
                 let msg = msg
-                    .serialize_b64u(&session_key)
+                    .serialize_b64u(session_key)
                     .context("httun HTTP-r message serialize")?;
 
                 log::trace!("Requesting from HTTP-r");
@@ -230,7 +230,7 @@ impl DirectionR {
             if !data.is_empty() {
                 log::trace!("Received from HTTP-r");
 
-                let msg = Message::deserialize(data, &session_key)
+                let msg = Message::deserialize(data, session_key)
                     .context("httun HTTP-r message deserialize")?;
                 if msg.type_() != MsgType::Data {
                     return Err(err!("Received invalid message type"));
@@ -277,7 +277,7 @@ impl DirectionW {
             msg.set_sequence(tx_sequence_b.next());
 
             let msg = msg
-                .serialize(&session_key)
+                .serialize(session_key)
                 .context("httun HTTP-w message serialize")?;
 
             log::trace!("Send to HTTP-w");

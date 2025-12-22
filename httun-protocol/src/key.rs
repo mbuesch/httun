@@ -122,6 +122,12 @@ impl KeyExchange {
     }
 }
 
+impl Default for KeyExchange {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl std::fmt::Debug for KeyExchange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "KeyExchange")
