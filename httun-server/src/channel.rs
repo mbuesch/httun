@@ -26,16 +26,10 @@ use std::{
 use httun_tun::TunHandler;
 
 /// Represents a session for a channel.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Session {
     pub key: Option<SessionKey>,
     pub sequence: u64,
-}
-
-impl std::fmt::Debug for Session {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "Session {{ key, sequence: {} }}", self.sequence)
-    }
 }
 
 /// Internal state for a channel's session.
@@ -125,6 +119,7 @@ impl Channel {
     ///
     /// This invalidates any previous session.
     pub fn create_new_session(&self, remote_public_key: &KexPublic) -> (KexPublic, SessionKey) {
+        // Do the key exchange to get the session key.
         let kex = KeyExchange::new();
         let local_public_key = kex.public_key();
         let session_shared_secret = kex.key_exchange(remote_public_key);
