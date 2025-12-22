@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
+use crate::key::SessionKey;
 use aes_gcm::aead::{AeadCore as _, AeadInPlace as _, KeyInit as _, OsRng};
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
@@ -14,18 +15,12 @@ use rand::prelude::*;
 
 /// AES-256-GCM with 160 bit (20 byte) nonce.
 type Aes256GcmN160 = aes_gcm::AesGcm<aes_gcm::aes::Aes256, aes_gcm::aes::cipher::consts::U20>;
-/// Shared key type.
-pub type Key = [u8; 32];
 /// Nonce type.
 type Nonce = [u8; 20];
 /// Nonce length.
 const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
 /// Authentication tag length.
 const AUTHTAG_LEN: usize = 16;
-/// Session secret type.
-pub type SessionSecret = [u8; 16];
-/// Session secret length.
-const SESSION_SECRET_LEN: usize = std::mem::size_of::<SessionSecret>();
 
 /// Maximum httun payload length.
 pub const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
@@ -224,11 +219,7 @@ impl Message {
     }
 
     /// Serialize message into bytes.
-    pub fn serialize(
-        &self,
-        key: &Key,
-        session_secret: Option<SessionSecret>,
-    ) -> ah::Result<Vec<u8>> {
+    pub fn serialize(&self, key: &SessionKey) -> ah::Result<Vec<u8>> {
         let type_: u8 = self.type_.into();
         let nonce = Aes256GcmN160::generate_nonce(&mut OsRng);
         let oper: u8 = self.oper.into();
@@ -247,11 +238,9 @@ impl Message {
         buf.extend(&len.to_be_bytes());
         buf.extend(&self.payload);
 
-        let mut assoc_data = [0_u8; SESSION_SECRET_LEN + 1];
-        assoc_data[0] = type_;
-        assoc_data[1..].copy_from_slice(&session_secret.unwrap_or_default());
+        let assoc_data = [type_];
 
-        let cipher = Aes256GcmN160::new(key.into());
+        let cipher = Aes256GcmN160::new(key.key().as_raw_bytes().into());
         let authtag = cipher
             .encrypt_in_place_detached(&nonce, &assoc_data, &mut buf[AREA_ASSOC_LEN + NONCE_LEN..])
             .map_err(|_| err!("AEAD encryption of httun message failed"))?;
@@ -263,12 +252,8 @@ impl Message {
     }
 
     /// Serialize message into base64url encoded string.
-    pub fn serialize_b64u(
-        &self,
-        key: &Key,
-        session_secret: Option<SessionSecret>,
-    ) -> ah::Result<String> {
-        Ok(Self::encode_b64u(&self.serialize(key, session_secret)?))
+    pub fn serialize_b64u(&self, key: &SessionKey) -> ah::Result<String> {
+        Ok(Self::encode_b64u(&self.serialize(key)?))
     }
 
     /// Encode bytes into base64url string.
@@ -277,11 +262,7 @@ impl Message {
     }
 
     /// Deserialize message from bytes.
-    pub fn deserialize(
-        buf: &[u8],
-        key: &Key,
-        session_secret: Option<SessionSecret>,
-    ) -> ah::Result<Self> {
+    pub fn deserialize(buf: &[u8], key: &SessionKey) -> ah::Result<Self> {
         Self::basic_length_check(buf)?;
 
         let mut buf = buf.to_vec();
@@ -291,11 +272,9 @@ impl Message {
         let nonce: [u8; NONCE_LEN] = buf[OFFS_NONCE..OFFS_NONCE + NONCE_LEN].try_into()?;
         let authtag: [u8; AUTHTAG_LEN] = buf[buf_len - AUTHTAG_LEN..].try_into()?;
 
-        let mut assoc_data = [0_u8; SESSION_SECRET_LEN + 1];
-        assoc_data[0] = type_;
-        assoc_data[1..].copy_from_slice(&session_secret.unwrap_or_default());
+        let assoc_data = [type_];
 
-        let cipher = Aes256GcmN160::new(key.into());
+        let cipher = Aes256GcmN160::new(key.key().as_raw_bytes().into());
         cipher
             .decrypt_in_place_detached(
                 &nonce.into(),
@@ -327,12 +306,8 @@ impl Message {
     }
 
     /// Deserialize message from base64url encoded string.
-    pub fn deserialize_b64u(
-        buf: &[u8],
-        key: &Key,
-        session_secret: Option<SessionSecret>,
-    ) -> ah::Result<Self> {
-        Self::deserialize(&Self::decode_b64u(buf)?, key, session_secret)
+    pub fn deserialize_b64u(buf: &[u8], key: &SessionKey) -> ah::Result<Self> {
+        Self::deserialize(&Self::decode_b64u(buf)?, key)
     }
 
     /// Decode base64url string into bytes.

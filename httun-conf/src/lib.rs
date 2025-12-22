@@ -3,7 +3,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::Key;
+use httun_protocol::UserSharedSecret;
 use httun_util::{header::HttpHeader, strings::hex};
 use std::{
     num::NonZeroUsize,
@@ -363,7 +363,7 @@ pub struct ConfigChannel {
     enable_test: bool,
     urls: Vec<String>,
     name: String,
-    shared_secret: Key,
+    shared_secret: UserSharedSecret,
     tun: Option<String>,
     l7_tunnel: Option<ConfigL7Tunnel>,
     http: ConfigChannelHttp,
@@ -423,7 +423,7 @@ impl TryFrom<&toml::Value> for ConfigChannel {
                     "channel: The value of shared-secret = \"{shared_secret}\" is invalid: {e}"
                 ));
             }
-            Ok(s) => s,
+            Ok(s) => s.into(),
         };
 
         if let Some(v) = table.get("tun") {
@@ -477,7 +477,7 @@ impl ConfigChannel {
         false
     }
 
-    pub fn shared_secret(&self) -> &Key {
+    pub fn shared_secret(&self) -> &UserSharedSecret {
         &self.shared_secret
     }
 
@@ -576,7 +576,8 @@ impl Config {
             if let Some(http_basic_auth) = chan.http().basic_auth()
                 && let Some(password) = http_basic_auth.password()
                 && !password.is_empty()
-                && password.trim().to_lowercase() == hex(&chan.shared_secret).trim().to_lowercase()
+                && password.trim().to_lowercase()
+                    == hex(chan.shared_secret.as_raw_bytes()).trim().to_lowercase()
             {
                 return Err(err!(
                     "The values of shared-secret and http_basic_auth.password \

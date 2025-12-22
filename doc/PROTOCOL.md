@@ -75,11 +75,14 @@ The frame is composed of four areas:
 #### httun Frame Element: Type
 
 This 1-byte field is not encrypted, but is authenticated.
+Only the least significant bit of this byte contains actual information:
 
 | Value | Name | Description                  |
 |-------|------|------------------------------|
 | 0     | Init | An initialization message.   |
 | 1     | Data | A regular data message.      |
+
+All other bits have undefined state.
 
 #### httun Frame Element: Nonce
 
@@ -128,11 +131,10 @@ The associated data for AES-gcm AEAD encryption and decryption consists of the f
 | Byte offs | Name           | Byte size | Description                                |
 |-----------|----------------|-----------|--------------------------------------------|
 | 0         | Type           | 1         | Basic message type. (from httun frame)     |
-| 1         | Session secret | 16        | Per session secret.                        |
 
-During the Init frame from client to server and its corresponding Init reply from server to client, the session secret is not yet available.
-In this case the session secret field in the associated data is filled with zeros.
-All other subsequent frames will use the session secret.
+## Encryption keys
+
+TODO
 
 ## L7 container frame
 

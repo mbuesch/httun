@@ -9,8 +9,8 @@ use crate::{
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::{Config, ConfigChannel};
 use httun_protocol::{
-    Key, Message, MsgType, Operation, SequenceGenerator, SequenceType, SequenceValidator,
-    SessionSecret, secure_random,
+    KexPublic, KeyExchange, Message, MsgType, Operation, SequenceGenerator, SequenceType,
+    SequenceValidator, SessionKey, UserSharedSecret, secure_random,
 };
 use httun_util::{
     header::HttpHeader,
@@ -114,7 +114,6 @@ macro_rules! define_direction {
             mode: HttunClientMode,
             user_agent: Arc<String>,
             extra_headers: Arc<[HttpHeader]>,
-            key: Arc<Key>,
             serial: AtomicU64,
         }
 
@@ -126,7 +125,6 @@ macro_rules! define_direction {
                 mode: HttunClientMode,
                 user_agent: Arc<String>,
                 extra_headers: Arc<[HttpHeader]>,
-                key: Arc<Key>,
             ) -> Self {
                 let url = format_url(base_url, chan_conf.name(), $urlpath);
                 Self {
@@ -136,7 +134,6 @@ macro_rules! define_direction {
                     mode,
                     user_agent,
                     extra_headers,
-                    key,
                     serial: AtomicU64::new(0),
                 }
             }
@@ -153,7 +150,7 @@ impl DirectionR {
         &self,
         ready: &Notify,
         comm: &AsyncTaskComm,
-        session_secret: SessionSecret,
+        session_key: &SessionKey,
     ) -> ah::Result<()> {
         self.serial
             .store(u64::from_ne_bytes(secure_random()), Relaxed);
@@ -191,7 +188,7 @@ impl DirectionR {
                 let mut msg = Message::new(MsgType::Data, oper, vec![])?;
                 msg.set_sequence(tx_sequence_c.next());
                 let msg = msg
-                    .serialize_b64u(&self.key, Some(session_secret))
+                    .serialize_b64u(&session_key)
                     .context("httun HTTP-r message serialize")?;
 
                 log::trace!("Requesting from HTTP-r");
@@ -233,7 +230,7 @@ impl DirectionR {
             if !data.is_empty() {
                 log::trace!("Received from HTTP-r");
 
-                let msg = Message::deserialize(data, &self.key, Some(session_secret))
+                let msg = Message::deserialize(data, &session_key)
                     .context("httun HTTP-r message deserialize")?;
                 if msg.type_() != MsgType::Data {
                     return Err(err!("Received invalid message type"));
@@ -257,7 +254,7 @@ impl DirectionW {
         &self,
         ready: &Notify,
         comm: &AsyncTaskComm,
-        session_secret: SessionSecret,
+        session_key: &SessionKey,
     ) -> ah::Result<()> {
         self.serial
             .store(u64::from_ne_bytes(secure_random()), Relaxed);
@@ -280,7 +277,7 @@ impl DirectionW {
             msg.set_sequence(tx_sequence_b.next());
 
             let msg = msg
-                .serialize(&self.key, Some(session_secret))
+                .serialize(&session_key)
                 .context("httun HTTP-w message serialize")?;
 
             log::trace!("Send to HTTP-w");
@@ -335,8 +332,8 @@ async fn get_session(
     base_url: &str,
     user_agent: &str,
     extra_headers: &[HttpHeader],
-    key: &Key,
-) -> ah::Result<SessionSecret> {
+    user_shared_secret: &UserSharedSecret,
+) -> ah::Result<SessionKey> {
     let client = make_client(user_agent, extra_headers, Duration::from_secs(5), chan_conf)
         .context("httun session build HTTP client")?;
 
@@ -345,9 +342,16 @@ async fn get_session(
     for i in 0..SESSION_INIT_TRIES {
         let last_try = i == SESSION_INIT_TRIES - 1;
 
-        let msg = Message::new(MsgType::Init, Operation::Init, vec![])?;
+        let init_session_key = SessionKey::make_init(user_shared_secret);
+        let kex = KeyExchange::new();
+
+        let msg = Message::new(
+            MsgType::Init,
+            Operation::Init,
+            kex.public_key().as_raw_bytes().to_vec(),
+        )?;
         let msg = msg
-            .serialize_b64u(key, None)
+            .serialize_b64u(&init_session_key)
             .context("httun session message serialize")?;
 
         let url = format_url_serial(
@@ -380,18 +384,24 @@ async fn get_session(
         }
 
         let data: &[u8] = &resp.bytes().await.context("httun session get body")?;
-        let msg = Message::deserialize(data, key, None).context("Message deserialize")?;
+        let msg =
+            Message::deserialize(data, &init_session_key).context("Message deserialize (init)")?;
         if msg.type_() != MsgType::Init {
             return Err(err!("Received invalid message type"));
         }
         if msg.oper() != Operation::Init {
             return Err(err!("Received invalid message operation"));
         }
-        let Ok(session_secret) = msg.into_payload().try_into() else {
-            return Err(err!("Received invalid session secret"));
-        };
+        let remote_public_key: KexPublic = msg
+            .into_payload()
+            .as_slice()
+            .try_into()
+            .context("Receive remote public key")?;
 
-        return Ok(session_secret);
+        let session_shared_secret = kex.key_exchange(&remote_public_key);
+        let session_key = SessionKey::make_session(user_shared_secret, &session_shared_secret);
+
+        return Ok(session_key);
     }
 
     Err(err!("Failed to get session ID from server."))
@@ -416,7 +426,7 @@ pub struct HttunClient {
     w: Arc<DirectionW>,
     user_agent: Arc<String>,
     extra_headers: Arc<[HttpHeader]>,
-    key: Arc<Key>,
+    user_shared_secret: Arc<UserSharedSecret>,
 }
 
 impl HttunClient {
@@ -459,7 +469,7 @@ impl HttunClient {
         }
 
         let user_agent = Arc::new(user_agent.to_string());
-        let key = Arc::new(*chan_conf.shared_secret());
+        let user_shared_secret = Arc::new(chan_conf.shared_secret().clone());
 
         Ok(Self {
             base_url: base_url.to_string(),
@@ -471,7 +481,6 @@ impl HttunClient {
                 mode,
                 Arc::clone(&user_agent),
                 Arc::clone(&extra_headers),
-                Arc::clone(&key),
             )),
             w: Arc::new(DirectionW::new(
                 Arc::clone(&conf),
@@ -480,11 +489,10 @@ impl HttunClient {
                 mode,
                 Arc::clone(&user_agent),
                 Arc::clone(&extra_headers),
-                Arc::clone(&key),
             )),
             user_agent: Arc::clone(&user_agent),
             extra_headers: Arc::clone(&extra_headers),
-            key: Arc::clone(&key),
+            user_shared_secret: Arc::clone(&user_shared_secret),
         })
     }
 
@@ -496,14 +504,16 @@ impl HttunClient {
         // Main loop.
         loop {
             // Initialize a new session.
-            let session_secret = get_session(
-                &self.chan_conf,
-                &self.base_url,
-                &self.user_agent,
-                &self.extra_headers,
-                &self.key,
-            )
-            .await?;
+            let session_key = Arc::new(
+                get_session(
+                    &self.chan_conf,
+                    &self.base_url,
+                    &self.user_agent,
+                    &self.extra_headers,
+                    &self.user_shared_secret,
+                )
+                .await?,
+            );
             log::debug!("Initialized new session.");
 
             comm.clear().await;
@@ -516,8 +526,9 @@ impl HttunClient {
                 let r = Arc::clone(&self.r);
                 let ready = Arc::clone(&r_task_ready);
                 let comm = Arc::clone(&comm);
+                let session_key = Arc::clone(&session_key);
                 async move {
-                    let res = r.run(&ready, &comm, session_secret).await;
+                    let res = r.run(&ready, &comm, &session_key).await;
                     ready.notify_one();
                     res
                 }
@@ -528,8 +539,9 @@ impl HttunClient {
                 let w = Arc::clone(&self.w);
                 let ready = Arc::clone(&w_task_ready);
                 let comm = Arc::clone(&comm);
+                let session_key = Arc::clone(&session_key);
                 async move {
-                    let res = w.run(&ready, &comm, session_secret).await;
+                    let res = w.run(&ready, &comm, &session_key).await;
                     ready.notify_one();
                     res
                 }

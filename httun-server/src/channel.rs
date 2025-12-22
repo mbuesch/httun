@@ -10,7 +10,8 @@ use crate::{
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::Config;
 use httun_protocol::{
-    Key, Message, SequenceGenerator, SequenceType, SequenceValidator, SessionSecret, secure_random,
+    KexPublic, KeyExchange, Message, SequenceGenerator, SequenceType, SequenceValidator,
+    SessionKey, UserSharedSecret,
 };
 use httun_util::timeouts::CHAN_ACTIVITY_TIMEOUT_S;
 use std::{
@@ -25,10 +26,16 @@ use std::{
 use httun_tun::TunHandler;
 
 /// Represents a session for a channel.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Session {
-    pub secret: Option<SessionSecret>,
+    pub key: Option<SessionKey>,
     pub sequence: u64,
+}
+
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "Session {{ key, sequence: {} }}", self.sequence)
+    }
 }
 
 /// Internal state for a channel's session.
@@ -51,7 +58,7 @@ pub struct Channel {
     /// Layer 7 (socket) handler, if any.
     l7: Option<L7State>,
     /// Shared secret key.
-    key: Key,
+    user_shared_secret: UserSharedSecret,
     /// Whether test messages are enabled.
     test_enabled: bool,
     /// Ping state, for connectivity testing.
@@ -69,7 +76,7 @@ impl Channel {
         name: &str,
         #[cfg(all(feature = "tun", target_os = "linux"))] l3: Option<TunHandler>,
         l7: Option<L7State>,
-        key: &Key,
+        user_shared_secret: &UserSharedSecret,
         test_enabled: bool,
     ) -> Self {
         let window_length = conf.parameters().receive().window_length();
@@ -84,7 +91,7 @@ impl Channel {
             #[cfg(all(feature = "tun", target_os = "linux"))]
             l3,
             l7,
-            key: *key,
+            user_shared_secret: user_shared_secret.clone(),
             test_enabled,
             ping: PingState::new(),
             session: StdMutex::new(session),
@@ -98,8 +105,8 @@ impl Channel {
     }
 
     /// Get shared secret key.
-    pub fn key(&self) -> &Key {
-        &self.key
+    pub fn user_shared_secret(&self) -> &UserSharedSecret {
+        &self.user_shared_secret
     }
 
     /// Whether test messages are enabled.
@@ -117,16 +124,19 @@ impl Channel {
     /// Create a new session, resetting sequence counters.
     ///
     /// This invalidates any previous session.
-    pub fn create_new_session(&self) -> SessionSecret {
-        // Securely generate a new session secret.
-        let session_secret: SessionSecret = secure_random();
+    pub fn create_new_session(&self, remote_public_key: &KexPublic) -> (KexPublic, SessionKey) {
+        let kex = KeyExchange::new();
+        let local_public_key = kex.public_key();
+        let session_shared_secret = kex.key_exchange(remote_public_key);
+        let session_key =
+            SessionKey::make_session(&self.user_shared_secret, &session_shared_secret);
 
         // Store the new session state, overwriting any previous session.
         {
             let mut s = self.session.lock().expect("Mutex poisoned");
 
             s.session.sequence = u64::MAX;
-            s.session.secret = Some(session_secret);
+            s.session.key = Some(session_key.clone());
             s.tx_sequence_a.reset();
             s.rx_validator_b.reset();
             s.rx_validator_c.reset();
@@ -135,8 +145,8 @@ impl Channel {
             }
         }
 
-        // Return the new session secret.
-        session_secret
+        // Return the new session key.
+        (local_public_key, session_key)
     }
 
     /// Check received message's sequence number.

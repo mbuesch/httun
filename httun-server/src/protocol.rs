@@ -3,11 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::{
-    channel::{Channel, Channels, Session},
+    channel::{Channel, Channels},
     comm_backend::{CommBackend, CommRxMsg},
 };
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::{Message, MsgType, Operation, SequenceType, SessionSecret};
+use httun_protocol::{KexPublic, Message, MsgType, Operation, SequenceType, SessionKey};
 use httun_util::errors::DisconnectedError;
 use std::sync::{
     Arc, RwLock as StdRwLock,
@@ -29,7 +29,7 @@ pub struct ProtocolHandler {
     /// Shared channel manager.
     channels: Arc<Channels>,
     /// Pinned session secret, if yet assigned.
-    pinned_session: StdRwLock<Option<SessionSecret>>,
+    pinned_session: StdRwLock<Option<SessionKey>>,
     /// Is the protocol handler dead?
     dead: AtomicBool,
 }
@@ -69,13 +69,13 @@ impl ProtocolHandler {
     }
 
     /// Get the pinned session secret, if any.
-    pub fn pinned_session(&self) -> Option<SessionSecret> {
-        *self.pinned_session.read().expect("RwLock poisoned")
+    pub fn pinned_session(&self) -> Option<SessionKey> {
+        self.pinned_session.read().expect("RwLock poisoned").clone()
     }
 
     /// Pin the given session secret.
-    fn pin_session(&self, session_secret: &SessionSecret) {
-        *self.pinned_session.write().expect("RwLock poisoned") = Some(*session_secret);
+    fn pin_session(&self, session_key: &SessionKey) {
+        *self.pinned_session.write().expect("RwLock poisoned") = Some(session_key.clone());
     }
 
     /// Create a new session for the given channel.
@@ -83,13 +83,17 @@ impl ProtocolHandler {
     /// Pins the new session secret and kills old sessions.
     ///
     /// `chan`: Channel to create the new session for.
-    async fn create_new_session(&self, chan: &Channel) -> SessionSecret {
-        let session_secret = chan.create_new_session();
-        self.pin_session(&session_secret);
+    async fn create_new_session(
+        &self,
+        chan: &Channel,
+        remote_public_key: &KexPublic,
+    ) -> (KexPublic, SessionKey) {
+        let (local_public_key, session_key) = chan.create_new_session(remote_public_key);
+        self.pin_session(&session_key);
         self.protman
-            .kill_old_sessions(chan.name(), &session_secret)
+            .kill_old_sessions(chan.name(), &session_key)
             .await;
-        session_secret
+        (local_public_key, session_key)
     }
 
     /// Check the received message's sequence number.
@@ -121,11 +125,12 @@ impl ProtocolHandler {
         &self,
         chan: &Channel,
         msg: Message,
-        session: Session,
+        session_key: &SessionKey,
     ) -> ah::Result<()> {
         let payload = msg
-            .serialize(chan.key(), session.secret)
+            .serialize(session_key)
             .context("Serialize httun message")?;
+
         self.comm.send_reply(payload).await?;
 
         chan.log_activity();
@@ -137,10 +142,13 @@ impl ProtocolHandler {
     async fn handle_tosrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
         let session = chan.get_session_and_update_tx_sequence();
+        let Some(session_key) = &session.key else {
+            return Err(err!("No session key in UnOperation::ToSrv context"));
+        };
 
         log::debug!("{}: W direction packet received", chan.name());
 
-        let msg = Message::deserialize(&payload, chan.key(), session.secret)?;
+        let msg = Message::deserialize(&payload, session_key)?;
         let oper = msg.oper();
 
         self.check_rx_sequence(&chan, &msg, SequenceType::B)
@@ -190,13 +198,12 @@ impl ProtocolHandler {
     /// Handle session initialization from server to client.
     async fn handle_fromsrv_init(&self, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
-        let mut session = chan.get_session_and_update_tx_sequence();
+        let _session = chan.get_session_and_update_tx_sequence();
+        let session_key = SessionKey::make_init(chan.user_shared_secret());
 
         log::debug!("{}: Session init packet received", chan.name());
 
-        // Deserialize the received message, even though we don't use it.
-        // This checks the authenticity of the message.
-        let msg = Message::deserialize(&payload, chan.key(), None)?;
+        let msg = Message::deserialize(&payload, &session_key)?;
         let oper = msg.oper();
 
         if oper != Operation::Init {
@@ -205,14 +212,22 @@ impl ProtocolHandler {
 
         log::trace!("{}: Session init", chan.name());
 
-        let new_session_secret = self.create_new_session(&chan).await;
+        let remote_public_key: KexPublic = msg
+            .into_payload()
+            .as_slice()
+            .try_into()
+            .context("Receive remote public key")?;
 
-        session.secret = None; // Don't use it for *this* message.
+        let (local_public_key, _) = self.create_new_session(&chan, &remote_public_key).await;
 
-        let msg = Message::new(MsgType::Init, Operation::Init, new_session_secret.to_vec())
-            .context("Make httun packet")?;
+        let msg = Message::new(
+            MsgType::Init,
+            Operation::Init,
+            local_public_key.as_raw_bytes().to_vec(),
+        )
+        .context("Make httun packet")?;
 
-        self.send_reply_msg(&chan, msg, session).await?;
+        self.send_reply_msg(&chan, msg, &session_key).await?;
 
         Ok(())
     }
@@ -221,10 +236,13 @@ impl ProtocolHandler {
     async fn handle_fromsrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
         let session = chan.get_session_and_update_tx_sequence();
+        let Some(session_key) = &session.key else {
+            return Err(err!("No session key in UnOperation::ReqFromSrv context"));
+        };
 
         log::debug!("{}: R direction packet received", chan.name());
 
-        let msg = Message::deserialize(&payload, chan.key(), session.secret)?;
+        let msg = Message::deserialize(&payload, session_key)?;
         let oper = msg.oper();
 
         self.check_rx_sequence(&chan, &msg, SequenceType::C)
@@ -259,7 +277,7 @@ impl ProtocolHandler {
             Message::new(MsgType::Data, reply_oper, payload).context("Make httun packet")?;
         msg.set_sequence(session.sequence);
 
-        self.send_reply_msg(&chan, msg, session).await?;
+        self.send_reply_msg(&chan, msg, &session_key).await?;
 
         Ok(())
     }
@@ -415,16 +433,12 @@ impl ProtocolManager {
     ///
     /// `chan_name`: Channel name to kill old sessions for.
     /// `new_session_secret`: Session secret of the new session to keep.
-    async fn kill_old_sessions(
-        self: &Arc<Self>,
-        chan_name: &str,
-        new_session_secret: &SessionSecret,
-    ) {
+    async fn kill_old_sessions(self: &Arc<Self>, chan_name: &str, new_session_key: &SessionKey) {
         self.insts.lock().await.retain(|inst| {
             if let Ok(name) = inst.prot.chan_name() {
                 if name == chan_name {
                     if let Some(pinned_session) = inst.prot.pinned_session() {
-                        pinned_session == *new_session_secret
+                        pinned_session == *new_session_key
                     } else {
                         false
                     }
