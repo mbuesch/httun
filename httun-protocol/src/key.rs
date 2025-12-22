@@ -138,6 +138,11 @@ impl std::fmt::Debug for KeyExchange {
 pub struct KexPublic(x25519_dalek::PublicKey);
 
 impl KexPublic {
+    /// Get the size of the raw key, in bytes.
+    pub const fn byte_len() -> usize {
+        KEY_SIZE
+    }
+
     /// Get the raw key.
     pub fn as_raw_bytes(&self) -> &[u8; KEY_SIZE] {
         self.0.as_bytes()

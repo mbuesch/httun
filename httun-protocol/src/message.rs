@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use crate::key::SessionKey;
+use crate::key::{KexPublic, SessionKey};
 use aes_gcm::aead::{AeadCore as _, AeadInPlace as _, KeyInit as _, OsRng};
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
@@ -337,6 +337,37 @@ impl Message {
             return Err(err!("Message size is too big."));
         }
         Ok(())
+    }
+}
+
+/// Payload for the `Operation::Init` message.
+pub struct InitPayload {
+    /// Public session key for DH key exchange.
+    session_public_key: KexPublic,
+}
+
+impl InitPayload {
+    /// Create a new `InitPayload` from a session public key.
+    pub fn new(session_public_key: KexPublic) -> Self {
+        Self { session_public_key }
+    }
+
+    /// Get the session public key from this payload.
+    pub fn session_public_key(&self) -> &KexPublic {
+        &self.session_public_key
+    }
+
+    /// Serialize the payload to raw bytes.
+    pub fn serialize(&self) -> Vec<u8> {
+        self.session_public_key.as_raw_bytes().to_vec()
+    }
+
+    /// Deserialize the payload from raw bytes.
+    pub fn deserialize(buf: &[u8]) -> ah::Result<Self> {
+        if buf.len() != KexPublic::byte_len() {
+            return Err(err!("Invalid InitPayload length"));
+        }
+        Ok(Self::new(buf.try_into()?))
     }
 }
 

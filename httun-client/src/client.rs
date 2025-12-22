@@ -9,7 +9,7 @@ use crate::{
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::{Config, ConfigChannel};
 use httun_protocol::{
-    KexPublic, KeyExchange, Message, MsgType, Operation, SequenceGenerator, SequenceType,
+    InitPayload, KeyExchange, Message, MsgType, Operation, SequenceGenerator, SequenceType,
     SequenceValidator, SessionKey, UserSharedSecret, secure_random,
 };
 use httun_util::{
@@ -345,11 +345,8 @@ async fn get_session(
         let init_session_key = SessionKey::make_init(user_shared_secret);
         let kex = KeyExchange::new();
 
-        let msg = Message::new(
-            MsgType::Init,
-            Operation::Init,
-            kex.public_key().as_raw_bytes().to_vec(),
-        )?;
+        let msg_payload = InitPayload::new(kex.public_key());
+        let msg = Message::new(MsgType::Init, Operation::Init, msg_payload.serialize())?;
         let msg = msg
             .serialize_b64u(&init_session_key)
             .context("httun session message serialize")?;
@@ -384,21 +381,18 @@ async fn get_session(
         }
 
         let data: &[u8] = &resp.bytes().await.context("httun session get body")?;
-        let msg =
+        let reply =
             Message::deserialize(data, &init_session_key).context("Message deserialize (init)")?;
-        if msg.type_() != MsgType::Init {
+        if reply.type_() != MsgType::Init {
             return Err(err!("Received invalid message type"));
         }
-        if msg.oper() != Operation::Init {
+        if reply.oper() != Operation::Init {
             return Err(err!("Received invalid message operation"));
         }
-        let remote_public_key: KexPublic = msg
-            .into_payload()
-            .as_slice()
-            .try_into()
-            .context("Receive remote public key")?;
+        let reply_payload =
+            InitPayload::deserialize(reply.payload()).context("Deserialize Init payload")?;
 
-        let session_shared_secret = kex.key_exchange(&remote_public_key);
+        let session_shared_secret = kex.key_exchange(reply_payload.session_public_key());
         let session_key = SessionKey::make_session(user_shared_secret, &session_shared_secret);
 
         return Ok(session_key);
