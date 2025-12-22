@@ -441,7 +441,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 }
                 #[cfg(not(target_family = "unix"))]
                 {
-                    let _ = code;
+                    let _: () = code;
                     unreachable!();
                 }
             }
