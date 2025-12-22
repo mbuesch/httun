@@ -21,10 +21,10 @@ const INET46: [Option<libc::c_int>; 2] = [Some(libc::AF_INET), Some(libc::AF_INE
 
 /// Check if the passed raw `fd` is a socket.
 fn is_socket(fd: RawFd) -> bool {
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    use libc::{stat64, fstat64};
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    use libc::{stat as stat64, fstat as fstat64};
+    use libc::{fstat as fstat64, stat as stat64};
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    use libc::{fstat64, stat64};
 
     // SAFETY: Initializing `libc::stat64` structure with zero is an allowed pattern.
     let mut stat: stat64 = unsafe { std::mem::zeroed() };
