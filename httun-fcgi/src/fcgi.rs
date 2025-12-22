@@ -2,7 +2,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::MAX_NUM_CONNECTIONS;
+use crate::async_main::MAX_NUM_CONNECTIONS;
 use anyhow::{self as ah, Context as _, format_err as err};
 use std::{
     os::fd::{FromRawFd as _, RawFd},

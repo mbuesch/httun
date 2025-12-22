@@ -2,114 +2,40 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+use anyhow as ah;
+
+#[cfg(target_family = "unix")]
+mod async_main;
+
+#[cfg(target_family = "unix")]
 mod fcgi;
+
+#[cfg(target_family = "unix")]
 mod fcgi_handler;
+
+#[cfg(target_family = "unix")]
 mod server_conn;
 
-use crate::{
-    fcgi::Fcgi,
-    fcgi_handler::{check_connection_timeouts, fcgi_handler, init_fcgi_handler},
-};
-use anyhow::{self as ah, Context as _, format_err as err};
-use std::{os::fd::AsRawFd as _, sync::Arc, time::Duration};
-use tokio::{
-    runtime,
-    signal::unix::{SignalKind, signal},
-    sync::{self, Semaphore},
-    task,
-};
-
-/// Maximum number of connections from the FastCGI server.
-const MAX_NUM_CONNECTIONS: u8 = 64;
-
-async fn async_main() -> ah::Result<()> {
-    println!("Spawning new httun-fcgi: {}", std::process::id());
-
-    // Create async IPC channels.
-    let (exit_tx, mut exit_rx) = sync::mpsc::channel(1);
-    let exit_tx = Arc::new(exit_tx);
-
-    // Register unix signal handlers.
-    let mut sigterm = signal(SignalKind::terminate())?;
-    let mut sigint = signal(SignalKind::interrupt())?;
-    let mut sighup = signal(SignalKind::hangup())?;
-
-    // Initialize FastCGI handler.
-    init_fcgi_handler()?;
-
-    // Create FastCGI listener.
-    let fcgi = Fcgi::new(std::io::stdin().as_raw_fd()).context("Create FCGI")?;
-
-    // Spawn task: Periodic task.
-    task::spawn({
-        async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(3));
-            loop {
-                interval.tick().await;
-                check_connection_timeouts().await;
-            }
-        }
-    });
-
-    // Spawn task: FastCGI handler.
-    task::spawn(async move {
-        let conn_semaphore = Arc::new(Semaphore::new(MAX_NUM_CONNECTIONS.into()));
-        loop {
-            let conn_semaphore = Arc::clone(&conn_semaphore);
-            match fcgi.accept().await {
-                Ok(mut conn) => {
-                    if let Ok(permit) = conn_semaphore.acquire_owned().await {
-                        task::spawn(async move {
-                            if let Err(e) = conn.handle(fcgi_handler).await {
-                                eprintln!("FCGI conn error: {e:?}");
-                            }
-                            drop(permit);
-                        });
-                    }
-                }
-                Err(e) => {
-                    let _ = exit_tx.send(Err(e)).await;
-                    break;
-                }
-            }
-        }
-    });
-
-    // Task: Main loop.
-    let exitcode;
-    loop {
-        tokio::select! {
-            _ = sigterm.recv() => {
-                eprintln!("SIGTERM: Terminating.");
-                exitcode = Ok(());
-                break;
-            }
-            _ = sigint.recv() => {
-                exitcode = Err(err!("Interrupted by SIGINT."));
-                break;
-            }
-            _ = sighup.recv() => {
-                println!("SIGHUP: Ignoring.");
-            }
-            code = exit_rx.recv() => {
-                exitcode = code.unwrap_or_else(|| Err(err!("Unknown error code.")));
-                break;
-            }
-        }
-    }
-    exitcode
-}
-
 fn main() -> ah::Result<()> {
-    const WORKER_THREADS: usize = 6;
-    runtime::Builder::new_multi_thread()
-        .thread_keep_alive(Duration::from_millis(5000))
-        .max_blocking_threads(WORKER_THREADS * 4)
-        .worker_threads(WORKER_THREADS)
-        .enable_all()
-        .build()
-        .context("Tokio runtime builder")?
-        .block_on(async_main())
+    #[cfg(target_family = "unix")]
+    {
+        use anyhow::Context as _;
+
+        const WORKER_THREADS: usize = 6;
+
+        tokio::runtime::Builder::new_multi_thread()
+            .thread_keep_alive(std::time::Duration::from_millis(5000))
+            .max_blocking_threads(WORKER_THREADS * 4)
+            .worker_threads(WORKER_THREADS)
+            .enable_all()
+            .build()
+            .context("Tokio runtime builder")?
+            .block_on(crate::async_main::async_main())
+    }
+    #[cfg(not(target_family = "unix"))]
+    {
+        Err(ah::format_err!("FastCGI is not supported on this OS."))
+    }
 }
 
 // vim: ts=4 sw=4 expandtab
