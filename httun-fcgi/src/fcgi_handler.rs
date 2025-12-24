@@ -58,7 +58,7 @@ impl Connection {
 }
 
 /// Key for the global connections map.
-type ConnectionsKey = (String, bool);
+type ConnectionsKey = (u16, bool);
 /// Global connections map.
 /// This map stores active connections to the `httun-server`.
 static CONNECTIONS: OnceLock<Mutex<HashMap<ConnectionsKey, Connection>>> = OnceLock::new();
@@ -72,15 +72,15 @@ async fn get_connections<'a>() -> MutexGuard<'a, HashMap<ConnectionsKey, Connect
         .await
 }
 
-/// Get a connection for the given channel name and direction.
-async fn get_connection(name: &str, send: bool) -> ah::Result<Arc<ServerUnixConn>> {
-    let key = (name.to_string(), send);
+/// Get a connection for the given channel ID and direction.
+async fn get_connection(chan_id: u16, send: bool) -> ah::Result<Arc<ServerUnixConn>> {
+    let key = (chan_id, send);
     let mut connections = get_connections().await;
     if let Some(conn) = connections.get_mut(&key) {
         conn.log_activity();
         Ok(Arc::clone(&conn.conn))
     } else {
-        let conn = Arc::new(ServerUnixConn::new(Path::new(UNIX_SOCK), name).await?);
+        let conn = Arc::new(ServerUnixConn::new(Path::new(UNIX_SOCK), chan_id).await?);
         connections.insert(key, Connection::new(Arc::clone(&conn)));
         Ok(conn)
     }
@@ -89,10 +89,10 @@ async fn get_connection(name: &str, send: bool) -> ah::Result<Arc<ServerUnixConn
 /// Remove a connection.
 ///
 /// This removes both the send and receive connections.
-async fn remove_connection(name: &str) {
+async fn remove_connection(chan_id: u16) {
     let mut connections = get_connections().await;
-    connections.remove(&(name.to_string(), false));
-    connections.remove(&(name.to_string(), true));
+    connections.remove(&(chan_id, false));
+    connections.remove(&(chan_id, true));
 }
 
 /// Check for and remove timed out connections.
@@ -111,15 +111,15 @@ struct FromHttunRet {
 }
 
 /// Send a payload to httun-server and receive a payload from httun-server.
-async fn recv_from_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<FromHttunRet> {
-    let conn = get_connection(name, false).await?;
+async fn recv_from_httun_server(chan_id: u16, req_payload: Vec<u8>) -> ah::Result<FromHttunRet> {
+    let conn = get_connection(chan_id, false).await?;
     match conn.recv(req_payload).await {
         Ok(payload) => Ok(FromHttunRet {
             payload,
             extra_headers: conn.extra_headers().to_vec(),
         }),
         Err(e) => {
-            remove_connection(name).await;
+            remove_connection(chan_id).await;
             Err(e)
         }
     }
@@ -132,10 +132,10 @@ struct ToHttunRet {
 }
 
 /// Send a payload to httun-server.
-async fn send_to_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<ToHttunRet> {
-    let conn = get_connection(name, true).await?;
+async fn send_to_httun_server(chan_id: u16, req_payload: Vec<u8>) -> ah::Result<ToHttunRet> {
+    let conn = get_connection(chan_id, true).await?;
     if let Err(e) = conn.send(req_payload).await {
-        remove_connection(name).await;
+        remove_connection(chan_id).await;
         Err(e)
     } else {
         Ok(ToHttunRet {
@@ -145,8 +145,8 @@ async fn send_to_httun_server(name: &str, req_payload: Vec<u8>) -> ah::Result<To
 }
 
 /// Send keepalive to httun-server.
-async fn send_keepalive_to_httun_server(name: &str) -> ah::Result<()> {
-    get_connection(name, true).await?.send_keepalive().await
+async fn send_keepalive_to_httun_server(chan_id: u16) -> ah::Result<()> {
+    get_connection(chan_id, true).await?.send_keepalive().await
 }
 
 /// Send FastCGI response.
@@ -238,7 +238,7 @@ pub async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
         return fcgi_response_error(&req, "400 Bad Request", &[], "FCGI: No path_info.").await;
     };
 
-    let (chan_name, direction) = match parse_path(path_info) {
+    let (chan_id, direction) = match parse_path(path_info) {
         Err(e) => {
             return fcgi_response_error(
                 &req,
@@ -301,15 +301,12 @@ pub async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
 
     match direction {
         Direction::R => {
-            let result = timeout(
-                CHAN_R_TIMEOUT,
-                recv_from_httun_server(&chan_name, req_payload),
-            )
-            .await;
+            let result =
+                timeout(CHAN_R_TIMEOUT, recv_from_httun_server(chan_id, req_payload)).await;
 
             match result {
                 Err(_) => {
-                    if let Err(e) = send_keepalive_to_httun_server(&chan_name).await {
+                    if let Err(e) = send_keepalive_to_httun_server(chan_id).await {
                         eprintln!("FCGI: HTTP-r: keepalive to server failed: {e:?}");
                     }
                     fcgi_response(&req, "408 Request Timeout", &[], None).await
@@ -336,7 +333,7 @@ pub async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
             }
         }
         Direction::W => {
-            let result = send_to_httun_server(&chan_name, req_payload).await;
+            let result = send_to_httun_server(chan_id, req_payload).await;
 
             match result {
                 Ok(ret) => fcgi_response(&req, "200 Ok", &ret.extra_headers, None).await,

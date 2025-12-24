@@ -39,9 +39,9 @@ struct Opts {
     /// Where '/httun' is the base path to the FCGI.
     server_url: Option<String>,
 
-    /// The httun channel to use for communication.
-    #[arg(long, short = 'c', default_value = "a", value_name = "NAME")]
-    channel: String,
+    /// The httun server's channel ID to use for communication.
+    #[arg(long, short = 'c', default_value = "0", value_name = "ID")]
+    channel: u16,
 
     /// The User-Agent header to use for the HTTP connection.
     ///
@@ -235,7 +235,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let mut client = HttunClient::connect(
         server_url,
         res_mode,
-        &opts.channel,
+        opts.channel,
         client_mode,
         &opts.user_agent,
         (&*opts.extra_headers).into(),

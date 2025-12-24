@@ -362,7 +362,7 @@ pub struct ConfigChannel {
     disabled: bool,
     enable_test: bool,
     urls: Vec<String>,
-    name: String,
+    id: u16,
     shared_secret: UserSharedSecret,
     tun: Option<String>,
     l7_tunnel: Option<ConfigL7Tunnel>,
@@ -375,7 +375,7 @@ impl Default for ConfigChannel {
             disabled: Default::default(),
             enable_test: Default::default(),
             urls: Default::default(),
-            name: Default::default(),
+            id: Default::default(),
             shared_secret: UserSharedSecret::random(),
             tun: Default::default(),
             l7_tunnel: Default::default(),
@@ -420,12 +420,16 @@ impl TryFrom<&toml::Value> for ConfigChannel {
             }
         }
 
-        this.name = table
-            .get("name")
-            .ok_or_else(|| err!("channel: Missing 'name'"))?
-            .as_str()
-            .ok_or_else(|| err!("channel: 'name' must be a string"))?
-            .to_string();
+        this.id = table
+            .get("id")
+            .ok_or_else(|| err!("channel: Missing 'id'"))?
+            .as_integer()
+            .ok_or_else(|| err!("channel: 'id' must be an integer"))?
+            .try_into()
+            .map_err(|_| err!("channel: 'id' must be between 0 and {}", Self::ID_MAX))?;
+        if this.id > Self::ID_MAX {
+            return Err(err!("channel: 'id' must be between 0 and {}", Self::ID_MAX));
+        }
 
         let shared_secret = table
             .get("shared-secret")
@@ -462,6 +466,9 @@ impl TryFrom<&toml::Value> for ConfigChannel {
 }
 
 impl ConfigChannel {
+    pub const ID_MAX: u16 = i16::MAX as u16;
+    pub const ID_INVALID: u16 = Self::ID_MAX + 1;
+
     fn disabled(&self) -> bool {
         self.disabled
     }
@@ -470,8 +477,8 @@ impl ConfigChannel {
         self.enable_test
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn id(&self) -> u16 {
+        self.id
     }
 
     pub fn urls(&self) -> &[String] {
@@ -612,13 +619,13 @@ impl Config {
         }
     }
 
-    pub fn channel(&self, channel: &str) -> Option<&ConfigChannel> {
-        self.channels_iter().find(|chan| chan.name() == channel)
+    pub fn channel(&self, id: u16) -> Option<&ConfigChannel> {
+        self.channels_iter().find(|chan| chan.id() == id)
     }
 
-    pub fn channel_with_url(&self, url: &str, channel: &str) -> Option<&ConfigChannel> {
+    pub fn channel_with_url(&self, id: u16, url: &str) -> Option<&ConfigChannel> {
         self.channels_iter()
-            .find(|chan| chan.name() == channel && chan.has_url(url))
+            .find(|chan| chan.id() == id && chan.has_url(url))
     }
 
     pub fn parameters(&self) -> &ConfigParameters {

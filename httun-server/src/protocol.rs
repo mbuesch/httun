@@ -50,13 +50,13 @@ impl ProtocolHandler {
         }
     }
 
-    /// Get the channel name for this protocol handler.
+    /// Get the channel id for this protocol handler.
     ///
-    /// Returns an error if the channel name is not yet known.
-    pub fn chan_name(&self) -> ah::Result<String> {
+    /// Returns an error if the channel ID is not yet known.
+    pub fn chan_id(&self) -> ah::Result<u16> {
         self.comm
-            .chan_name()
-            .ok_or_else(|| err!("Channel name is not known, yet."))
+            .chan_id()
+            .ok_or_else(|| err!("Channel ID is not known, yet."))
     }
 
     /// Get the channel.
@@ -64,7 +64,7 @@ impl ProtocolHandler {
     /// Returns an error if the channel is not configured.
     fn chan(&self) -> ah::Result<Arc<Channel>> {
         self.channels
-            .get(&self.chan_name()?)
+            .get(self.chan_id()?)
             .ok_or_else(|| err!("Channel is not configured."))
     }
 
@@ -91,7 +91,7 @@ impl ProtocolHandler {
         let (local_public_key, session_key) = chan.create_new_session(remote_public_key);
         self.pin_session(&session_key);
         self.protman
-            .kill_old_sessions(chan.name(), &session_key)
+            .kill_old_sessions(chan.id(), &session_key)
             .await;
         (local_public_key, session_key)
     }
@@ -146,7 +146,7 @@ impl ProtocolHandler {
             return Err(err!("No session key in UnOperation::ToSrv context"));
         };
 
-        log::debug!("{}: W direction packet received", chan.name());
+        log::debug!("{}: W direction packet received", chan.id());
 
         let msg = Message::deserialize(&payload, session_key)?;
         let oper = msg.oper();
@@ -157,22 +157,22 @@ impl ProtocolHandler {
 
         match oper {
             Operation::L3ToSrv => {
-                log::trace!("{}: Received Operation::L3ToSrv", chan.name());
+                log::trace!("{}: Received Operation::L3ToSrv", chan.id());
                 chan.l3send(msg.payload())
                     .await
                     .context("Channel L3 send")?;
             }
             Operation::L7ToSrv => {
-                log::trace!("{}: Received Operation::L7ToSrv", chan.name());
+                log::trace!("{}: Received Operation::L7ToSrv", chan.id());
                 chan.l7send(msg.payload())
                     .await
                     .context("Channel L7 send")?;
             }
             Operation::TestToSrv if chan.test_enabled() => {
-                log::trace!("{}: Received Operation::TestToSrv", chan.name());
+                log::trace!("{}: Received Operation::TestToSrv", chan.id());
                 log::debug!(
                     "{}: Received test mode ping: '{}'",
-                    chan.name(),
+                    chan.id(),
                     String::from_utf8_lossy(msg.payload())
                 );
                 chan.put_ping(msg.into_payload()).await;
@@ -201,7 +201,7 @@ impl ProtocolHandler {
         let _session = chan.get_session_and_update_tx_sequence();
         let session_key = SessionKey::make_init(chan.user_shared_secret());
 
-        log::debug!("{}: Session init packet received", chan.name());
+        log::debug!("{}: Session init packet received", chan.id());
 
         let msg = Message::deserialize(&payload, &session_key)?;
         let oper = msg.oper();
@@ -210,7 +210,7 @@ impl ProtocolHandler {
             return Err(err!("Received {oper:?} in init context"));
         }
 
-        log::trace!("{}: Session init", chan.name());
+        log::trace!("{}: Session init", chan.id());
 
         let remote_public_key: KexPublic = msg
             .into_payload()
@@ -240,7 +240,7 @@ impl ProtocolHandler {
             return Err(err!("No session key in UnOperation::ReqFromSrv context"));
         };
 
-        log::debug!("{}: R direction packet received", chan.name());
+        log::debug!("{}: R direction packet received", chan.id());
 
         let msg = Message::deserialize(&payload, session_key)?;
         let oper = msg.oper();
@@ -251,21 +251,21 @@ impl ProtocolHandler {
 
         let (reply_oper, payload) = match oper {
             Operation::L3FromSrv => {
-                log::trace!("{}: Received Operation::L3FromSrv", chan.name());
+                log::trace!("{}: Received Operation::L3FromSrv", chan.id());
                 (
                     Operation::L3FromSrv,
                     chan.l3recv().await.context("Channel L3 receive")?,
                 )
             }
             Operation::L7FromSrv => {
-                log::trace!("{}: Received Operation::L7FromSrv", chan.name());
+                log::trace!("{}: Received Operation::L7FromSrv", chan.id());
                 (
                     Operation::L7FromSrv,
                     chan.l7recv().await.context("Channel L7 receive")?,
                 )
             }
             Operation::TestFromSrv if chan.test_enabled() => {
-                log::trace!("{}: Received Operation::TestFromSrv", chan.name());
+                log::trace!("{}: Received Operation::TestFromSrv", chan.id());
                 (Operation::TestFromSrv, chan.get_pong().await)
             }
             _ => {
@@ -307,7 +307,7 @@ impl ProtocolHandler {
             CommRxMsg::Keepalive => {
                 let chan = self.chan()?;
                 chan.log_activity();
-                log::trace!("{}: Unix socket: Received Keepalive", chan.name());
+                log::trace!("{}: Unix socket: Received Keepalive", chan.id());
                 Ok(())
             }
         }
@@ -428,15 +428,15 @@ impl ProtocolManager {
         insts.push(ProtocolInstance::new(handle, prot));
     }
 
-    /// Kill old sessions for the given channel name.
+    /// Kill old sessions for the given channel ID.
     /// Keeps only the session with the given new session secret.
     ///
-    /// `chan_name`: Channel name to kill old sessions for.
+    /// `chan_id`: Channel ID to kill old sessions for.
     /// `new_session_secret`: Session secret of the new session to keep.
-    async fn kill_old_sessions(self: &Arc<Self>, chan_name: &str, new_session_key: &SessionKey) {
+    async fn kill_old_sessions(self: &Arc<Self>, chan_id: u16, new_session_key: &SessionKey) {
         self.insts.lock().await.retain(|inst| {
-            if let Ok(name) = inst.prot.chan_name() {
-                if name == chan_name {
+            if let Ok(id) = inst.prot.chan_id() {
+                if id == chan_id {
                     if let Some(pinned_session) = inst.prot.pinned_session() {
                         pinned_session == *new_session_key
                     } else {

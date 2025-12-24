@@ -91,8 +91,8 @@ pub enum UnOperation {
 pub struct UnMessage {
     /// Operation code.
     op: UnOperation,
-    /// Channel name.
-    chan_name: String,
+    /// Channel ID.
+    chan_id: u16,
     /// Extra HTTP headers (only for FromSrvInit).
     extra_headers: Vec<HttpHeader>,
     /// Payload data.
@@ -103,8 +103,8 @@ impl std::fmt::Debug for UnMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
-            "UnMessage {{ op: {:?}, chan_name: {}, extra_headers: {:?} }}",
-            self.op, self.chan_name, self.extra_headers,
+            "UnMessage {{ op: {:?}, chan_id: {}, extra_headers: {:?} }}",
+            self.op, self.chan_id, self.extra_headers,
         )
     }
 }
@@ -113,51 +113,51 @@ impl UnMessage {
     /// Create a new Unix domain socket protocol message.
     fn new(
         op: UnOperation,
-        chan_name: String,
+        chan_id: u16,
         extra_headers: Vec<HttpHeader>,
         payload: Vec<u8>,
     ) -> Self {
         Self {
             op,
-            chan_name,
+            chan_id,
             extra_headers,
             payload,
         }
     }
 
     /// Creates a new `ToSrvInit` message.
-    pub fn new_to_srv_init(chan_name: String) -> Self {
-        Self::new(UnOperation::ToSrvInit, chan_name, vec![], vec![])
+    pub fn new_to_srv_init(chan_id: u16) -> Self {
+        Self::new(UnOperation::ToSrvInit, chan_id, vec![], vec![])
     }
 
     /// Creates a new `FromSrvInit` message.
-    pub fn new_from_srv_init(chan_name: String, extra_headers: Vec<HttpHeader>) -> Self {
-        Self::new(UnOperation::FromSrvInit, chan_name, extra_headers, vec![])
+    pub fn new_from_srv_init(chan_id: u16, extra_headers: Vec<HttpHeader>) -> Self {
+        Self::new(UnOperation::FromSrvInit, chan_id, extra_headers, vec![])
     }
 
     /// Creates a new `Keepalive` message.
-    pub fn new_keepalive(chan_name: String) -> Self {
-        Self::new(UnOperation::Keepalive, chan_name, vec![], vec![])
+    pub fn new_keepalive(chan_id: u16) -> Self {
+        Self::new(UnOperation::Keepalive, chan_id, vec![], vec![])
     }
 
     /// Creates a new `ToSrv` message.
-    pub fn new_to_srv(chan_name: String, payload: Vec<u8>) -> Self {
-        Self::new(UnOperation::ToSrv, chan_name, vec![], payload)
+    pub fn new_to_srv(chan_id: u16, payload: Vec<u8>) -> Self {
+        Self::new(UnOperation::ToSrv, chan_id, vec![], payload)
     }
 
     /// Creates a new `ReqFromSrv` message.
-    pub fn new_req_from_srv(chan_name: String, payload: Vec<u8>) -> Self {
-        Self::new(UnOperation::ReqFromSrv, chan_name, vec![], payload)
+    pub fn new_req_from_srv(chan_id: u16, payload: Vec<u8>) -> Self {
+        Self::new(UnOperation::ReqFromSrv, chan_id, vec![], payload)
     }
 
     /// Creates a new `FromSrv` message.
-    pub fn new_from_srv(chan_name: String, payload: Vec<u8>) -> Self {
-        Self::new(UnOperation::FromSrv, chan_name, vec![], payload)
+    pub fn new_from_srv(chan_id: u16, payload: Vec<u8>) -> Self {
+        Self::new(UnOperation::FromSrv, chan_id, vec![], payload)
     }
 
     /// Creates a new `Close` message.
-    pub fn new_close(chan_name: String) -> Self {
-        Self::new(UnOperation::Close, chan_name, vec![], vec![])
+    pub fn new_close(chan_id: u16) -> Self {
+        Self::new(UnOperation::Close, chan_id, vec![], vec![])
     }
 
     /// Returns the operation code.
@@ -165,9 +165,9 @@ impl UnMessage {
         self.op
     }
 
-    /// Returns the channel name.
-    pub fn chan_name(&self) -> &str {
-        &self.chan_name
+    /// Returns the channel ID.
+    pub fn chan_id(&self) -> u16 {
+        self.chan_id
     }
 
     /// Convert this message into the extra http headers.

@@ -45,7 +45,7 @@ struct SessionState {
 #[derive(Debug)]
 pub struct Channel {
     /// Name of the channel.
-    name: String,
+    id: u16,
     /// Layer 3 (TUN) handler, if any.
     #[cfg(all(feature = "tun", target_os = "linux"))]
     l3: Option<TunHandler>,
@@ -67,7 +67,7 @@ impl Channel {
     /// Create new Channel instance.
     fn new(
         conf: &Config,
-        name: &str,
+        id: u16,
         #[cfg(all(feature = "tun", target_os = "linux"))] l3: Option<TunHandler>,
         l7: Option<L7State>,
         user_shared_secret: &UserSharedSecret,
@@ -81,7 +81,7 @@ impl Channel {
             rx_validator_c: SequenceValidator::new(SequenceType::C, window_length),
         };
         Self {
-            name: name.to_string(),
+            id,
             #[cfg(all(feature = "tun", target_os = "linux"))]
             l3,
             l7,
@@ -93,9 +93,9 @@ impl Channel {
         }
     }
 
-    /// Get channel name.
-    pub fn name(&self) -> &str {
-        &self.name
+    /// Get channel ID.
+    pub fn id(&self) -> u16 {
+        self.id
     }
 
     /// Get shared secret key.
@@ -196,8 +196,8 @@ impl Channel {
         } else {
             Err(err!(
                 "Can't send data to TUN interface. \
-                 Channel '{}' has no configured tun=... entry.",
-                self.name
+                 Channel with id='{}' has no configured tun=... entry.",
+                self.id
             ))
         }
     }
@@ -215,8 +215,8 @@ impl Channel {
         } else {
             Err(err!(
                 "Can't receive data from TUN interface. \
-                 Channel '{}' has no configured tun=... entry.",
-                self.name
+                 Channel with id='{}' has no configured tun=... entry.",
+                self.id
             ))
         }
     }
@@ -233,8 +233,8 @@ impl Channel {
         } else {
             Err(err!(
                 "Can't send data to L7 socket. \
-                 Channel '{}' has no configured l7-tunnel... entries.",
-                self.name
+                 Channel with id='{}' has no configured l7-tunnel... entries.",
+                self.id
             ))
         }
     }
@@ -246,8 +246,8 @@ impl Channel {
         } else {
             Err(err!(
                 "Can't receive data from L7 socket. \
-                 Channel '{}' has no configured l7-tunnel... entries.",
-                self.name
+                 Channel with id='{}' has no configured l7-tunnel... entries.",
+                self.id
             ))
         }
     }
@@ -264,7 +264,7 @@ impl Channel {
 #[derive(Debug)]
 pub struct Channels {
     /// Map of channel name -> Channel
-    channels: StdMutex<HashMap<String, Arc<Channel>>>,
+    channels: StdMutex<HashMap<u16, Arc<Channel>>>,
 }
 
 impl Channels {
@@ -273,8 +273,8 @@ impl Channels {
         let mut channels = HashMap::new();
 
         for chan_conf in conf.channels_iter() {
-            let name = chan_conf.name();
-            log::info!("Active channel: {name}");
+            let id = chan_conf.id();
+            log::info!("Active channel ID: {id}");
 
             #[cfg(all(feature = "tun", target_os = "linux"))]
             let tun = if let Some(tun_name) = chan_conf.tun() {
@@ -297,7 +297,7 @@ impl Channels {
 
             let chan = Channel::new(
                 &conf,
-                name,
+                id,
                 #[cfg(all(feature = "tun", target_os = "linux"))]
                 tun,
                 l7,
@@ -305,7 +305,7 @@ impl Channels {
                 test_enabled,
             );
 
-            channels.insert(name.to_string(), Arc::new(chan));
+            channels.insert(id, Arc::new(chan));
         }
         if channels.is_empty() {
             log::warn!("There are no [[channels]] configured in the configuration file!");
@@ -317,11 +317,11 @@ impl Channels {
     }
 
     /// Get channel by name.
-    pub fn get(&self, name: &str) -> Option<Arc<Channel>> {
+    pub fn get(&self, id: u16) -> Option<Arc<Channel>> {
         self.channels
             .lock()
             .expect("Lock poison")
-            .get(name)
+            .get(&id)
             .map(Arc::clone)
     }
 }

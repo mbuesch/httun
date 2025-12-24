@@ -61,12 +61,12 @@ impl CommBackend {
         Self::Http(Box::new(CommBackendHttp { conn }))
     }
 
-    /// Get the channel name, if known.
-    pub fn chan_name(&self) -> Option<String> {
+    /// Get the channel ID, if known.
+    pub fn chan_id(&self) -> Option<u16> {
         match self {
             #[cfg(target_family = "unix")]
-            Self::Unix(b) => Some(b.conn.chan_name().to_string()),
-            Self::Http(b) => b.conn.chan_name(),
+            Self::Unix(b) => Some(b.conn.chan_id()),
+            Self::Http(b) => b.conn.chan_id(),
         }
     }
 
@@ -103,10 +103,10 @@ impl CommBackend {
         match self {
             #[cfg(target_family = "unix")]
             Self::Unix(b) => {
-                let chan_name = self
-                    .chan_name()
-                    .ok_or_else(|| err!("Channel name is not known, yet"))?;
-                let umsg = UnMessage::new_from_srv(chan_name.to_string(), payload);
+                let chan_id = self
+                    .chan_id()
+                    .ok_or_else(|| err!("Channel ID is not known, yet"))?;
+                let umsg = UnMessage::new_from_srv(chan_id, payload);
                 b.conn.send(&umsg).await.context("Unix socket send")
             }
             Self::Http(b) => b.conn.send_reply_ok(&payload).await,
@@ -142,10 +142,10 @@ impl CommBackend {
         match self {
             #[cfg(target_family = "unix")]
             Self::Unix(b) => {
-                let chan_name = self
-                    .chan_name()
-                    .ok_or_else(|| err!("Channel name is not known, yet"))?;
-                let umsg = UnMessage::new_close(chan_name.to_string());
+                let chan_id = self
+                    .chan_id()
+                    .ok_or_else(|| err!("Channel ID is not known, yet"))?;
+                let umsg = UnMessage::new_close(chan_id);
                 b.conn.send(&umsg).await.context("Unix socket send")
             }
             Self::Http(b) => b.conn.close().await,

@@ -290,12 +290,12 @@ pub enum HttpRequest {
     Post,
 }
 
-/// Parse the HTTP request header line (first line, e.g., "GET /chan_name/r?m=... HTTP/1.1").
+/// Parse the HTTP request header line (first line, e.g., "GET /chan_id/r?m=... HTTP/1.1").
 ///
 /// `line` is the HTTP request header line.
 ///
 /// Returns the parts of the request as a tuple.
-fn parse_request_header(line: &[u8]) -> ah::Result<(HttpRequest, String, Direction, Query)> {
+fn parse_request_header(line: &[u8]) -> ah::Result<(HttpRequest, u16, Direction, Query)> {
     let Some((request, tail)) = split_delim(line, b' ') else {
         return Err(err!("No GET/POST request found."));
     };
@@ -313,12 +313,12 @@ fn parse_request_header(line: &[u8]) -> ah::Result<(HttpRequest, String, Directi
 
     let (path, query) = split_delim(path_info, b'?').unwrap_or_else(|| (path_info, b"".as_slice()));
 
-    let (chan_name, direction) = parse_path(path)?;
+    let (chan_id, direction) = parse_path(path)?;
 
     let query: Result<Query, _> = query.try_into();
     let query = query.context("Parse query string")?;
 
-    Ok((request, chan_name, direction, query))
+    Ok((request, chan_id, direction, query))
 }
 
 /// Decode the HTTP Basic Authorization header.
@@ -348,8 +348,8 @@ fn decode_auth_header(value: &[u8]) -> Option<HttpAuth> {
 pub struct HttunHttpReq {
     /// HTTP request method.
     request: HttpRequest,
-    /// Httun channel name.
-    chan_name: String,
+    /// Httun channel ID.
+    chan_id: u16,
     /// Httun direction (R/W).
     direction: Direction,
     /// HTTP query parameters.
@@ -386,9 +386,9 @@ impl HttunHttpReq {
         let Some((h, mut tail)) = next_hdr(buf) else {
             return Err(err!("No GET/POST header found"));
         };
-        let (request, chan_name, direction, query) = parse_request_header(h)?;
+        let (request, chan_id, direction, query) = parse_request_header(h)?;
 
-        log::trace!("Conn {id}: {request:?} / {chan_name} / {direction:?} / {query:?}");
+        log::trace!("Conn {id}: {request:?} / id={chan_id} / {direction:?} / {query:?}");
 
         // Go through all headers.
         let body = loop {
@@ -411,7 +411,7 @@ impl HttunHttpReq {
 
         let mut req = HttunHttpReq {
             request,
-            chan_name,
+            chan_id,
             direction,
             query,
             authorization,
@@ -521,8 +521,8 @@ pub struct HttpConn {
     rx_r: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
     /// Receiver for W direction requests.
     rx_w: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
-    /// Pinned channel name and auth. (None if not pinned yet).
-    pinned_chan: StdOnceLock<(String, Option<HttpAuth>)>,
+    /// Pinned channel ID and auth. (None if not pinned yet).
+    pinned_chan: StdOnceLock<(u16, Option<HttpAuth>)>,
     /// Server configuration.
     conf: Arc<Config>,
     /// Extra HTTP headers to include in replies.
@@ -586,8 +586,8 @@ impl HttpConn {
         *self.rx_w.lock().await = Some(rx_w_receiver);
     }
 
-    /// Get the pinned channel name (if any).
-    pub fn chan_name(&self) -> Option<String> {
+    /// Get the pinned channel ID (if any).
+    pub fn chan_id(&self) -> Option<u16> {
         self.pinned_chan.get().map(|c| &c.0).cloned()
     }
 
@@ -621,7 +621,7 @@ impl HttpConn {
     /// Returns Ok(()) if pinning is successful, Err otherwise.
     fn pin_channel(&self, req: &HttunHttpReq) -> ah::Result<()> {
         if let Some(pinned_chan) = self.pinned_chan.get() {
-            if pinned_chan.0 == req.chan_name {
+            if pinned_chan.0 == req.chan_id {
                 self.check_auth(req, &pinned_chan.1)?;
                 return Ok(());
             } else {
@@ -633,15 +633,15 @@ impl HttpConn {
 
         let chan = self
             .conf
-            .channel(&req.chan_name)
+            .channel(req.chan_id)
             .context("Get channel from configuration")?;
         self.check_auth(req, chan.http().basic_auth())?;
 
         let pinned_chan = self
             .pinned_chan
-            .get_or_init(|| (req.chan_name.to_string(), chan.http().basic_auth().clone()));
+            .get_or_init(|| (req.chan_id, chan.http().basic_auth().clone()));
 
-        if pinned_chan.0 != req.chan_name {
+        if pinned_chan.0 != req.chan_id {
             Err(err!(
                 "Http connection is already pinned to a different channel."
             ))

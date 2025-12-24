@@ -4,7 +4,7 @@
 
 use crate::{WEBSERVER_GID, WEBSERVER_UID};
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_conf::Config;
+use httun_conf::{Config, ConfigChannel};
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
 use httun_util::{errors::DisconnectedError, header::HttpHeader, timeouts::UNIX_HANDSHAKE_TIMEOUT};
 use std::{
@@ -26,8 +26,8 @@ use std::os::unix::net::UnixListener as StdUnixListener;
 /// This is where the FastCGI requests are received from the httun FastCGI daemon.
 #[derive(Debug)]
 pub struct UnixConn {
-    /// The channel name.
-    name: String,
+    /// The channel ID.
+    id: u16,
     /// The underlying Unix stream.
     stream: UnixStream,
 }
@@ -42,7 +42,7 @@ impl UnixConn {
         extra_headers: &[HttpHeader],
     ) -> ah::Result<Self> {
         let mut this = Self {
-            name: "".to_string(),
+            id: ConfigChannel::ID_INVALID,
             stream,
         };
 
@@ -58,31 +58,28 @@ impl UnixConn {
                 UnOperation::ToSrvInit
             ));
         }
-        if msg.chan_name().is_empty() {
-            return Err(err!("UnixConn: Got invalid channel name."));
+        if msg.chan_id() > ConfigChannel::ID_MAX {
+            return Err(err!("UnixConn: Got invalid channel ID."));
         }
-        this.name = msg.chan_name().to_string();
+        this.id = msg.chan_id();
 
         // Send the initialization handshake reply.
         let mut extra_headers = extra_headers.to_vec();
-        if let Some(chan_conf) = conf.channel(this.chan_name()) {
+        if let Some(chan_conf) = conf.channel(this.chan_id()) {
             extra_headers.extend_from_slice(chan_conf.http().extra_headers());
         }
-        this.send(&UnMessage::new_from_srv_init(
-            this.chan_name().to_string(),
-            extra_headers,
-        ))
-        .await
-        .context("Handshake reply")?;
+        this.send(&UnMessage::new_from_srv_init(this.chan_id(), extra_headers))
+            .await
+            .context("Handshake reply")?;
 
-        log::debug!("Connected: {}", this.name);
+        log::debug!("Connected: id={}", this.chan_id());
 
         Ok(this)
     }
 
-    /// Get the channel name.
-    pub fn chan_name(&self) -> &str {
-        &self.name
+    /// Get the channel ID.
+    pub fn chan_id(&self) -> u16 {
+        self.id
     }
 
     /// Receive raw data from the Unix socket.
@@ -119,7 +116,7 @@ impl UnixConn {
         let hdr = UnMessageHeader::deserialize(&hdr)?;
         let msg = self.do_recv(hdr.body_size()).await?;
         let msg = UnMessage::deserialize(&msg)?;
-        if !self.name.is_empty() && msg.chan_name() != self.name {
+        if self.chan_id() <= ConfigChannel::ID_MAX && msg.chan_id() != self.chan_id() {
             return Err(err!("Unix socket: Received message for wrong channel."));
         }
         Ok(msg)

@@ -96,11 +96,10 @@ fn format_url_serial(url: &str, serial: u64) -> String {
 }
 
 /// Format the URL for a channel and direction.
-fn format_url(base_url: &str, chan_name: &str, direction: &str) -> String {
+fn format_url(base_url: &str, chan_id: u16, direction: &str) -> String {
     let base_url = base_url.trim_end_matches('/');
-    let chan_name = chan_name.trim_matches('/');
     let direction = direction.trim_matches('/');
-    format!("{base_url}/{chan_name}/{direction}")
+    format!("{base_url}/{chan_id}/{direction}")
 }
 
 macro_rules! define_direction {
@@ -126,7 +125,7 @@ macro_rules! define_direction {
                 user_agent: Arc<String>,
                 extra_headers: Arc<[HttpHeader]>,
             ) -> Self {
-                let url = format_url(base_url, chan_conf.name(), $urlpath);
+                let url = format_url(base_url, chan_conf.id(), $urlpath);
                 Self {
                     conf,
                     chan_conf,
@@ -352,7 +351,7 @@ async fn get_session(
             .context("httun session message serialize")?;
 
         let url = format_url_serial(
-            &format_url(base_url, chan_conf.name(), "r"),
+            &format_url(base_url, chan_conf.id(), "r"),
             u64::from_ne_bytes(secure_random()),
         );
         let mut req = client.get(&url).query(&[("m", &msg)]);
@@ -428,15 +427,15 @@ impl HttunClient {
     pub async fn connect(
         base_url: &str,
         res_mode: ResMode,
-        chan_name: &str,
+        chan_id: u16,
         mode: HttunClientMode,
         user_agent: &str,
         extra_headers: Arc<[HttpHeader]>,
         conf: Arc<Config>,
     ) -> ah::Result<Self> {
-        let Some(chan_conf) = conf.channel_with_url(base_url, chan_name) else {
+        let Some(chan_conf) = conf.channel_with_url(chan_id, base_url) else {
             return Err(err!(
-                "Did not find a configuration for URL '{base_url}' channel '{chan_name}'.",
+                "Did not find a configuration for URL '{base_url}' with channel id='{chan_id}'.",
             ));
         };
 

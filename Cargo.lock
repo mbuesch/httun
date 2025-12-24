@@ -1061,6 +1061,7 @@ name = "httun-util"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "atoi",
  "log",
  "memchr",
  "rkyv",

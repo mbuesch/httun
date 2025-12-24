@@ -12,23 +12,23 @@ use tokio::{net::UnixStream, time::timeout};
 #[derive(Debug)]
 pub struct ServerUnixConn {
     stream: UnixStream,
-    chan_name: String,
+    chan_id: u16,
     extra_headers: Vec<HttpHeader>,
 }
 
 impl ServerUnixConn {
-    pub async fn new(socket_path: &Path, chan_name: &str) -> ah::Result<Self> {
+    pub async fn new(socket_path: &Path, chan_id: u16) -> ah::Result<Self> {
         let stream = UnixStream::connect(socket_path)
             .await
             .context("Connect to Unix socket")?;
         let mut this = Self {
             stream,
-            chan_name: chan_name.to_string(),
+            chan_id,
             extra_headers: vec![],
         };
 
         // Send initialization handshake.
-        this.send_msg(UnMessage::new_to_srv_init(chan_name.to_string()))
+        this.send_msg(UnMessage::new_to_srv_init(chan_id))
             .await
             .context("Initialize unix connection to httun-server")?;
 
@@ -44,8 +44,8 @@ impl ServerUnixConn {
                 UnOperation::FromSrvInit
             ));
         }
-        if msg.chan_name() != chan_name {
-            return Err(err!("UnixConn: Got invalid channel name."));
+        if msg.chan_id() != chan_id {
+            return Err(err!("UnixConn: Got invalid channel ID."));
         }
         this.extra_headers = msg.into_extra_headers();
 
@@ -123,21 +123,17 @@ impl ServerUnixConn {
     }
 
     pub async fn send(&self, payload: Vec<u8>) -> ah::Result<()> {
-        self.send_msg(UnMessage::new_to_srv(self.chan_name.to_string(), payload))
+        self.send_msg(UnMessage::new_to_srv(self.chan_id, payload))
             .await
     }
 
     pub async fn send_keepalive(&self) -> ah::Result<()> {
-        self.send_msg(UnMessage::new_keepalive(self.chan_name.to_string()))
-            .await
+        self.send_msg(UnMessage::new_keepalive(self.chan_id)).await
     }
 
     pub async fn recv(&self, payload: Vec<u8>) -> ah::Result<Vec<u8>> {
-        self.send_msg(UnMessage::new_req_from_srv(
-            self.chan_name.to_string(),
-            payload,
-        ))
-        .await?;
+        self.send_msg(UnMessage::new_req_from_srv(self.chan_id, payload))
+            .await?;
         let msg = self.recv_msg().await?;
         match msg.op() {
             UnOperation::Close => {
@@ -148,11 +144,11 @@ impl ServerUnixConn {
                 return Err(err!("ServerUnixConn: Got unexpected op: {op:?}"));
             }
         }
-        if msg.chan_name() != self.chan_name {
+        if msg.chan_id() != self.chan_id {
             return Err(err!(
                 "ServerUnixConn: Reply chan was '{}' instead of '{}'",
-                msg.chan_name(),
-                self.chan_name
+                msg.chan_id(),
+                self.chan_id
             ));
         }
         Ok(msg.into_payload())

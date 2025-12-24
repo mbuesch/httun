@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use anyhow::{self as ah, format_err as err};
+use atoi::atoi;
 use memchr::memchr;
 use std::fmt::Write as _;
 
@@ -38,13 +39,13 @@ pub fn next_path_comp(mut path: &[u8]) -> Option<(&[u8], &[u8])> {
     }
 }
 
-/// Parses a path into a channel name and direction.
-pub fn parse_path(path: &[u8]) -> ah::Result<(String, Direction)> {
+/// Parses a path into a channel ID and direction.
+pub fn parse_path(path: &[u8]) -> ah::Result<(u16, Direction)> {
     if !path_is_valid(path) {
         return Err(err!("Invalid characters in path."));
     }
 
-    let Some((chan_name, tail)) = next_path_comp(path) else {
+    let Some((chan_id, tail)) = next_path_comp(path) else {
         return Err(err!("1st path component is missing."));
     };
     let Some((direction, tail)) = next_path_comp(tail) else {
@@ -57,7 +58,9 @@ pub fn parse_path(path: &[u8]) -> ah::Result<(String, Direction)> {
         return Err(err!("Got trailing garbage in path."));
     }
 
-    let chan_name = String::from_utf8(chan_name.to_vec())?;
+    let Some(chan_id) = atoi::<u16>(chan_id) else {
+        return Err(err!("Invalid chan_id in path."));
+    };
     let direction = match direction {
         b"r" => Direction::R,
         b"w" => Direction::W,
@@ -66,7 +69,7 @@ pub fn parse_path(path: &[u8]) -> ah::Result<(String, Direction)> {
         }
     };
 
-    Ok((chan_name, direction))
+    Ok((chan_id, direction))
 }
 
 /// Converts a byte slice to a hexadecimal string.
