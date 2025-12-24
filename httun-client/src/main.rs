@@ -19,7 +19,7 @@ use crate::{
     resolver::ResMode,
 };
 use anyhow::{self as ah, Context as _, format_err as err};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use httun_conf::{Config, ConfigVariant};
 use httun_util::header::HttpHeader;
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -195,16 +195,18 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     }
 
     let Some(mode) = &opts.mode else {
+        Opts::command()
+            .print_help()
+            .context("Failed to print help")?;
         return Err(err!(
-            "'httun-client' requires a subcommand but one was not provided. \
-            Please run 'httun --help' for more information."
+            "'httun-client' requires a subcommand but one was not provided."
         ));
     };
     let Some(server_url) = &opts.server_url else {
-        return Err(err!(
-            "'httun-client' requires the SERVER_URL argument. \
-            Please run 'httun --help' for more information."
-        ));
+        Opts::command()
+            .print_help()
+            .context("Failed to print help")?;
+        return Err(err!("'httun-client' requires the SERVER_URL argument."));
     };
 
     let conf = Arc::new(
