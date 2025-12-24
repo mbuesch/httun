@@ -270,11 +270,12 @@ pub struct Channels {
 impl Channels {
     /// Create Channels manager from configuration.
     pub async fn new(conf: Arc<Config>) -> ah::Result<Self> {
+        let uuid = conf.uuid();
         let mut channels = HashMap::new();
 
         for chan_conf in conf.channels_iter() {
             let id = chan_conf.id();
-            log::info!("Active channel ID: {id}");
+            log::info!("Active channel ID {id} on server {uuid}.");
 
             #[cfg(all(feature = "tun", target_os = "linux"))]
             let tun = if let Some(tun_name) = chan_conf.tun() {

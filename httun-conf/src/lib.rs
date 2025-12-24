@@ -636,6 +636,10 @@ impl Config {
         Ok(())
     }
 
+    pub fn uuid(&self) -> &Uuid {
+        &self.uuid
+    }
+
     pub fn channels_iter(&self) -> ChanIter<'_> {
         ChanIter {
             config: self,
