@@ -207,7 +207,10 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         ));
     };
 
-    let conf = Arc::new(Config::new_parse_file(&opts.get_config()).context("Parse configuration")?);
+    let conf = Arc::new(
+        Config::new_parse_file(&opts.get_config(), ConfigVariant::Client)
+            .context("Parse configuration")?,
+    );
 
     // Create async IPC channels.
     let (exit_tx, mut exit_rx) = mpsc::channel(1);

@@ -6,6 +6,7 @@ use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::UserSharedSecret;
 use httun_util::{header::HttpHeader, strings::hex};
 use std::{
+    collections::HashSet,
     num::NonZeroUsize,
     path::{Path, PathBuf},
 };
@@ -578,20 +579,28 @@ impl Config {
         path
     }
 
-    pub fn new_parse_file(path: &Path) -> ah::Result<Self> {
+    pub fn new_parse_file(path: &Path, variant: ConfigVariant) -> ah::Result<Self> {
         let data = std::fs::read_to_string(path).context("Read configuration file")?;
         let value: toml::Value = toml::from_str(&data).context("Parse configuration file")?;
         let this = Self::try_from(&value)?;
-        this.check()?;
+        this.check(variant)?;
         Ok(this)
     }
 
-    pub fn parse_file(&mut self, path: &Path) -> ah::Result<()> {
-        *self = Self::new_parse_file(path)?;
+    pub fn parse_file(&mut self, path: &Path, variant: ConfigVariant) -> ah::Result<()> {
+        *self = Self::new_parse_file(path, variant)?;
         Ok(())
     }
 
-    fn check(&self) -> ah::Result<()> {
+    fn check(&self, variant: ConfigVariant) -> ah::Result<()> {
+        if variant == ConfigVariant::Server {
+            // Check whether channel IDs are unique.
+            let ids: HashSet<u16> = self.channels.iter().map(|c| c.id()).collect();
+            if ids.len() != self.channels.len() {
+                return Err(err!("The configuration contains duplicate channel IDs."));
+            }
+        }
+
         // Validate all keys
         for chan in self.channels_iter() {
             // Compare shared-secret to http-password.

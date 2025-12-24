@@ -283,7 +283,10 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let mut sigint = register_signal!(interrupt).context("Register SIGINT")?;
     let mut sighup = register_signal!(hangup).context("Register SIGHUP")?;
 
-    let conf = Arc::new(Config::new_parse_file(&opts.get_config()).context("Parse configuration")?);
+    let conf = Arc::new(
+        Config::new_parse_file(&opts.get_config(), ConfigVariant::Server)
+            .context("Parse configuration")?,
+    );
 
     // Either start simple standalone HTTP server or Unix socket for FastCGI.
     let mut http_srv = None;
