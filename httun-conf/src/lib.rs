@@ -11,6 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use subtle::ConstantTimeEq as _;
+use uuid::Uuid;
 
 /// The default server configuration path, relative to the install prefix.
 #[cfg(not(target_os = "windows"))]
@@ -522,6 +523,7 @@ impl ConfigChannel {
 /// Configuration.
 #[derive(Debug, Clone, Default)]
 pub struct Config {
+    uuid: Uuid,
     parameters: ConfigParameters,
     channels: Vec<ConfigChannel>,
 }
@@ -533,6 +535,19 @@ impl TryFrom<&toml::Value> for Config {
         let mut this: Self = Default::default();
 
         let table = value.as_table().ok_or_else(|| err!("Expected a table"))?;
+
+        if let Some(v) = table.get("uuid") {
+            this.uuid = v
+                .as_str()
+                .ok_or_else(|| err!("'uuid' must be a string"))?
+                .parse()
+                .context("Parse config 'uuid'")?;
+        }
+        if this.uuid.is_nil() || this.uuid.is_max() {
+            return Err(err!(
+                "The 'uuid' is invalid. Please generate a valid uuid with httun-client gen-uuid."
+            ));
+        }
 
         if let Some(v) = table.get("parameters") {
             this.parameters = ConfigParameters::try_from(v)?;

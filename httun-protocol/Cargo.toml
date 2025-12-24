@@ -20,4 +20,5 @@ getrandom = { workspace = true }
 rand = { workspace = true }
 sha3 = { workspace = true }
 subtle = { workspace = true }
-x25519-dalek = { workspace = true, features = [ "getrandom" ]}
+uuid = { workspace = true }
+x25519-dalek = { workspace = true, features = [ "getrandom", "static_secrets" ]}

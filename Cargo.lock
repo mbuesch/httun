@@ -971,6 +971,7 @@ dependencies = [
  "reqwest",
  "tokio",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -982,6 +983,7 @@ dependencies = [
  "httun-util",
  "subtle",
  "toml",
+ "uuid",
 ]
 
 [[package]]
@@ -1008,6 +1010,7 @@ dependencies = [
  "rand",
  "sha3",
  "subtle",
+ "uuid",
  "x25519-dalek",
 ]
 

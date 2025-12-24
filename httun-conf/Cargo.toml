@@ -18,3 +18,4 @@ httun-protocol = { workspace = true }
 httun-util = { workspace = true }
 subtle = { workspace = true }
 toml = { workspace = true }
+uuid = { workspace = true }
