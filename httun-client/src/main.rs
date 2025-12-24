@@ -145,7 +145,7 @@ enum Mode {
     },
 
     /// Generate a new truly random key.
-    Genkey {},
+    GenKey {},
 }
 
 /// Default delay after errors before retrying.
@@ -190,7 +190,7 @@ macro_rules! recv_signal {
 }
 
 async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
-    if matches!(opts.mode, Some(Mode::Genkey {})) {
+    if matches!(opts.mode, Some(Mode::GenKey {})) {
         return run_mode_genkey().await;
     }
 
@@ -233,7 +233,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         Mode::Tun { .. } => HttunClientMode::L3,
         Mode::Socket { .. } => HttunClientMode::L7,
         Mode::Test { .. } => HttunClientMode::Test,
-        Mode::Genkey {} => unreachable!(),
+        Mode::GenKey {} => unreachable!(),
     };
 
     // Connect to the httun server.
@@ -289,7 +289,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         Some(Mode::Test { period }) => {
             run_mode_test(Arc::clone(&exit_tx), Arc::clone(&task_comm), *period).await?;
         }
-        None | Some(Mode::Genkey {}) => unreachable!(),
+        None | Some(Mode::GenKey {}) => unreachable!(),
     }
 
     // Task: Main loop.
