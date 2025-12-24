@@ -4,7 +4,7 @@
 
 use crate::async_task_comm::AsyncTaskComm;
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::{L7C_MAX_PAYLOAD_LEN, L7Container, Message, MsgType, Operation};
+use httun_protocol::{L7Container, Message, MsgType, Operation};
 use httun_util::{
     errors::DisconnectedError,
     net::{tcp_recv_until_blocking, tcp_send_all},
@@ -18,7 +18,7 @@ use tokio::{
     task,
 };
 
-const RX_BUF_SIZE: usize = L7C_MAX_PAYLOAD_LEN;
+const RX_BUF_SIZE: usize = L7Container::MAX_PAYLOAD_LEN;
 
 async fn send_close_to_httun(
     comm: &AsyncTaskComm,

@@ -9,7 +9,7 @@ use crate::{
 use anyhow::{self as ah, Context as _, format_err as err};
 use arc_swap::ArcSwapOption;
 use httun_conf::ConfigL7Tunnel;
-use httun_protocol::{L7C_MAX_PAYLOAD_LEN, L7Container};
+use httun_protocol::L7Container;
 use httun_util::{
     net::{tcp_recv_until_blocking, tcp_send_all},
     timeouts::{L7_RX_TIMEOUT, L7_TIMEOUT_S, L7_TX_TIMEOUT},
@@ -25,7 +25,7 @@ use std::{
 use tokio::{net::TcpStream, sync::Notify, time::timeout};
 
 /// Size of the receive buffer.
-const RX_BUF_SIZE: usize = L7C_MAX_PAYLOAD_LEN;
+const RX_BUF_SIZE: usize = L7Container::MAX_PAYLOAD_LEN;
 
 /// L7 socket.
 ///

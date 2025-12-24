@@ -5,15 +5,6 @@
 use anyhow::{self as ah, format_err as err};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
-const L7C_OFFS_ADDR: usize = 0;
-const L7C_OFFS_PORT: usize = 16;
-const L7C_OFFS_PAYLOAD: usize = 18;
-
-/// Overhead of the L7Container in bytes.
-const L7C_OVERHEAD_LEN: usize = 16 + 2;
-/// Maximum payload length of the L7Container in bytes.
-pub const L7C_MAX_PAYLOAD_LEN: usize = crate::message::MAX_PAYLOAD_LEN - L7C_OVERHEAD_LEN;
-
 /// # Message container for L7 payload.
 ///
 /// See `Message` for more information.
@@ -35,6 +26,17 @@ impl std::fmt::Debug for L7Container {
 }
 
 impl L7Container {
+    // Raw byte offsets.
+    const OFFS_ADDR: usize = 0;
+    const OFFS_PORT: usize = 16;
+    const OFFS_PAYLOAD: usize = 18;
+
+    /// Overhead of the L7Container in bytes.
+    const OVERHEAD_LEN: usize = 16 + 2;
+    /// Maximum payload length of the L7Container in bytes.
+    pub const MAX_PAYLOAD_LEN: usize =
+        crate::message::Message::MAX_PAYLOAD_LEN - Self::OVERHEAD_LEN;
+
     /// Create a new L7Container.
     ///
     /// `addr` is the destination address for the L7 payload.
@@ -66,7 +68,7 @@ impl L7Container {
         };
         let port = self.addr.port();
 
-        let mut buf = Vec::with_capacity(self.payload.len() + L7C_OVERHEAD_LEN);
+        let mut buf = Vec::with_capacity(self.payload.len() + Self::OVERHEAD_LEN);
         buf.extend(addr);
         buf.extend(port.to_be_bytes());
         buf.extend(&self.payload);
@@ -76,16 +78,16 @@ impl L7Container {
 
     /// Deserialize a byte slice into an L7Container.
     pub fn deserialize(buf: &[u8]) -> ah::Result<Self> {
-        if buf.len() < L7C_OVERHEAD_LEN {
+        if buf.len() < Self::OVERHEAD_LEN {
             return Err(err!("L7Container size is too small."));
         }
-        if buf.len() > L7C_OVERHEAD_LEN + L7C_MAX_PAYLOAD_LEN {
+        if buf.len() > Self::OVERHEAD_LEN + Self::MAX_PAYLOAD_LEN {
             return Err(err!("L7Container size is too big."));
         }
 
-        let addr = &buf[L7C_OFFS_ADDR..L7C_OFFS_ADDR + 16];
-        let port = u16::from_be_bytes(buf[L7C_OFFS_PORT..L7C_OFFS_PORT + 2].try_into()?);
-        let payload = &buf[L7C_OFFS_PAYLOAD..];
+        let addr = &buf[Self::OFFS_ADDR..Self::OFFS_ADDR + 16];
+        let port = u16::from_be_bytes(buf[Self::OFFS_PORT..Self::OFFS_PORT + 2].try_into()?);
+        let payload = &buf[Self::OFFS_PAYLOAD..];
 
         let addr: [u8; 16] = addr.try_into()?;
         let addr: Ipv6Addr = addr.into();

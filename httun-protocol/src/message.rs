@@ -17,24 +17,6 @@ use rand::prelude::*;
 type Aes256GcmN160 = aes_gcm::AesGcm<aes_gcm::aes::Aes256, aes_gcm::aes::cipher::consts::U20>;
 /// Nonce type.
 type Nonce = [u8; 20];
-/// Nonce length.
-const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
-/// Authentication tag length.
-const AUTHTAG_LEN: usize = 16;
-
-/// Maximum httun payload length.
-pub const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
-
-const OFFS_TYPE: usize = 0;
-const OFFS_NONCE: usize = 1;
-const OFFS_OPER: usize = 21;
-const OFFS_SEQ: usize = 22;
-const OFFS_LEN: usize = 30;
-const OFFS_PAYLOAD: usize = 32;
-
-const AREA_ASSOC_LEN: usize = 1;
-const AREA_CRYPT_LEN: usize = 1 + 8 + 2;
-pub const OVERHEAD_LEN: usize = AREA_ASSOC_LEN + NONCE_LEN + AREA_CRYPT_LEN + AUTHTAG_LEN;
 
 /// Basic message type.
 ///
@@ -175,9 +157,30 @@ impl std::fmt::Debug for Message {
 }
 
 impl Message {
+    // Raw byte offsets.
+    const OFFS_TYPE: usize = 0;
+    const OFFS_NONCE: usize = 1;
+    const OFFS_OPER: usize = 21;
+    const OFFS_SEQ: usize = 22;
+    const OFFS_LEN: usize = 30;
+    const OFFS_PAYLOAD: usize = 32;
+
+    /// Nonce length.
+    const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
+    /// Authentication tag length.
+    const AUTHTAG_LEN: usize = 16;
+
+    /// Maximum httun payload length.
+    pub const MAX_PAYLOAD_LEN: usize = u16::MAX as usize;
+
+    const AREA_ASSOC_LEN: usize = 1;
+    const AREA_CRYPT_LEN: usize = 1 + 8 + 2;
+    pub(crate) const OVERHEAD_LEN: usize =
+        Self::AREA_ASSOC_LEN + Self::NONCE_LEN + Self::AREA_CRYPT_LEN + Self::AUTHTAG_LEN;
+
     /// Create a new message.
     pub fn new(type_: MsgType, oper: Operation, payload: Vec<u8>) -> ah::Result<Self> {
-        if payload.len() > MAX_PAYLOAD_LEN {
+        if payload.len() > Self::MAX_PAYLOAD_LEN {
             return Err(err!("Payload size is too big"));
         }
         Ok(Self {
@@ -230,7 +233,7 @@ impl Message {
             .try_into()
             .context("Payload is too big (>0xFFFF)")?;
 
-        let mut buf = Vec::with_capacity(MAX_PAYLOAD_LEN + OVERHEAD_LEN);
+        let mut buf = Vec::with_capacity(Self::MAX_PAYLOAD_LEN + Self::OVERHEAD_LEN);
         buf.extend(&type_.to_be_bytes());
         buf.extend(&nonce);
         buf.extend(&oper.to_be_bytes());
@@ -242,12 +245,16 @@ impl Message {
 
         let cipher = Aes256GcmN160::new(key.key().as_raw_bytes().into());
         let authtag = cipher
-            .encrypt_in_place_detached(&nonce, &assoc_data, &mut buf[AREA_ASSOC_LEN + NONCE_LEN..])
+            .encrypt_in_place_detached(
+                &nonce,
+                &assoc_data,
+                &mut buf[Self::AREA_ASSOC_LEN + Self::NONCE_LEN..],
+            )
             .map_err(|_| err!("AEAD encryption of httun message failed"))?;
 
         buf.extend(&authtag);
 
-        assert_eq!(buf.len(), self.payload.len() + OVERHEAD_LEN);
+        assert_eq!(buf.len(), self.payload.len() + Self::OVERHEAD_LEN);
         Ok(buf)
     }
 
@@ -268,9 +275,10 @@ impl Message {
         let mut buf = buf.to_vec();
         let buf_len = buf.len();
 
-        let type_ = u8::from_be_bytes(buf[OFFS_TYPE..OFFS_TYPE + 1].try_into()?);
-        let nonce: [u8; NONCE_LEN] = buf[OFFS_NONCE..OFFS_NONCE + NONCE_LEN].try_into()?;
-        let authtag: [u8; AUTHTAG_LEN] = buf[buf_len - AUTHTAG_LEN..].try_into()?;
+        let type_ = u8::from_be_bytes(buf[Self::OFFS_TYPE..Self::OFFS_TYPE + 1].try_into()?);
+        let nonce: [u8; Self::NONCE_LEN] =
+            buf[Self::OFFS_NONCE..Self::OFFS_NONCE + Self::NONCE_LEN].try_into()?;
+        let authtag: [u8; Self::AUTHTAG_LEN] = buf[buf_len - Self::AUTHTAG_LEN..].try_into()?;
 
         let assoc_data = [type_];
 
@@ -279,23 +287,23 @@ impl Message {
             .decrypt_in_place_detached(
                 &nonce.into(),
                 &assoc_data,
-                &mut buf[AREA_ASSOC_LEN + NONCE_LEN..buf_len - AUTHTAG_LEN],
+                &mut buf[Self::AREA_ASSOC_LEN + Self::NONCE_LEN..buf_len - Self::AUTHTAG_LEN],
                 &authtag.into(),
             )
             .map_err(|_| err!("AEAD decryption of httun message failed."))?;
 
-        let oper = u8::from_be_bytes(buf[OFFS_OPER..OFFS_OPER + 1].try_into()?);
-        let sequence = u64::from_be_bytes(buf[OFFS_SEQ..OFFS_SEQ + 8].try_into()?);
-        let len = u16::from_be_bytes(buf[OFFS_LEN..OFFS_LEN + 2].try_into()?);
+        let oper = u8::from_be_bytes(buf[Self::OFFS_OPER..Self::OFFS_OPER + 1].try_into()?);
+        let sequence = u64::from_be_bytes(buf[Self::OFFS_SEQ..Self::OFFS_SEQ + 8].try_into()?);
+        let len = u16::from_be_bytes(buf[Self::OFFS_LEN..Self::OFFS_LEN + 2].try_into()?);
 
         let type_ = type_.try_into()?;
         let oper = oper.try_into()?;
 
         let len: usize = len.into();
-        if len != buf.len() - OVERHEAD_LEN {
+        if len != buf.len() - Self::OVERHEAD_LEN {
             return Err(err!("Invalid payload length."));
         }
-        let payload = buf[OFFS_PAYLOAD..OFFS_PAYLOAD + len].to_vec();
+        let payload = buf[Self::OFFS_PAYLOAD..Self::OFFS_PAYLOAD + len].to_vec();
 
         Ok(Message {
             type_,
@@ -323,17 +331,17 @@ impl Message {
     /// Use [Message::deserialize] to get authenticated data.
     pub fn peek_type(buf: &[u8]) -> ah::Result<MsgType> {
         Self::basic_length_check(buf)?;
-        u8::from_be_bytes(buf[OFFS_TYPE..OFFS_TYPE + 1].try_into()?).try_into()
+        u8::from_be_bytes(buf[Self::OFFS_TYPE..Self::OFFS_TYPE + 1].try_into()?).try_into()
     }
 
     /// Basic length check of raw message bytes.
     ///
     /// This returns an error if the length is obviously invalid.
     fn basic_length_check(buf: &[u8]) -> ah::Result<()> {
-        if buf.len() < OVERHEAD_LEN {
+        if buf.len() < Self::OVERHEAD_LEN {
             return Err(err!("Message size is too small."));
         }
-        if buf.len() > OVERHEAD_LEN + MAX_PAYLOAD_LEN {
+        if buf.len() > Self::OVERHEAD_LEN + Self::MAX_PAYLOAD_LEN {
             return Err(err!("Message size is too big."));
         }
         Ok(())

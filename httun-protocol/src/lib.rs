@@ -14,8 +14,8 @@ mod sequence;
 
 pub use crate::{
     key::{KexPublic, KexSharedSecret, KeyExchange, SessionKey, UserSharedSecret},
-    l7container::{L7C_MAX_PAYLOAD_LEN, L7Container},
-    message::{InitPayload, MAX_PAYLOAD_LEN, Message, MsgType, Operation},
+    l7container::L7Container,
+    message::{InitPayload, Message, MsgType, Operation},
     random::secure_random,
     sequence::{SequenceGenerator, SequenceType, SequenceValidator},
 };
