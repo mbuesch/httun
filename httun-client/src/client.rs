@@ -29,6 +29,7 @@ use std::{
 };
 use tokio::{sync::Notify, task, time::sleep};
 use url::{Host, Url};
+use uuid::Uuid;
 
 /// Number of retries for HTTP read/write operations.
 const HTTP_RW_TRIES: usize = 3;
@@ -327,6 +328,7 @@ impl DirectionW {
 
 /// Initialize a new httun session.
 async fn get_session(
+    client_uuid: &Uuid,
     chan_conf: &ConfigChannel,
     base_url: &str,
     user_agent: &str,
@@ -344,7 +346,7 @@ async fn get_session(
         let init_session_key = SessionKey::make_init(user_shared_secret);
         let kex = KeyExchange::new();
 
-        let msg_payload = InitPayload::new(kex.public_key());
+        let msg_payload = InitPayload::new(*client_uuid, kex.public_key());
         let msg = Message::new(MsgType::Init, Operation::Init, msg_payload.serialize())?;
         let msg = msg
             .serialize_b64u(&init_session_key)
@@ -414,6 +416,7 @@ pub enum HttunClientMode {
 /// establishment, and the read/write directions of the tunnel.
 pub struct HttunClient {
     base_url: String,
+    conf: Arc<Config>,
     chan_conf: ConfigChannel,
     r: Arc<DirectionR>,
     w: Arc<DirectionW>,
@@ -466,6 +469,7 @@ impl HttunClient {
 
         Ok(Self {
             base_url: base_url.to_string(),
+            conf: Arc::clone(&conf),
             chan_conf: chan_conf.clone(),
             r: Arc::new(DirectionR::new(
                 Arc::clone(&conf),
@@ -499,6 +503,7 @@ impl HttunClient {
             // Initialize a new session.
             let session_key = Arc::new(
                 get_session(
+                    self.conf.uuid(),
                     &self.chan_conf,
                     &self.base_url,
                     &self.user_agent,

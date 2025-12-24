@@ -7,7 +7,10 @@ use crate::{
     comm_backend::{CommBackend, CommRxMsg},
 };
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_protocol::{KexPublic, Message, MsgType, Operation, SequenceType, SessionKey};
+use httun_conf::Config;
+use httun_protocol::{
+    InitPayload, KexPublic, Message, MsgType, Operation, SequenceType, SessionKey,
+};
 use httun_util::errors::DisconnectedError;
 use std::sync::{
     Arc, RwLock as StdRwLock,
@@ -22,6 +25,8 @@ use tokio::{
 /// Httun protocol handler on the server.
 #[derive(Debug)]
 pub struct ProtocolHandler {
+    /// Configuration file.
+    conf: Arc<Config>,
     /// Protocol manager.
     protman: Arc<ProtocolManager>,
     /// Communication backend.
@@ -37,11 +42,13 @@ pub struct ProtocolHandler {
 impl ProtocolHandler {
     /// Create a new protocol handler.
     pub async fn new(
+        conf: Arc<Config>,
         protman: Arc<ProtocolManager>,
         comm: CommBackend,
         channels: Arc<Channels>,
     ) -> Self {
         Self {
+            conf,
             protman,
             comm,
             channels,
@@ -201,7 +208,7 @@ impl ProtocolHandler {
         let _session = chan.get_session_and_update_tx_sequence();
         let session_key = SessionKey::make_init(chan.user_shared_secret());
 
-        log::debug!("{}: Session init packet received", chan.id());
+        log::trace!("{}: Session init packet received", chan.id());
 
         let msg = Message::deserialize(&payload, &session_key)?;
         let oper = msg.oper();
@@ -210,24 +217,24 @@ impl ProtocolHandler {
             return Err(err!("Received {oper:?} in init context"));
         }
 
-        log::trace!("{}: Session init", chan.id());
+        let msg_payload =
+            InitPayload::deserialize(msg.payload()).context("Deserialize init payload")?;
 
-        let remote_public_key: KexPublic = msg
-            .into_payload()
-            .as_slice()
-            .try_into()
-            .context("Receive remote public key")?;
+        log::debug!(
+            "{}: Session init from client {}",
+            chan.id(),
+            msg_payload.sender_uuid()
+        );
 
-        let (local_public_key, _) = self.create_new_session(&chan, &remote_public_key).await;
+        let (local_public_key, _) = self
+            .create_new_session(&chan, msg_payload.session_public_key())
+            .await;
 
-        let msg = Message::new(
-            MsgType::Init,
-            Operation::Init,
-            local_public_key.as_raw_bytes().to_vec(),
-        )
-        .context("Make httun packet")?;
+        let reply_payload = InitPayload::new(*self.conf.uuid(), local_public_key);
+        let reply = Message::new(MsgType::Init, Operation::Init, reply_payload.serialize())
+            .context("Make httun packet")?;
 
-        self.send_reply_msg(&chan, msg, &session_key).await?;
+        self.send_reply_msg(&chan, reply, &session_key).await?;
 
         Ok(())
     }
@@ -376,13 +383,15 @@ impl Drop for ProtocolInstance {
 /// This manager handles all protocol instances on the server.
 #[derive(Debug)]
 pub struct ProtocolManager {
+    conf: Arc<Config>,
     insts: Mutex<Vec<ProtocolInstance>>,
 }
 
 impl ProtocolManager {
     /// Create a new protocol manager.
-    pub fn new() -> Arc<Self> {
+    pub fn new(conf: Arc<Config>) -> Arc<Self> {
         Arc::new(ProtocolManager {
+            conf,
             insts: Mutex::new(Vec::with_capacity(8)),
         })
     }
@@ -398,7 +407,9 @@ impl ProtocolManager {
         channels: Arc<Channels>,
         permit: OwnedSemaphorePermit,
     ) {
-        let prot = Arc::new(ProtocolHandler::new(Arc::clone(self), comm, channels).await);
+        let prot = Arc::new(
+            ProtocolHandler::new(Arc::clone(&self.conf), Arc::clone(self), comm, channels).await,
+        );
 
         let mut insts = self.insts.lock().await;
 

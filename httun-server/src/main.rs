@@ -333,7 +333,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     }
 
     // Initialize the httun protocol manager.
-    let protman = ProtocolManager::new();
+    let protman = ProtocolManager::new(Arc::clone(&conf));
 
     // Notify systemd that we are ready.
     #[cfg(target_os = "linux")]

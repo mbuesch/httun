@@ -7,6 +7,7 @@ use aes_gcm::aead::{AeadCore as _, AeadInPlace as _, KeyInit as _, OsRng};
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
 use rand::prelude::*;
+use uuid::Uuid;
 
 //TODO: Currently we only have a symmetric common secret.
 // Add a way to derive a symmetric key from some sort of asymmetric key handshake.
@@ -350,14 +351,37 @@ impl Message {
 
 /// Payload for the `Operation::Init` message.
 pub struct InitPayload {
+    /// The sender's UUID.
+    sender_uuid: Uuid,
     /// Public session key for DH key exchange.
     session_public_key: KexPublic,
 }
 
 impl InitPayload {
+    // Raw byte offsets.
+    const OFFS_SEND_UUID: usize = 0;
+    const OFFS_SESS_PUB: usize = 16;
+
+    /// Size of the UUID.
+    const UUID_LEN: usize = Uuid::nil().as_bytes().len();
+
+    /// Size of the session public key.
+    const SESS_PUB_LEN: usize = KexPublic::byte_len();
+
+    /// Whole payload length.
+    const LEN: usize = Self::UUID_LEN + Self::SESS_PUB_LEN;
+
     /// Create a new `InitPayload` from a session public key.
-    pub fn new(session_public_key: KexPublic) -> Self {
-        Self { session_public_key }
+    pub fn new(sender_uuid: Uuid, session_public_key: KexPublic) -> Self {
+        Self {
+            sender_uuid,
+            session_public_key,
+        }
+    }
+
+    /// Get the sender UUID from this payload.
+    pub fn sender_uuid(&self) -> &Uuid {
+        &self.sender_uuid
     }
 
     /// Get the session public key from this payload.
@@ -367,15 +391,28 @@ impl InitPayload {
 
     /// Serialize the payload to raw bytes.
     pub fn serialize(&self) -> Vec<u8> {
-        self.session_public_key.as_raw_bytes().to_vec()
+        let mut buf = Vec::with_capacity(Self::LEN);
+
+        buf.extend(self.sender_uuid.as_bytes());
+        buf.extend(self.session_public_key.as_raw_bytes());
+
+        buf
     }
 
     /// Deserialize the payload from raw bytes.
     pub fn deserialize(buf: &[u8]) -> ah::Result<Self> {
-        if buf.len() != KexPublic::byte_len() {
+        if buf.len() != Self::LEN {
             return Err(err!("Invalid InitPayload length"));
         }
-        Ok(Self::new(buf.try_into()?))
+
+        let sender_uuid = &buf[Self::OFFS_SEND_UUID..Self::OFFS_SEND_UUID + Self::UUID_LEN];
+        let session_public_key =
+            &buf[Self::OFFS_SESS_PUB..Self::OFFS_SESS_PUB + Self::SESS_PUB_LEN];
+
+        Ok(InitPayload {
+            sender_uuid: Uuid::from_bytes(sender_uuid.try_into()?),
+            session_public_key: session_public_key.try_into()?,
+        })
     }
 }
 
