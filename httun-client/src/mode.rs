@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-pub mod genkey;
+pub mod generate;
 pub mod socket;
 pub mod test;
 pub mod tun;

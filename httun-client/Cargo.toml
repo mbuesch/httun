@@ -29,6 +29,7 @@ rand = { workspace = true }
 reqwest = { workspace = true, features = [ "http2", "rustls-tls", "gzip", "brotli", "zstd", "deflate", "charset", "hickory-dns" ] }
 tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros", "tracing" ] }
 url = { workspace = true }
+uuid = { workspace = true }
 
 [target.'cfg(target_os="linux")'.dependencies]
 httun-tun = { workspace = true, optional = true }

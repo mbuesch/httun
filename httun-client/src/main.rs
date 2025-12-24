@@ -14,7 +14,10 @@ use crate::{
     async_task_comm::AsyncTaskComm,
     client::{HttunClient, HttunClientMode},
     mode::{
-        genkey::run_mode_genkey, socket::run_mode_socket, test::run_mode_test, tun::run_mode_tun,
+        generate::{run_mode_genkey, run_mode_genuuid},
+        socket::run_mode_socket,
+        test::run_mode_test,
+        tun::run_mode_tun,
     },
     resolver::ResMode,
 };
@@ -146,6 +149,9 @@ enum Mode {
 
     /// Generate a new truly random key.
     GenKey {},
+
+    /// Generate a new UUID.
+    GenUuid {},
 }
 
 /// Default delay after errors before retrying.
@@ -190,8 +196,14 @@ macro_rules! recv_signal {
 }
 
 async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
-    if matches!(opts.mode, Some(Mode::GenKey {})) {
-        return run_mode_genkey().await;
+    match opts.mode {
+        Some(Mode::GenKey {}) => {
+            return run_mode_genkey().await;
+        }
+        Some(Mode::GenUuid {}) => {
+            return run_mode_genuuid().await;
+        }
+        _ => (),
     }
 
     let Some(mode) = &opts.mode else {
@@ -233,7 +245,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         Mode::Tun { .. } => HttunClientMode::L3,
         Mode::Socket { .. } => HttunClientMode::L7,
         Mode::Test { .. } => HttunClientMode::Test,
-        Mode::GenKey {} => unreachable!(),
+        Mode::GenKey {} | Mode::GenUuid {} => unreachable!(),
     };
 
     // Connect to the httun server.
@@ -272,11 +284,11 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         }
     });
 
-    match &opts.mode {
-        Some(Mode::Tun { tun }) => {
+    match mode {
+        Mode::Tun { tun } => {
             run_mode_tun(Arc::clone(&task_comm), tun).await?;
         }
-        Some(Mode::Socket { target, local_port }) => {
+        Mode::Socket { target, local_port } => {
             run_mode_socket(
                 Arc::clone(&exit_tx),
                 Arc::clone(&task_comm),
@@ -286,10 +298,10 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             )
             .await?;
         }
-        Some(Mode::Test { period }) => {
+        Mode::Test { period } => {
             run_mode_test(Arc::clone(&exit_tx), Arc::clone(&task_comm), *period).await?;
         }
-        None | Some(Mode::GenKey {}) => unreachable!(),
+        Mode::GenKey {} | Mode::GenUuid {} => unreachable!(),
     }
 
     // Task: Main loop.
