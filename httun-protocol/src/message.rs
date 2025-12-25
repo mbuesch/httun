@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use crate::key::{KexPublic, SessionKey};
+use crate::{
+    key::{KexPublic, SessionKey},
+    ser::{De, Ser},
+};
 use aes_gcm::aead::{AeadCore as _, AeadInPlace as _, KeyInit as _, OsRng};
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
@@ -158,14 +161,6 @@ impl std::fmt::Debug for Message {
 }
 
 impl Message {
-    // Raw byte offsets.
-    const OFFS_TYPE: usize = 0;
-    const OFFS_NONCE: usize = 1;
-    const OFFS_OPER: usize = 21;
-    const OFFS_SEQ: usize = 22;
-    const OFFS_LEN: usize = 30;
-    const OFFS_PAYLOAD: usize = 32;
-
     /// Nonce length.
     const NONCE_LEN: usize = std::mem::size_of::<Nonce>();
     /// Authentication tag length.
@@ -224,39 +219,44 @@ impl Message {
 
     /// Serialize message into bytes.
     pub fn serialize(&self, key: &SessionKey) -> ah::Result<Vec<u8>> {
+        // Type conversions.
         let type_: u8 = self.type_.into();
         let nonce = Aes256GcmN160::generate_nonce(&mut OsRng);
         let oper: u8 = self.oper.into();
         let sequence: u64 = self.sequence;
-        let len: u16 = self
+        let payload_len: u16 = self
             .payload
             .len()
             .try_into()
             .context("Payload is too big (>0xFFFF)")?;
 
-        let mut buf = Vec::with_capacity(Self::MAX_PAYLOAD_LEN + Self::OVERHEAD_LEN);
-        buf.extend(&type_.to_be_bytes());
-        buf.extend(&nonce);
-        buf.extend(&oper.to_be_bytes());
-        buf.extend(&sequence.to_be_bytes());
-        buf.extend(&len.to_be_bytes());
-        buf.extend(&self.payload);
+        // Serialize all fields into a buffer.
+        let ser_len = Self::OVERHEAD_LEN
+            .checked_add(payload_len.into())
+            .ok_or_else(|| err!("Overflow"))?;
+        let mut ser = Ser::new_fixed_size(ser_len);
+        ser.push_u8(type_)?;
+        ser.push(&nonce)?;
+        ser.push_u8(oper)?;
+        ser.push_u64(sequence)?;
+        ser.push_u16(payload_len)?;
+        ser.push(&self.payload)?;
 
+        // In-place encrypt all to-be encrypted fields and authenticate all fields.
         let assoc_data = [type_];
-
         let cipher = Aes256GcmN160::new(key.key().as_raw_bytes().into());
         let authtag = cipher
             .encrypt_in_place_detached(
                 &nonce,
                 &assoc_data,
-                &mut buf[Self::AREA_ASSOC_LEN + Self::NONCE_LEN..],
+                &mut ser.as_slice_mut()[Self::AREA_ASSOC_LEN + Self::NONCE_LEN..],
             )
             .map_err(|_| err!("AEAD encryption of httun message failed"))?;
 
-        buf.extend(&authtag);
+        // Append the authentication tag.
+        ser.push(&authtag)?;
 
-        assert_eq!(buf.len(), self.payload.len() + Self::OVERHEAD_LEN);
-        Ok(buf)
+        ser.into_vec()
     }
 
     /// Serialize message into base64url encoded string.
@@ -270,41 +270,54 @@ impl Message {
     }
 
     /// Deserialize message from bytes.
-    pub fn deserialize(buf: &[u8], key: &SessionKey) -> ah::Result<Self> {
-        Self::basic_length_check(buf)?;
+    pub fn deserialize(mut buf: Vec<u8>, key: &SessionKey) -> ah::Result<Self> {
+        // Deserialize the unencrypted and nonce fields at the front of the buffer.
+        let mut de = De::new_min_max(
+            &buf,
+            Self::OVERHEAD_LEN,
+            Self::OVERHEAD_LEN + Self::MAX_PAYLOAD_LEN,
+        )?;
+        let type_ = de.pop_u8()?;
+        let nonce: [u8; Self::NONCE_LEN] = de.pop_array()?;
 
-        let mut buf = buf.to_vec();
-        let buf_len = buf.len();
+        // Deserialize the auth tag at the end of the buffer.
+        let authtag: [u8; Self::AUTHTAG_LEN] = de.pop_back_array()?;
 
-        let type_ = u8::from_be_bytes(buf[Self::OFFS_TYPE..Self::OFFS_TYPE + 1].try_into()?);
-        let nonce: [u8; Self::NONCE_LEN] =
-            buf[Self::OFFS_NONCE..Self::OFFS_NONCE + Self::NONCE_LEN].try_into()?;
-        let authtag: [u8; Self::AUTHTAG_LEN] = buf[buf_len - Self::AUTHTAG_LEN..].try_into()?;
+        let de = de.suspend();
 
+        // In-place decrypt all encrypted fields and authenticate all fields.
+        let crypt_begin = Self::AREA_ASSOC_LEN + Self::NONCE_LEN;
+        let crypt_end = buf.len() - Self::AUTHTAG_LEN;
         let assoc_data = [type_];
-
         let cipher = Aes256GcmN160::new(key.key().as_raw_bytes().into());
         cipher
             .decrypt_in_place_detached(
                 &nonce.into(),
                 &assoc_data,
-                &mut buf[Self::AREA_ASSOC_LEN + Self::NONCE_LEN..buf_len - Self::AUTHTAG_LEN],
+                &mut buf[crypt_begin..crypt_end],
                 &authtag.into(),
             )
             .map_err(|_| err!("AEAD decryption of httun message failed."))?;
 
-        let oper = u8::from_be_bytes(buf[Self::OFFS_OPER..Self::OFFS_OPER + 1].try_into()?);
-        let sequence = u64::from_be_bytes(buf[Self::OFFS_SEQ..Self::OFFS_SEQ + 8].try_into()?);
-        let len = u16::from_be_bytes(buf[Self::OFFS_LEN..Self::OFFS_LEN + 2].try_into()?);
+        let mut de = de.resume(&buf);
 
+        // Deserialize all remaining fields that have just been decrypted.
+        let oper = de.pop_u8()?;
+        let sequence = de.pop_u64()?;
+        let len = de.pop_u16()?;
+        let remaining_range = de.into_remaining_range();
+        let payload = &buf[remaining_range];
+
+        // Type conversions.
         let type_ = type_.try_into()?;
         let oper = oper.try_into()?;
-
         let len: usize = len.into();
+        let payload = payload.to_vec();
+
+        // Check the authenticated message payload length against what's actually been received.
         if len != buf.len() - Self::OVERHEAD_LEN {
             return Err(err!("Invalid payload length."));
         }
-        let payload = buf[Self::OFFS_PAYLOAD..Self::OFFS_PAYLOAD + len].to_vec();
 
         Ok(Message {
             type_,
@@ -315,8 +328,8 @@ impl Message {
     }
 
     /// Deserialize message from base64url encoded string.
-    pub fn deserialize_b64u(buf: &[u8], key: &SessionKey) -> ah::Result<Self> {
-        Self::deserialize(&Self::decode_b64u(buf)?, key)
+    pub fn deserialize_b64u(buf: Vec<u8>, key: &SessionKey) -> ah::Result<Self> {
+        Self::deserialize(Self::decode_b64u(&buf)?, key)
     }
 
     /// Decode base64url string into bytes.
@@ -331,21 +344,15 @@ impl Message {
     /// The returned information is not authenticated.
     /// Use [Message::deserialize] to get authenticated data.
     pub fn peek_type(buf: &[u8]) -> ah::Result<MsgType> {
-        Self::basic_length_check(buf)?;
-        u8::from_be_bytes(buf[Self::OFFS_TYPE..Self::OFFS_TYPE + 1].try_into()?).try_into()
-    }
+        // Deserialize the type field (first field).
+        let mut de = De::new_min_max(
+            buf,
+            Self::OVERHEAD_LEN,
+            Self::OVERHEAD_LEN + Self::MAX_PAYLOAD_LEN,
+        )?;
+        let type_ = de.pop_u8()?;
 
-    /// Basic length check of raw message bytes.
-    ///
-    /// This returns an error if the length is obviously invalid.
-    fn basic_length_check(buf: &[u8]) -> ah::Result<()> {
-        if buf.len() < Self::OVERHEAD_LEN {
-            return Err(err!("Message size is too small."));
-        }
-        if buf.len() > Self::OVERHEAD_LEN + Self::MAX_PAYLOAD_LEN {
-            return Err(err!("Message size is too big."));
-        }
-        Ok(())
+        type_.try_into()
     }
 }
 
@@ -358,10 +365,6 @@ pub struct InitPayload {
 }
 
 impl InitPayload {
-    // Raw byte offsets.
-    const OFFS_SEND_UUID: usize = 0;
-    const OFFS_SESS_PUB: usize = 16;
-
     /// Size of the UUID.
     const UUID_LEN: usize = Uuid::nil().as_bytes().len();
 
@@ -390,24 +393,21 @@ impl InitPayload {
     }
 
     /// Serialize the payload to raw bytes.
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(Self::LEN);
+    pub fn serialize(&self) -> ah::Result<Vec<u8>> {
+        let mut ser = Ser::new_fixed_size(Self::LEN);
 
-        buf.extend(self.sender_uuid.as_bytes());
-        buf.extend(self.session_public_key.as_raw_bytes());
+        ser.push(self.sender_uuid.as_bytes())?;
+        ser.push(self.session_public_key.as_raw_bytes())?;
 
-        buf
+        ser.into_vec()
     }
 
     /// Deserialize the payload from raw bytes.
     pub fn deserialize(buf: &[u8]) -> ah::Result<Self> {
-        if buf.len() != Self::LEN {
-            return Err(err!("Invalid InitPayload length"));
-        }
+        let mut de = De::new_fixed_size(buf, Self::LEN)?;
 
-        let sender_uuid = &buf[Self::OFFS_SEND_UUID..Self::OFFS_SEND_UUID + Self::UUID_LEN];
-        let session_public_key =
-            &buf[Self::OFFS_SESS_PUB..Self::OFFS_SESS_PUB + Self::SESS_PUB_LEN];
+        let sender_uuid = de.pop(Self::UUID_LEN)?;
+        let session_public_key = de.pop(Self::SESS_PUB_LEN)?;
 
         Ok(InitPayload {
             sender_uuid: Uuid::from_bytes(sender_uuid.try_into()?),

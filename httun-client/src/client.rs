@@ -226,7 +226,7 @@ impl DirectionR {
                 }
             }
 
-            let data: &[u8] = &resp.bytes().await.context("httun HTTP-r get body")?;
+            let data: Vec<u8> = resp.bytes().await.context("httun HTTP-r get body")?.into();
             if !data.is_empty() {
                 log::trace!("Received from HTTP-r");
 
@@ -347,7 +347,9 @@ async fn get_session(
         let kex = KeyExchange::new();
 
         let msg_payload = InitPayload::new(*client_uuid, kex.public_key());
-        let msg = Message::new(MsgType::Init, Operation::Init, msg_payload.serialize())?;
+        let msg_payload = msg_payload.serialize().context("Make httun init payload")?;
+        let msg = Message::new(MsgType::Init, Operation::Init, msg_payload)
+            .context("Make httun packet")?;
         let msg = msg
             .serialize_b64u(&init_session_key)
             .context("httun session message serialize")?;
@@ -381,7 +383,7 @@ async fn get_session(
             }
         }
 
-        let data: &[u8] = &resp.bytes().await.context("httun session get body")?;
+        let data: Vec<u8> = resp.bytes().await.context("httun session get body")?.into();
         let reply =
             Message::deserialize(data, &init_session_key).context("Message deserialize (init)")?;
         if reply.type_() != MsgType::Init {

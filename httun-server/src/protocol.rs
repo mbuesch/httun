@@ -155,7 +155,7 @@ impl ProtocolHandler {
 
         log::debug!("{}: W direction packet received", chan.id());
 
-        let msg = Message::deserialize(&payload, session_key)?;
+        let msg = Message::deserialize(payload, session_key)?;
         let oper = msg.oper();
 
         self.check_rx_sequence(&chan, &msg, SequenceType::B)
@@ -210,7 +210,7 @@ impl ProtocolHandler {
 
         log::trace!("{}: Session init packet received", chan.id());
 
-        let msg = Message::deserialize(&payload, &session_key)?;
+        let msg = Message::deserialize(payload, &session_key)?;
         let oper = msg.oper();
 
         if oper != Operation::Init {
@@ -231,7 +231,10 @@ impl ProtocolHandler {
             .await;
 
         let reply_payload = InitPayload::new(*self.conf.uuid(), local_public_key);
-        let reply = Message::new(MsgType::Init, Operation::Init, reply_payload.serialize())
+        let reply_payload = reply_payload
+            .serialize()
+            .context("Make httun init payload")?;
+        let reply = Message::new(MsgType::Init, Operation::Init, reply_payload)
             .context("Make httun packet")?;
 
         self.send_reply_msg(&chan, reply, &session_key).await?;
@@ -249,7 +252,7 @@ impl ProtocolHandler {
 
         log::debug!("{}: R direction packet received", chan.id());
 
-        let msg = Message::deserialize(&payload, session_key)?;
+        let msg = Message::deserialize(payload, session_key)?;
         let oper = msg.oper();
 
         self.check_rx_sequence(&chan, &msg, SequenceType::C)

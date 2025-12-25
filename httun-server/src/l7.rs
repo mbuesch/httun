@@ -342,7 +342,7 @@ impl L7State {
 
             // Pack the received data into an L7 container.
             let cont = L7Container::new(remote_addr, buf);
-            let data = cont.serialize();
+            let data = cont.serialize().context("L7 packing")?;
 
             break Ok(data);
         }

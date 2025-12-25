@@ -11,6 +11,7 @@ mod l7container;
 mod message;
 mod random;
 mod sequence;
+mod ser;
 
 pub use crate::{
     key::{KexPublic, KexSharedSecret, KeyExchange, SessionKey, UserSharedSecret},

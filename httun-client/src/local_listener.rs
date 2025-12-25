@@ -27,8 +27,8 @@ async fn send_close_to_httun(
 ) -> ah::Result<()> {
     let buf = vec![]; // Empty buffer signals a closed connection.
     let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
-    let msg = Message::new(MsgType::Data, Operation::L7ToSrv, l7.serialize())
-        .context("Make httun packet")?;
+    let l7 = l7.serialize().context("L7 serialize")?;
+    let msg = Message::new(MsgType::Data, Operation::L7ToSrv, l7).context("Make httun packet")?;
     comm.send_to_httun(msg).await;
     Ok(())
 }
@@ -53,8 +53,9 @@ async fn local_rx(
         }
 
         let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
-        let msg = Message::new(MsgType::Data, Operation::L7ToSrv, l7.serialize())
-            .context("Make httun packet")?;
+        let l7 = l7.serialize().context("L7 serialize")?;
+        let msg =
+            Message::new(MsgType::Data, Operation::L7ToSrv, l7).context("Make httun packet")?;
 
         comm.send_to_httun(msg).await;
     }
