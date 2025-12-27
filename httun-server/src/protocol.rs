@@ -128,21 +128,12 @@ impl ProtocolHandler {
     /// `chan`: Channel to send the message on.
     /// `msg`: Message to send.
     /// `session`: Session to use for sending.
-    async fn send_reply_msg(
-        &self,
-        chan: &Channel,
-        msg: Message,
-        session_key: &SessionKey,
-    ) -> ah::Result<()> {
+    async fn send_reply_msg(&self, msg: Message, session_key: &SessionKey) -> ah::Result<()> {
         let payload = msg
             .serialize(session_key)
             .context("Serialize httun message")?;
 
-        self.comm.send_reply(payload).await?;
-
-        chan.log_activity();
-
-        Ok(())
+        self.comm.send_reply(payload).await
     }
 
     /// Handle data communication from client to server.
@@ -188,8 +179,6 @@ impl ProtocolHandler {
                 return Err(err!("Received {oper:?} in UnOperation::ToSrv context"));
             }
         }
-
-        chan.log_activity();
 
         Ok(())
     }
@@ -237,7 +226,7 @@ impl ProtocolHandler {
         let reply = Message::new(MsgType::Init, Operation::Init, reply_payload)
             .context("Make httun packet")?;
 
-        self.send_reply_msg(&chan, reply, &session_key).await?;
+        self.send_reply_msg(reply, &session_key).await?;
 
         Ok(())
     }
@@ -287,7 +276,7 @@ impl ProtocolHandler {
             Message::new(MsgType::Data, reply_oper, payload).context("Make httun packet")?;
         msg.set_sequence(session.sequence);
 
-        self.send_reply_msg(&chan, msg, session_key).await?;
+        self.send_reply_msg(msg, session_key).await?;
 
         Ok(())
     }

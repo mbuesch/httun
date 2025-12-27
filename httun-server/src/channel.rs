@@ -140,6 +140,8 @@ impl Channel {
             }
         }
 
+        self.log_activity();
+
         // Return the new session key.
         (local_public_key, session_key)
     }
@@ -181,10 +183,12 @@ impl Channel {
     /// This will be sent back as pong payload.
     pub async fn put_ping(&self, payload: Vec<u8>) {
         self.ping.put(payload).await;
+        self.log_activity();
     }
 
     /// Generate the pong payload to send.
     pub async fn get_pong(&self) -> Vec<u8> {
+        self.log_activity();
         self.ping.get().await
     }
 
@@ -192,7 +196,9 @@ impl Channel {
     #[cfg(all(feature = "tun", target_os = "linux"))]
     pub async fn l3send(&self, data: &[u8]) -> ah::Result<()> {
         if let Some(l3) = &self.l3 {
-            l3.send(data).await.context("TUN/L3 send")
+            l3.send(data).await.context("TUN/L3 send")?;
+            self.log_activity();
+            Ok(())
         } else {
             Err(err!(
                 "Can't send data to TUN interface. \
@@ -211,6 +217,7 @@ impl Channel {
     #[cfg(all(feature = "tun", target_os = "linux"))]
     pub async fn l3recv(&self) -> ah::Result<Vec<u8>> {
         if let Some(l3) = &self.l3 {
+            self.log_activity();
             l3.recv().await.context("TUN/L3 receive")
         } else {
             Err(err!(
@@ -229,7 +236,9 @@ impl Channel {
     /// Send data to the L7 socket.
     pub async fn l7send(&self, data: &[u8]) -> ah::Result<()> {
         if let Some(l7) = &self.l7 {
-            l7.send(data).await.context("L7 socket send")
+            l7.send(data).await.context("L7 socket send")?;
+            self.log_activity();
+            Ok(())
         } else {
             Err(err!(
                 "Can't send data to L7 socket. \
@@ -242,6 +251,7 @@ impl Channel {
     /// Receive data from the L7 socket.
     pub async fn l7recv(&self) -> ah::Result<Vec<u8>> {
         if let Some(l7) = &self.l7 {
+            self.log_activity();
             l7.recv().await.context("L7 socket receive")
         } else {
             Err(err!(
