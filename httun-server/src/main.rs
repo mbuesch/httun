@@ -213,7 +213,7 @@ struct Opts {
     /// Enable `tokio-console` tracing support.
     ///
     /// See https://crates.io/crates/tokio-console
-    #[arg(long)]
+    #[arg(long, hide = true)]
     tokio_console: bool,
 
     /// Show version information and exit.
