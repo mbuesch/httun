@@ -429,19 +429,47 @@ pub struct HttunClient {
 
 impl HttunClient {
     /// Connect to a httun server.
+    #[allow(clippy::too_many_arguments)]
     pub async fn connect(
         base_url: &str,
         res_mode: ResMode,
-        chan_id: u16,
+        alias: Option<&str>,
+        chan_id: Option<u16>,
         mode: HttunClientMode,
         user_agent: &str,
         extra_headers: Arc<[HttpHeader]>,
         conf: Arc<Config>,
     ) -> ah::Result<Self> {
-        let Some(chan_conf) = conf.channel_with_url(chan_id, base_url) else {
-            return Err(err!(
-                "Did not find a configuration for URL '{base_url}' with channel id='{chan_id}'.",
-            ));
+        // Get the channel configuration.
+        let chan_conf = if let Some(alias) = alias {
+            // Get channel configuration by alias.
+            let Some(chan_conf) = conf.channel_by_alias(alias) else {
+                return Err(err!(
+                    "Did not find a channel configuration with alias '{alias}'."
+                ));
+            };
+
+            let chan_id_conf = chan_conf.id();
+            if let Some(chan_id) = chan_id
+                && chan_id_conf != chan_id
+            {
+                return Err(err!(
+                    "Given channel ID '{chan_id}' does not match \
+                     configured ID '{chan_id_conf}' for alias '{alias}'."
+                ));
+            }
+            chan_conf
+        } else {
+            let chan_id = chan_id.unwrap_or_default(); // Default to channel 0.
+
+            // Get channel configuration by URL.
+            let Some(chan_conf) = conf.channel_by_url(chan_id, base_url) else {
+                return Err(err!(
+                    "Did not find a configuration for URL '{base_url}' \
+                     with channel id='{chan_id}'.",
+                ));
+            };
+            chan_conf
         };
 
         // Try to resolve the server-url domain name (if any) into an IP address.

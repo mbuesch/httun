@@ -65,7 +65,7 @@ impl UnixConn {
 
         // Send the initialization handshake reply.
         let mut extra_headers = extra_headers.to_vec();
-        if let Some(chan_conf) = conf.channel(this.chan_id()) {
+        if let Some(chan_conf) = conf.channel_by_id(this.chan_id()) {
             extra_headers.extend_from_slice(chan_conf.http().extra_headers());
         }
         this.send(&UnMessage::new_from_srv_init(this.chan_id(), extra_headers))

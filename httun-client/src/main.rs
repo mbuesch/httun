@@ -42,9 +42,13 @@ struct Opts {
     /// Where '/httun' is the base path to the FCGI.
     server_url: Option<String>,
 
+    /// Identify the local channel configuration by alias rather than by URL.
+    #[arg(long, short = 'a', value_name = "CHAN-ALIAS")]
+    alias: Option<String>,
+
     /// The httun server's channel ID to use for communication.
-    #[arg(long, short = 'c', default_value = "0", value_name = "ID")]
-    channel: u16,
+    #[arg(long, short = 'c', value_name = "ID")]
+    channel: Option<u16>,
 
     /// The User-Agent header to use for the HTTP connection.
     ///
@@ -254,6 +258,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let mut client = HttunClient::connect(
         server_url,
         res_mode,
+        opts.alias.as_deref(),
         opts.channel,
         client_mode,
         &opts.user_agent,

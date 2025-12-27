@@ -364,6 +364,7 @@ pub struct ConfigChannel {
     disabled: bool,
     enable_test: bool,
     urls: Vec<String>,
+    alias: Option<String>,
     id: u16,
     shared_secret: UserSharedSecret,
     tun: Option<String>,
@@ -377,6 +378,7 @@ impl Default for ConfigChannel {
             disabled: Default::default(),
             enable_test: Default::default(),
             urls: Default::default(),
+            alias: Default::default(),
             id: Default::default(),
             shared_secret: UserSharedSecret::random(),
             tun: Default::default(),
@@ -420,6 +422,14 @@ impl TryFrom<&toml::Value> for ConfigChannel {
                         .to_string(),
                 );
             }
+        }
+
+        if let Some(v) = table.get("alias") {
+            this.alias = Some(
+                v.as_str()
+                    .ok_or_else(|| err!("channel: 'alias' must be a string"))?
+                    .to_string(),
+            );
         }
 
         this.id = table
@@ -499,6 +509,10 @@ impl ConfigChannel {
             }
         }
         false
+    }
+
+    pub fn alias(&self) -> Option<&str> {
+        self.alias.as_deref()
     }
 
     pub fn shared_secret(&self) -> &UserSharedSecret {
@@ -647,11 +661,16 @@ impl Config {
         }
     }
 
-    pub fn channel(&self, id: u16) -> Option<&ConfigChannel> {
+    pub fn channel_by_id(&self, id: u16) -> Option<&ConfigChannel> {
         self.channels_iter().find(|chan| chan.id() == id)
     }
 
-    pub fn channel_with_url(&self, id: u16, url: &str) -> Option<&ConfigChannel> {
+    pub fn channel_by_alias(&self, alias: &str) -> Option<&ConfigChannel> {
+        self.channels_iter()
+            .find(|chan| chan.alias() == Some(alias))
+    }
+
+    pub fn channel_by_url(&self, id: u16, url: &str) -> Option<&ConfigChannel> {
         self.channels_iter()
             .find(|chan| chan.id() == id && chan.has_url(url))
     }

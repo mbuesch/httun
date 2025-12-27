@@ -633,7 +633,7 @@ impl HttpConn {
 
         let chan = self
             .conf
-            .channel(req.chan_id)
+            .channel_by_id(req.chan_id)
             .context("Get channel from configuration")?;
         self.check_auth(req, chan.http().basic_auth())?;
 
