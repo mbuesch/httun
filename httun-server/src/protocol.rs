@@ -332,11 +332,18 @@ impl ProtocolHandler {
 
     /// Check if the protocol handler is dead or channel activity has timed out.
     fn is_dead(&self) -> bool {
-        self.dead.load(atomic::Ordering::Relaxed)
-            || self
-                .chan()
-                .map(|c| c.activity_timed_out())
-                .unwrap_or_default()
+        if self.dead.load(atomic::Ordering::Relaxed) {
+            return true;
+        }
+        self.chan()
+            .map(|chan| {
+                let timed_out = chan.activity_timed_out();
+                if timed_out {
+                    log::debug!("Channel {} activity timed out", chan.id());
+                }
+                timed_out
+            })
+            .unwrap_or_default()
     }
 
     /// Perform periodic work for this protocol handler.
