@@ -210,6 +210,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         Opts::command()
             .print_help()
             .context("Failed to print help")?;
+        println!();
         return Err(err!(
             "'httun-client' requires a subcommand but one was not provided."
         ));
@@ -218,6 +219,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         Opts::command()
             .print_help()
             .context("Failed to print help")?;
+        println!();
         return Err(err!("'httun-client' requires the SERVER_URL argument."));
     };
 
