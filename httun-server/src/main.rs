@@ -33,6 +33,7 @@ use std::{
 };
 use tokio::{
     runtime,
+    signal::ctrl_c,
     sync::{self, Semaphore},
     task,
 };
@@ -421,26 +422,13 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     }
 
     // Task: Main loop.
-    let exitcode;
     loop {
         tokio::select! {
-            _ = recv_signal!(sigterm) => {
-                log::info!("SIGTERM: Terminating.");
-                exitcode = Ok(());
-                break;
-            }
-            _ = recv_signal!(sigint) => {
-                exitcode = Err(err!("Interrupted by SIGINT."));
-                break;
-            }
-            _ = recv_signal!(sighup) => {
-                log::info!("SIGHUP: Ignoring.");
-            }
-            code = recv_signal!(exit_rx) => {
+            biased;
+            code = exit_rx.recv() => {
                 #[cfg(target_family = "unix")]
                 {
-                    exitcode = code.unwrap_or_else(|| Err(err!("Unknown error code.")));
-                    break;
+                    break code.unwrap_or_else(|| Err(err!("Unknown error code.")));
                 }
                 #[cfg(not(target_family = "unix"))]
                 {
@@ -448,9 +436,21 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                     unreachable!();
                 }
             }
+            _ = ctrl_c() => {
+                break Err(err!("Interrupted by Ctrl+C."));
+            }
+            _ = recv_signal!(sigint) => {
+                break Err(err!("Interrupted by SIGINT."));
+            }
+            _ = recv_signal!(sigterm) => {
+                log::info!("SIGTERM: Terminating.");
+                break Ok(());
+            }
+            _ = recv_signal!(sighup) => {
+                log::info!("SIGHUP: Ignoring.");
+            }
         }
     }
-    exitcode
 }
 
 fn main() -> ah::Result<()> {

@@ -27,7 +27,6 @@ pub async fn async_main() -> ah::Result<()> {
     // Register unix signal handlers.
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;
-    let mut sighup = signal(SignalKind::hangup())?;
 
     // Initialize FastCGI handler.
     init_fcgi_handler()?;
@@ -71,28 +70,19 @@ pub async fn async_main() -> ah::Result<()> {
     });
 
     // Task: Main loop.
-    let exitcode;
-    loop {
-        tokio::select! {
-            _ = sigterm.recv() => {
-                eprintln!("SIGTERM: Terminating.");
-                exitcode = Ok(());
-                break;
-            }
-            _ = sigint.recv() => {
-                exitcode = Err(err!("Interrupted by SIGINT."));
-                break;
-            }
-            _ = sighup.recv() => {
-                println!("SIGHUP: Ignoring.");
-            }
-            code = exit_rx.recv() => {
-                exitcode = code.unwrap_or_else(|| Err(err!("Unknown error code.")));
-                break;
-            }
+    tokio::select! {
+        biased;
+        code = exit_rx.recv() => {
+            code.unwrap_or_else(|| Err(err!("Unknown error code.")))
+        }
+        _ = sigint.recv() => {
+            Err(err!("Interrupted by SIGINT."))
+        }
+        _ = sigterm.recv() => {
+            eprintln!("SIGTERM: Terminating.");
+            Ok(())
         }
     }
-    exitcode
 }
 
 // vim: ts=4 sw=4 expandtab
