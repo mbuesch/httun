@@ -426,15 +426,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         tokio::select! {
             biased;
             code = exit_rx.recv() => {
-                #[cfg(target_family = "unix")]
-                {
-                    break code.unwrap_or_else(|| Err(err!("Unknown error code.")));
-                }
-                #[cfg(not(target_family = "unix"))]
-                {
-                    let _: () = code;
-                    unreachable!();
-                }
+                break code.unwrap_or_else(|| Err(err!("Unknown error code.")));
             }
             _ = ctrl_c() => {
                 break Err(err!("Interrupted by Ctrl+C."));
