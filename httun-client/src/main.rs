@@ -6,6 +6,7 @@
 
 mod async_task_comm;
 mod client;
+mod error_throttle;
 mod local_listener;
 mod mode;
 mod resolver;
@@ -13,6 +14,7 @@ mod resolver;
 use crate::{
     async_task_comm::AsyncTaskComm,
     client::{HttunClient, HttunClientMode},
+    error_throttle::ErrorThrottle,
     mode::{
         generate::{run_mode_genkey, run_mode_genuuid},
         socket::run_mode_socket,
@@ -26,7 +28,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use httun_conf::{Config, ConfigVariant};
 use httun_util::header::HttpHeader;
 use std::{path::PathBuf, sync::Arc, time::Duration};
-use tokio::{runtime, sync::mpsc, task, time};
+use tokio::{runtime, signal::ctrl_c, sync::mpsc, task, time};
 
 #[cfg(target_family = "unix")]
 use tokio::signal::unix::{SignalKind, signal};
@@ -239,7 +241,6 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     // Register unix signal handlers.
     let mut sigterm = register_signal!(terminate).context("Register SIGTERM")?;
     let mut sigint = register_signal!(interrupt).context("Register SIGINT")?;
-    let mut sighup = register_signal!(hangup).context("Register SIGHUP")?;
 
     // Get the resolver mode from the options.
     let res_mode = match (opts.resolve_ipv6, opts.resolve_ipv4) {
@@ -277,16 +278,18 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         let task_comm = Arc::clone(&task_comm);
 
         async move {
+            let ethrottle = ErrorThrottle::new();
+
             loop {
                 let _exit_tx = Arc::clone(&exit_tx);
                 let task_comm = Arc::clone(&task_comm);
 
                 if let Err(e) = client.handle_packets(task_comm).await {
                     log::error!("httun client: {e:?}");
-                    error_delay().await;
                 } else {
-                    unreachable!();
+                    log::error!("httun client: Unexpected: handle_packets() returned Ok.");
                 }
+                ethrottle.error().await;
             }
         }
     });
@@ -312,28 +315,22 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     }
 
     // Task: Main loop.
-    let exitcode;
-    loop {
-        tokio::select! {
-            _ = recv_signal!(sigterm) => {
-                log::info!("SIGTERM: Terminating.");
-                exitcode = Ok(());
-                break;
-            }
-            _ = recv_signal!(sigint) => {
-                exitcode = Err(err!("Interrupted by SIGINT."));
-                break;
-            }
-            _ = recv_signal!(sighup) => {
-                log::info!("SIGHUP: Ignoring.");
-            }
-            code = exit_rx.recv() => {
-                exitcode = code.unwrap_or_else(|| Err(err!("Unknown error code.")));
-                break;
-            }
+    tokio::select! {
+        biased;
+        code = exit_rx.recv() => {
+            code.unwrap_or_else(|| Err(err!("Unknown error code.")))
+        }
+        _ = ctrl_c() => {
+            Err(err!("Interrupted by Ctrl+C."))
+        }
+        _ = recv_signal!(sigint) => {
+            Err(err!("Interrupted by SIGINT."))
+        }
+        _ = recv_signal!(sigterm) => {
+            log::info!("SIGTERM: Terminating.");
+            Ok(())
         }
     }
-    exitcode
 }
 
 fn main() -> ah::Result<()> {
