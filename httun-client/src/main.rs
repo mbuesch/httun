@@ -212,7 +212,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         _ => (),
     }
 
-    let Some(mode) = &opts.mode else {
+    if opts.mode.is_none() {
         Opts::command()
             .print_help()
             .context("Failed to print help")?;
@@ -220,14 +220,14 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         return Err(err!(
             "'httun-client' requires a subcommand but one was not provided."
         ));
-    };
-    let Some(server_url) = &opts.server_url else {
+    }
+    if opts.server_url.is_none() {
         Opts::command()
             .print_help()
             .context("Failed to print help")?;
         println!();
         return Err(err!("'httun-client' requires the SERVER_URL argument."));
-    };
+    }
 
     let conf = Arc::new(
         Config::new_parse_file(&opts.get_config(), ConfigVariant::Client)
@@ -248,37 +248,45 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         (false, false) | (false, true) => ResMode::Ipv4,
     };
 
-    let client_mode = match mode {
-        Mode::Tun { .. } => HttunClientMode::L3,
-        Mode::Socket { .. } => HttunClientMode::L7,
-        Mode::Test { .. } => HttunClientMode::Test,
-        Mode::GenKey {} | Mode::GenUuid {} => unreachable!(),
-    };
-
-    // Connect to the httun server.
-    let mut client = HttunClient::connect(
-        server_url,
-        res_mode,
-        opts.alias.as_deref(),
-        opts.channel,
-        client_mode,
-        &opts.user_agent,
-        (&*opts.extra_headers).into(),
-        Arc::clone(&conf),
-    )
-    .await
-    .context("Connect to httun server (FCGI)")?;
-
     // Initialize communication between the async tasks.
     let task_comm = Arc::new(AsyncTaskComm::new());
 
     // Spawn task: httun client handler.
     task::spawn({
+        let opts = Arc::clone(&opts);
         let exit_tx = Arc::clone(&exit_tx);
         let task_comm = Arc::clone(&task_comm);
 
         async move {
             let ethrottle = ErrorThrottle::new();
+
+            let client_mode = match opts.mode {
+                Some(Mode::Tun { .. }) => HttunClientMode::L3,
+                Some(Mode::Socket { .. }) => HttunClientMode::L7,
+                Some(Mode::Test { .. }) => HttunClientMode::Test,
+                None | Some(Mode::GenKey {}) | Some(Mode::GenUuid {}) => unreachable!(),
+            };
+
+            // Connect to the httun server.
+            let mut client = match HttunClient::connect(
+                opts.server_url.as_ref().expect("opts.server_url is None"),
+                res_mode,
+                opts.alias.as_deref(),
+                opts.channel,
+                client_mode,
+                &opts.user_agent,
+                (&*opts.extra_headers).into(),
+                Arc::clone(&conf),
+            )
+            .await
+            .context("Connect to httun server (FCGI)")
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = exit_tx.send(Err(e)).await;
+                    return;
+                }
+            };
 
             loop {
                 let _exit_tx = Arc::clone(&exit_tx);
@@ -294,25 +302,43 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         }
     });
 
-    match mode {
-        Mode::Tun { tun } => {
-            run_mode_tun(Arc::clone(&task_comm), tun).await?;
+    // Spawn task: Mode handler.
+    task::spawn({
+        let opts = Arc::clone(&opts);
+        let exit_tx = Arc::clone(&exit_tx);
+        let task_comm = Arc::clone(&task_comm);
+
+        async move {
+            match &opts.mode {
+                Some(Mode::Tun { tun }) => {
+                    if let Err(e) = run_mode_tun(Arc::clone(&task_comm), tun).await {
+                        let _ = exit_tx.send(Err(e)).await;
+                    }
+                }
+                Some(Mode::Socket { target, local_port }) => {
+                    if let Err(e) = run_mode_socket(
+                        Arc::clone(&exit_tx),
+                        Arc::clone(&task_comm),
+                        target,
+                        res_mode,
+                        *local_port,
+                    )
+                    .await
+                    {
+                        let _ = exit_tx.send(Err(e)).await;
+                    }
+                }
+                Some(Mode::Test { period }) => {
+                    if let Err(e) =
+                        run_mode_test(Arc::clone(&exit_tx), Arc::clone(&task_comm), *period).await
+                    {
+                        let _ = exit_tx.send(Err(e)).await;
+                    }
+                }
+                None | Some(Mode::GenKey {}) | Some(Mode::GenUuid {}) => unreachable!(),
+            }
         }
-        Mode::Socket { target, local_port } => {
-            run_mode_socket(
-                Arc::clone(&exit_tx),
-                Arc::clone(&task_comm),
-                target,
-                res_mode,
-                *local_port,
-            )
-            .await?;
-        }
-        Mode::Test { period } => {
-            run_mode_test(Arc::clone(&exit_tx), Arc::clone(&task_comm), *period).await?;
-        }
-        Mode::GenKey {} | Mode::GenUuid {} => unreachable!(),
-    }
+    });
 
     // Task: Main loop.
     tokio::select! {
