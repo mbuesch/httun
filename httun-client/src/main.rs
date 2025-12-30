@@ -26,7 +26,7 @@ use crate::{
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::{CommandFactory, Parser, Subcommand};
 use httun_conf::{Config, ConfigVariant};
-use httun_util::{header::HttpHeader, ChannelId};
+use httun_util::{ChannelId, header::HttpHeader};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{runtime, signal::ctrl_c, sync::mpsc, task, time};
 

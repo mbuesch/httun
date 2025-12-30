@@ -13,9 +13,9 @@ use httun_protocol::{
     SequenceValidator, SessionKey, UserSharedSecret, secure_random,
 };
 use httun_util::{
+    ChannelId,
     header::HttpHeader,
     timeouts::{HTTP_R_TIMEOUT, HTTP_W_TIMEOUT},
-    ChannelId,
 };
 use reqwest::{
     Client, StatusCode,
