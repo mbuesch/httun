@@ -17,7 +17,7 @@ pub struct ServerUnixConn {
 }
 
 impl ServerUnixConn {
-    pub async fn new(socket_path: &Path, chan_id: u16) -> ah::Result<Self> {
+    pub async fn new(socket_path: &Path, chan_id: u16, dir_to_server: bool) -> ah::Result<Self> {
         let stream = UnixStream::connect(socket_path)
             .await
             .context("Connect to Unix socket")?;
@@ -28,7 +28,12 @@ impl ServerUnixConn {
         };
 
         // Send initialization handshake.
-        this.send_msg(UnMessage::new_to_srv_init(chan_id))
+        let msg = if dir_to_server {
+            UnMessage::new_init_dir_to_srv(chan_id)
+        } else {
+            UnMessage::new_init_dir_from_srv(chan_id)
+        };
+        this.send_msg(msg)
             .await
             .context("Initialize unix connection to httun-server")?;
 
@@ -37,11 +42,12 @@ impl ServerUnixConn {
             .await
             .context("Handshake receive timeout")?
             .context("Handshake receive")?;
-        if msg.op() != UnOperation::FromSrvInit {
+        let expected_op = UnOperation::InitReply;
+        if msg.op() != expected_op {
             return Err(err!(
                 "UnixConn: Got {:?} but expected {:?}",
                 msg.op(),
-                UnOperation::FromSrvInit
+                expected_op,
             ));
         }
         if msg.chan_id() != chan_id {
@@ -109,10 +115,10 @@ impl ServerUnixConn {
     }
 
     async fn send_msg(&self, msg: UnMessage) -> ah::Result<()> {
-        let msg = msg.serialize()?;
-        let hdr = UnMessageHeader::new(msg.len())?.serialize()?;
-        self.do_send(&hdr).await?;
-        self.do_send(&msg).await
+        let mut msg = msg.serialize()?;
+        let mut buf = UnMessageHeader::new(msg.len())?.serialize()?;
+        buf.append(&mut msg);
+        self.do_send(&buf).await
     }
 
     async fn recv_msg(&self) -> ah::Result<UnMessage> {

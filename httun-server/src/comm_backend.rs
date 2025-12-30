@@ -80,8 +80,9 @@ impl CommBackend {
                     UnOperation::ToSrv => Ok(CommRxMsg::ToSrv(umsg.into_payload())),
                     UnOperation::ReqFromSrv => Ok(CommRxMsg::ReqFromSrv(umsg.into_payload())),
                     UnOperation::Keepalive => Ok(CommRxMsg::Keepalive),
-                    UnOperation::ToSrvInit
-                    | UnOperation::FromSrvInit
+                    UnOperation::InitDirToSrv
+                    | UnOperation::InitDirFromSrv
+                    | UnOperation::InitReply
                     | UnOperation::FromSrv
                     | UnOperation::Close => {
                         Err(err!("Received invalid operation: {:?}", umsg.op()))

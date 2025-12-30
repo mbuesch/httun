@@ -80,7 +80,7 @@ async fn get_connection(chan_id: u16, send: bool) -> ah::Result<Arc<ServerUnixCo
         conn.log_activity();
         Ok(Arc::clone(&conn.conn))
     } else {
-        let conn = Arc::new(ServerUnixConn::new(Path::new(UNIX_SOCK), chan_id).await?);
+        let conn = Arc::new(ServerUnixConn::new(Path::new(UNIX_SOCK), chan_id, send).await?);
         connections.insert(key, Connection::new(Arc::clone(&conn)));
         Ok(conn)
     }

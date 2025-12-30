@@ -61,11 +61,14 @@ impl UnMessageHeader {
 /// Operation code for the Unix domain socket protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
 pub enum UnOperation {
-    /// First message to server.
-    ToSrvInit,
+    /// Initialize a new ToSrv socket.
+    InitDirToSrv,
 
-    /// First message from server.
-    FromSrvInit,
+    /// Initialize a new FromSrv socket.
+    InitDirFromSrv,
+
+    /// Reply to `InitDirToSrv` or `InitDirFromSrv`.
+    InitReply,
 
     /// Keep-alive message to server.
     Keepalive,
@@ -125,14 +128,19 @@ impl UnMessage {
         }
     }
 
-    /// Creates a new `ToSrvInit` message.
-    pub fn new_to_srv_init(chan_id: u16) -> Self {
-        Self::new(UnOperation::ToSrvInit, chan_id, vec![], vec![])
+    /// Creates a new `InitDirToSrv` message.
+    pub fn new_init_dir_to_srv(chan_id: u16) -> Self {
+        Self::new(UnOperation::InitDirToSrv, chan_id, vec![], vec![])
     }
 
-    /// Creates a new `FromSrvInit` message.
-    pub fn new_from_srv_init(chan_id: u16, extra_headers: Vec<HttpHeader>) -> Self {
-        Self::new(UnOperation::FromSrvInit, chan_id, extra_headers, vec![])
+    /// Creates a new `InitDirFromSrv` message.
+    pub fn new_init_dir_from_srv(chan_id: u16) -> Self {
+        Self::new(UnOperation::InitDirFromSrv, chan_id, vec![], vec![])
+    }
+
+    /// Creates a new `InitReply` message.
+    pub fn new_init_reply(chan_id: u16, extra_headers: Vec<HttpHeader>) -> Self {
+        Self::new(UnOperation::InitReply, chan_id, extra_headers, vec![])
     }
 
     /// Creates a new `Keepalive` message.

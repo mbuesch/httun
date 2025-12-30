@@ -21,6 +21,17 @@ use crate::systemd::SystemdSocket;
 #[cfg(target_os = "linux")]
 use std::os::unix::net::UnixListener as StdUnixListener;
 
+/// Main communication direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnixDirection {
+    /// Not defined, yet.
+    Undefined,
+    /// Communication from FastCGI to httun-server.
+    ToSrv,
+    /// Communication from httun-server to FastCGI.
+    FromSrv,
+}
+
 /// A connection on the Unix socket.
 ///
 /// This is where the FastCGI requests are received from the httun FastCGI daemon.
@@ -28,6 +39,8 @@ use std::os::unix::net::UnixListener as StdUnixListener;
 pub struct UnixConn {
     /// The channel ID.
     id: u16,
+    /// Direction.
+    dir: UnixDirection,
     /// The underlying Unix stream.
     stream: UnixStream,
 }
@@ -43,6 +56,7 @@ impl UnixConn {
     ) -> ah::Result<Self> {
         let mut this = Self {
             id: ConfigChannel::ID_INVALID,
+            dir: UnixDirection::Undefined,
             stream,
         };
 
@@ -51,11 +65,14 @@ impl UnixConn {
             .await
             .context("Handshake receive timeout")?
             .context("Handshake receive")?;
-        if msg.op() != UnOperation::ToSrvInit {
+        if msg.op() == UnOperation::InitDirToSrv {
+            this.dir = UnixDirection::ToSrv;
+        } else if msg.op() == UnOperation::InitDirFromSrv {
+            this.dir = UnixDirection::FromSrv;
+        } else {
             return Err(err!(
-                "UnixConn: Got {:?} but expected {:?}",
+                "UnixConn: Got unexpected init message {:?}.",
                 msg.op(),
-                UnOperation::ToSrvInit
             ));
         }
         if msg.chan_id() > ConfigChannel::ID_MAX {
@@ -68,7 +85,7 @@ impl UnixConn {
         if let Some(chan_conf) = conf.channel_by_id(this.chan_id()) {
             extra_headers.extend_from_slice(chan_conf.http().extra_headers());
         }
-        this.send(&UnMessage::new_from_srv_init(this.chan_id(), extra_headers))
+        this.send(&UnMessage::new_init_reply(this.chan_id(), extra_headers))
             .await
             .context("Handshake reply")?;
 
@@ -80,6 +97,11 @@ impl UnixConn {
     /// Get the channel ID.
     pub fn chan_id(&self) -> u16 {
         self.id
+    }
+
+    /// Get the communication direction.
+    pub fn dir(&self) -> UnixDirection {
+        self.dir
     }
 
     /// Receive raw data from the Unix socket.
@@ -116,9 +138,51 @@ impl UnixConn {
         let hdr = UnMessageHeader::deserialize(&hdr)?;
         let msg = self.do_recv(hdr.body_size()).await?;
         let msg = UnMessage::deserialize(&msg)?;
-        if self.chan_id() <= ConfigChannel::ID_MAX && msg.chan_id() != self.chan_id() {
-            return Err(err!("Unix socket: Received message for wrong channel."));
+
+        let allowed = match self.dir() {
+            UnixDirection::Undefined => match msg.op() {
+                UnOperation::InitDirToSrv => true,
+                UnOperation::InitDirFromSrv => true,
+                UnOperation::InitReply => true,
+                UnOperation::Keepalive => false,
+                UnOperation::ToSrv => false,
+                UnOperation::ReqFromSrv => false,
+                UnOperation::FromSrv => false,
+                UnOperation::Close => false,
+            },
+            UnixDirection::ToSrv => match msg.op() {
+                UnOperation::InitDirToSrv => false,
+                UnOperation::InitDirFromSrv => false,
+                UnOperation::InitReply => false,
+                UnOperation::Keepalive => true,
+                UnOperation::ToSrv => true,
+                UnOperation::ReqFromSrv => false,
+                UnOperation::FromSrv => false,
+                UnOperation::Close => false,
+            },
+            UnixDirection::FromSrv => match msg.op() {
+                UnOperation::InitDirToSrv => false,
+                UnOperation::InitDirFromSrv => false,
+                UnOperation::InitReply => false,
+                UnOperation::Keepalive => true,
+                UnOperation::ToSrv => false,
+                UnOperation::ReqFromSrv => true,
+                UnOperation::FromSrv => false,
+                UnOperation::Close => false,
+            },
+        };
+        if !allowed {
+            return Err(err!(
+                "Unix recv: Received invalid message {:?} for {:?}.",
+                msg.op(),
+                self.dir()
+            ));
         }
+
+        if self.chan_id() <= ConfigChannel::ID_MAX && msg.chan_id() != self.chan_id() {
+            return Err(err!("Unix recv: Received message for wrong channel."));
+        }
+
         Ok(msg)
     }
 
@@ -146,10 +210,41 @@ impl UnixConn {
 
     /// Send a message on the Unix socket.
     pub async fn send(&self, msg: &UnMessage) -> ah::Result<()> {
-        let msg = msg.serialize()?;
-        let hdr = UnMessageHeader::new(msg.len())?.serialize()?;
-        self.do_send(&hdr).await?;
-        self.do_send(&msg).await
+        let allowed = match self.dir() {
+            UnixDirection::Undefined => false,
+            UnixDirection::ToSrv => match msg.op() {
+                UnOperation::InitDirToSrv => false,
+                UnOperation::InitDirFromSrv => false,
+                UnOperation::InitReply => true,
+                UnOperation::Keepalive => false,
+                UnOperation::ToSrv => false,
+                UnOperation::ReqFromSrv => false,
+                UnOperation::FromSrv => false,
+                UnOperation::Close => true,
+            },
+            UnixDirection::FromSrv => match msg.op() {
+                UnOperation::InitDirToSrv => false,
+                UnOperation::InitDirFromSrv => false,
+                UnOperation::InitReply => true,
+                UnOperation::Keepalive => false,
+                UnOperation::ToSrv => false,
+                UnOperation::ReqFromSrv => false,
+                UnOperation::FromSrv => true,
+                UnOperation::Close => true,
+            },
+        };
+        if !allowed {
+            return Err(err!(
+                "Unix send: Trying to send invalid message {:?} for {:?}.",
+                msg.op(),
+                self.dir()
+            ));
+        }
+
+        let mut msg = msg.serialize()?;
+        let mut buf = UnMessageHeader::new(msg.len())?.serialize()?;
+        buf.append(&mut msg);
+        self.do_send(&buf).await
     }
 }
 
