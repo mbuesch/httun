@@ -4,7 +4,7 @@
 
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
-use httun_util::{header::HttpHeader, timeouts::UNIX_HANDSHAKE_TIMEOUT};
+use httun_util::{ChannelId, header::HttpHeader, timeouts::UNIX_HANDSHAKE_TIMEOUT};
 use std::{io::ErrorKind, path::Path};
 use tokio::{net::UnixStream, time::timeout};
 
@@ -12,12 +12,16 @@ use tokio::{net::UnixStream, time::timeout};
 #[derive(Debug)]
 pub struct ServerUnixConn {
     stream: UnixStream,
-    chan_id: u16,
+    chan_id: ChannelId,
     extra_headers: Vec<HttpHeader>,
 }
 
 impl ServerUnixConn {
-    pub async fn new(socket_path: &Path, chan_id: u16, dir_to_server: bool) -> ah::Result<Self> {
+    pub async fn new(
+        socket_path: &Path,
+        chan_id: ChannelId,
+        dir_to_server: bool,
+    ) -> ah::Result<Self> {
         let stream = UnixStream::connect(socket_path)
             .await
             .context("Connect to Unix socket")?;

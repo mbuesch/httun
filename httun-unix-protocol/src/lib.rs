@@ -5,7 +5,7 @@
 #![forbid(unsafe_code)]
 
 use anyhow::{self as ah, format_err as err};
-use httun_util::header::HttpHeader;
+use httun_util::{ChannelId, header::HttpHeader};
 
 /// Path to the Unix domain socket used by httun-server.
 pub const UNIX_SOCK: &str = "/run/httun-server/httun-server.sock";
@@ -95,7 +95,7 @@ pub struct UnMessage {
     /// Operation code.
     op: UnOperation,
     /// Channel ID.
-    chan_id: u16,
+    chan_id: ChannelId,
     /// Extra HTTP headers (only for FromSrvInit).
     extra_headers: Vec<HttpHeader>,
     /// Payload data.
@@ -116,7 +116,7 @@ impl UnMessage {
     /// Create a new Unix domain socket protocol message.
     fn new(
         op: UnOperation,
-        chan_id: u16,
+        chan_id: ChannelId,
         extra_headers: Vec<HttpHeader>,
         payload: Vec<u8>,
     ) -> Self {
@@ -129,42 +129,42 @@ impl UnMessage {
     }
 
     /// Creates a new `InitDirToSrv` message.
-    pub fn new_init_dir_to_srv(chan_id: u16) -> Self {
+    pub fn new_init_dir_to_srv(chan_id: ChannelId) -> Self {
         Self::new(UnOperation::InitDirToSrv, chan_id, vec![], vec![])
     }
 
     /// Creates a new `InitDirFromSrv` message.
-    pub fn new_init_dir_from_srv(chan_id: u16) -> Self {
+    pub fn new_init_dir_from_srv(chan_id: ChannelId) -> Self {
         Self::new(UnOperation::InitDirFromSrv, chan_id, vec![], vec![])
     }
 
     /// Creates a new `InitReply` message.
-    pub fn new_init_reply(chan_id: u16, extra_headers: Vec<HttpHeader>) -> Self {
+    pub fn new_init_reply(chan_id: ChannelId, extra_headers: Vec<HttpHeader>) -> Self {
         Self::new(UnOperation::InitReply, chan_id, extra_headers, vec![])
     }
 
     /// Creates a new `Keepalive` message.
-    pub fn new_keepalive(chan_id: u16) -> Self {
+    pub fn new_keepalive(chan_id: ChannelId) -> Self {
         Self::new(UnOperation::Keepalive, chan_id, vec![], vec![])
     }
 
     /// Creates a new `ToSrv` message.
-    pub fn new_to_srv(chan_id: u16, payload: Vec<u8>) -> Self {
+    pub fn new_to_srv(chan_id: ChannelId, payload: Vec<u8>) -> Self {
         Self::new(UnOperation::ToSrv, chan_id, vec![], payload)
     }
 
     /// Creates a new `ReqFromSrv` message.
-    pub fn new_req_from_srv(chan_id: u16, payload: Vec<u8>) -> Self {
+    pub fn new_req_from_srv(chan_id: ChannelId, payload: Vec<u8>) -> Self {
         Self::new(UnOperation::ReqFromSrv, chan_id, vec![], payload)
     }
 
     /// Creates a new `FromSrv` message.
-    pub fn new_from_srv(chan_id: u16, payload: Vec<u8>) -> Self {
+    pub fn new_from_srv(chan_id: ChannelId, payload: Vec<u8>) -> Self {
         Self::new(UnOperation::FromSrv, chan_id, vec![], payload)
     }
 
     /// Creates a new `Close` message.
-    pub fn new_close(chan_id: u16) -> Self {
+    pub fn new_close(chan_id: ChannelId) -> Self {
         Self::new(UnOperation::Close, chan_id, vec![], vec![])
     }
 
@@ -174,7 +174,7 @@ impl UnMessage {
     }
 
     /// Returns the channel ID.
-    pub fn chan_id(&self) -> u16 {
+    pub fn chan_id(&self) -> ChannelId {
         self.chan_id
     }
 

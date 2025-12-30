@@ -11,4 +11,6 @@ pub mod query;
 pub mod strings;
 pub mod timeouts;
 
+pub type ChannelId = u16;
+
 // vim: ts=4 sw=4 expandtab

@@ -13,6 +13,7 @@ use base64::prelude::*;
 use httun_conf::{Config, HttpAuth};
 use httun_protocol::Message;
 use httun_util::{
+    ChannelId,
     errors::DisconnectedError,
     header::HttpHeader,
     net::tcp_send_all,
@@ -295,7 +296,7 @@ pub enum HttpRequest {
 /// `line` is the HTTP request header line.
 ///
 /// Returns the parts of the request as a tuple.
-fn parse_request_header(line: &[u8]) -> ah::Result<(HttpRequest, u16, Direction, Query)> {
+fn parse_request_header(line: &[u8]) -> ah::Result<(HttpRequest, ChannelId, Direction, Query)> {
     let Some((request, tail)) = split_delim(line, b' ') else {
         return Err(err!("No GET/POST request found."));
     };
@@ -349,7 +350,7 @@ pub struct HttunHttpReq {
     /// HTTP request method.
     request: HttpRequest,
     /// Httun channel ID.
-    chan_id: u16,
+    chan_id: ChannelId,
     /// Httun direction (R/W).
     direction: Direction,
     /// HTTP query parameters.
@@ -522,7 +523,7 @@ pub struct HttpConn {
     /// Receiver for W direction requests.
     rx_w: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
     /// Pinned channel ID and auth. (None if not pinned yet).
-    pinned_chan: StdOnceLock<(u16, Option<HttpAuth>)>,
+    pinned_chan: StdOnceLock<(ChannelId, Option<HttpAuth>)>,
     /// Server configuration.
     conf: Arc<Config>,
     /// Extra HTTP headers to include in replies.
@@ -587,7 +588,7 @@ impl HttpConn {
     }
 
     /// Get the pinned channel ID (if any).
-    pub fn chan_id(&self) -> Option<u16> {
+    pub fn chan_id(&self) -> Option<ChannelId> {
         self.pinned_chan.get().map(|c| &c.0).cloned()
     }
 

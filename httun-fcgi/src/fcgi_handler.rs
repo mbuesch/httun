@@ -10,6 +10,7 @@ use anyhow::{self as ah, format_err as err};
 use httun_protocol::Message;
 use httun_unix_protocol::UNIX_SOCK;
 use httun_util::{
+    ChannelId,
     header::HttpHeader,
     query::Query,
     strings::{Direction, parse_path},
@@ -58,7 +59,7 @@ impl Connection {
 }
 
 /// Key for the global connections map.
-type ConnectionsKey = (u16, bool);
+type ConnectionsKey = (ChannelId, bool);
 /// Global connections map.
 /// This map stores active connections to the `httun-server`.
 static CONNECTIONS: OnceLock<Mutex<HashMap<ConnectionsKey, Connection>>> = OnceLock::new();
@@ -73,7 +74,7 @@ async fn get_connections<'a>() -> MutexGuard<'a, HashMap<ConnectionsKey, Connect
 }
 
 /// Get a connection for the given channel ID and direction.
-async fn get_connection(chan_id: u16, send: bool) -> ah::Result<Arc<ServerUnixConn>> {
+async fn get_connection(chan_id: ChannelId, send: bool) -> ah::Result<Arc<ServerUnixConn>> {
     let key = (chan_id, send);
     let mut connections = get_connections().await;
     if let Some(conn) = connections.get_mut(&key) {
@@ -89,7 +90,7 @@ async fn get_connection(chan_id: u16, send: bool) -> ah::Result<Arc<ServerUnixCo
 /// Remove a connection.
 ///
 /// This removes both the send and receive connections.
-async fn remove_connection(chan_id: u16) {
+async fn remove_connection(chan_id: ChannelId) {
     let mut connections = get_connections().await;
     connections.remove(&(chan_id, false));
     connections.remove(&(chan_id, true));
@@ -111,7 +112,10 @@ struct FromHttunRet {
 }
 
 /// Send a payload to httun-server and receive a payload from httun-server.
-async fn recv_from_httun_server(chan_id: u16, req_payload: Vec<u8>) -> ah::Result<FromHttunRet> {
+async fn recv_from_httun_server(
+    chan_id: ChannelId,
+    req_payload: Vec<u8>,
+) -> ah::Result<FromHttunRet> {
     let conn = get_connection(chan_id, false).await?;
     match conn.recv(req_payload).await {
         Ok(payload) => Ok(FromHttunRet {
@@ -132,7 +136,7 @@ struct ToHttunRet {
 }
 
 /// Send a payload to httun-server.
-async fn send_to_httun_server(chan_id: u16, req_payload: Vec<u8>) -> ah::Result<ToHttunRet> {
+async fn send_to_httun_server(chan_id: ChannelId, req_payload: Vec<u8>) -> ah::Result<ToHttunRet> {
     let conn = get_connection(chan_id, true).await?;
     if let Err(e) = conn.send(req_payload).await {
         remove_connection(chan_id).await;
@@ -145,7 +149,7 @@ async fn send_to_httun_server(chan_id: u16, req_payload: Vec<u8>) -> ah::Result<
 }
 
 /// Send keepalive to httun-server.
-async fn send_keepalive_to_httun_server(chan_id: u16) -> ah::Result<()> {
+async fn send_keepalive_to_httun_server(chan_id: ChannelId) -> ah::Result<()> {
     get_connection(chan_id, true).await?.send_keepalive().await
 }
 

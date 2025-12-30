@@ -4,7 +4,7 @@
 
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::UserSharedSecret;
-use httun_util::{header::HttpHeader, strings::hex};
+use httun_util::{ChannelId, header::HttpHeader, strings::hex};
 use std::{
     collections::HashSet,
     num::NonZeroUsize,
@@ -365,7 +365,7 @@ pub struct ConfigChannel {
     enable_test: bool,
     urls: Vec<String>,
     alias: Option<String>,
-    id: u16,
+    id: ChannelId,
     shared_secret: UserSharedSecret,
     tun: Option<String>,
     l7_tunnel: Option<ConfigL7Tunnel>,
@@ -478,8 +478,8 @@ impl TryFrom<&toml::Value> for ConfigChannel {
 }
 
 impl ConfigChannel {
-    pub const ID_MAX: u16 = i16::MAX as u16;
-    pub const ID_INVALID: u16 = Self::ID_MAX + 1;
+    pub const ID_MAX: ChannelId = i16::MAX as ChannelId;
+    pub const ID_INVALID: ChannelId = Self::ID_MAX + 1;
 
     fn disabled(&self) -> bool {
         self.disabled
@@ -489,7 +489,7 @@ impl ConfigChannel {
         self.enable_test
     }
 
-    pub fn id(&self) -> u16 {
+    pub fn id(&self) -> ChannelId {
         self.id
     }
 
@@ -624,7 +624,7 @@ impl Config {
     fn check(&self, variant: ConfigVariant) -> ah::Result<()> {
         if variant == ConfigVariant::Server {
             // Check whether channel IDs are unique.
-            let ids: HashSet<u16> = self.channels.iter().map(|c| c.id()).collect();
+            let ids: HashSet<ChannelId> = self.channels.iter().map(|c| c.id()).collect();
             if ids.len() != self.channels.len() {
                 return Err(err!("The configuration contains duplicate channel IDs."));
             }
@@ -661,7 +661,7 @@ impl Config {
         }
     }
 
-    pub fn channel_by_id(&self, id: u16) -> Option<&ConfigChannel> {
+    pub fn channel_by_id(&self, id: ChannelId) -> Option<&ConfigChannel> {
         self.channels_iter().find(|chan| chan.id() == id)
     }
 
@@ -670,7 +670,7 @@ impl Config {
             .find(|chan| chan.alias() == Some(alias))
     }
 
-    pub fn channel_by_url(&self, id: u16, url: &str) -> Option<&ConfigChannel> {
+    pub fn channel_by_url(&self, id: ChannelId, url: &str) -> Option<&ConfigChannel> {
         self.channels_iter()
             .find(|chan| chan.id() == id && chan.has_url(url))
     }

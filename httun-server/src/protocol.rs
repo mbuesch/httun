@@ -11,7 +11,7 @@ use httun_conf::Config;
 use httun_protocol::{
     InitPayload, KexPublic, Message, MsgType, Operation, SequenceType, SessionKey,
 };
-use httun_util::errors::DisconnectedError;
+use httun_util::{ChannelId, errors::DisconnectedError};
 use std::sync::{
     Arc, RwLock as StdRwLock,
     atomic::{self, AtomicBool},
@@ -60,7 +60,7 @@ impl ProtocolHandler {
     /// Get the channel id for this protocol handler.
     ///
     /// Returns an error if the channel ID is not yet known.
-    pub fn chan_id(&self) -> ah::Result<u16> {
+    pub fn chan_id(&self) -> ah::Result<ChannelId> {
         self.comm
             .chan_id()
             .ok_or_else(|| err!("Channel ID is not known, yet."))
@@ -435,6 +435,8 @@ impl ProtocolManager {
             }
         });
 
+        //TODO kill all old instances.
+
         insts.push(ProtocolInstance::new(handle, prot));
     }
 
@@ -443,7 +445,7 @@ impl ProtocolManager {
     ///
     /// `chan_id`: Channel ID to kill old sessions for.
     /// `new_session_secret`: Session secret of the new session to keep.
-    async fn kill_old_sessions(self: &Arc<Self>, chan_id: u16, new_session_key: &SessionKey) {
+    async fn kill_old_sessions(self: &Arc<Self>, chan_id: ChannelId, new_session_key: &SessionKey) {
         self.insts.lock().await.retain(|inst| {
             if let Ok(id) = inst.prot.chan_id() {
                 if id == chan_id {

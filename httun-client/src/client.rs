@@ -15,6 +15,7 @@ use httun_protocol::{
 use httun_util::{
     header::HttpHeader,
     timeouts::{HTTP_R_TIMEOUT, HTTP_W_TIMEOUT},
+    ChannelId,
 };
 use reqwest::{
     Client, StatusCode,
@@ -97,7 +98,7 @@ fn format_url_serial(url: &str, serial: u64) -> String {
 }
 
 /// Format the URL for a channel and direction.
-fn format_url(base_url: &str, chan_id: u16, direction: &str) -> String {
+fn format_url(base_url: &str, chan_id: ChannelId, direction: &str) -> String {
     let base_url = base_url.trim_end_matches('/');
     let direction = direction.trim_matches('/');
     format!("{base_url}/{chan_id}/{direction}")
@@ -434,7 +435,7 @@ impl HttunClient {
         base_url: &str,
         res_mode: ResMode,
         alias: Option<&str>,
-        chan_id: Option<u16>,
+        chan_id: Option<ChannelId>,
         mode: HttunClientMode,
         user_agent: &str,
         extra_headers: Arc<[HttpHeader]>,

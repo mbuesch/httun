@@ -4,7 +4,7 @@
 
 use crate::http_server::HttpConn;
 use anyhow as ah;
-use httun_util::timeouts::CHAN_R_TIMEOUT;
+use httun_util::{ChannelId, timeouts::CHAN_R_TIMEOUT};
 use std::time::Duration;
 
 #[cfg(target_family = "unix")]
@@ -15,6 +15,21 @@ use anyhow::{Context as _, format_err as err};
 
 #[cfg(target_family = "unix")]
 use httun_unix_protocol::{UnMessage, UnOperation};
+
+/// Dominant communication direction / Semantic data flow direction
+///
+/// For example:
+/// On a [CommDirection::FromSrv] direction the server can
+/// receive [UnOperation::ReqFromSrv] messages and send [UnOperation::FromSrv] messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommDirection {
+    /// Communication in both directions.
+    Bidirectional,
+    /// Communication from FastCGI to httun-server.
+    ToSrv,
+    /// Communication from httun-server to FastCGI.
+    FromSrv,
+}
 
 /// Message received from communication backend.
 #[derive(Debug)]
@@ -62,7 +77,7 @@ impl CommBackend {
     }
 
     /// Get the channel ID, if known.
-    pub fn chan_id(&self) -> Option<u16> {
+    pub fn chan_id(&self) -> Option<ChannelId> {
         match self {
             #[cfg(target_family = "unix")]
             Self::Unix(b) => Some(b.conn.chan_id()),
@@ -150,6 +165,14 @@ impl CommBackend {
                 b.conn.send(&umsg).await.context("Unix socket send")
             }
             Self::Http(b) => b.conn.close().await,
+        }
+    }
+
+    /// Semantic communication direction.
+    pub fn dir(&self) -> CommDirection {
+        match self {
+            Self::Unix(b) => b.conn.dir(),
+            Self::Http(_) => CommDirection::Bidirectional, //TODO?
         }
     }
 }

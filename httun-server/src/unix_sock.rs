@@ -2,11 +2,13 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::{WEBSERVER_GID, WEBSERVER_UID};
+use crate::{WEBSERVER_GID, WEBSERVER_UID, comm_backend::CommDirection};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::{Config, ConfigChannel};
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
-use httun_util::{errors::DisconnectedError, header::HttpHeader, timeouts::UNIX_HANDSHAKE_TIMEOUT};
+use httun_util::{
+    ChannelId, errors::DisconnectedError, header::HttpHeader, timeouts::UNIX_HANDSHAKE_TIMEOUT,
+};
 use std::{
     path::Path,
     sync::{Arc, atomic},
@@ -21,26 +23,15 @@ use crate::systemd::SystemdSocket;
 #[cfg(target_os = "linux")]
 use std::os::unix::net::UnixListener as StdUnixListener;
 
-/// Main communication direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnixDirection {
-    /// Not defined, yet.
-    Undefined,
-    /// Communication from FastCGI to httun-server.
-    ToSrv,
-    /// Communication from httun-server to FastCGI.
-    FromSrv,
-}
-
 /// A connection on the Unix socket.
 ///
 /// This is where the FastCGI requests are received from the httun FastCGI daemon.
 #[derive(Debug)]
 pub struct UnixConn {
     /// The channel ID.
-    id: u16,
+    id: ChannelId,
     /// Direction.
-    dir: UnixDirection,
+    dir: CommDirection,
     /// The underlying Unix stream.
     stream: UnixStream,
 }
@@ -56,7 +47,7 @@ impl UnixConn {
     ) -> ah::Result<Self> {
         let mut this = Self {
             id: ConfigChannel::ID_INVALID,
-            dir: UnixDirection::Undefined,
+            dir: CommDirection::Bidirectional,
             stream,
         };
 
@@ -66,9 +57,9 @@ impl UnixConn {
             .context("Handshake receive timeout")?
             .context("Handshake receive")?;
         if msg.op() == UnOperation::InitDirToSrv {
-            this.dir = UnixDirection::ToSrv;
+            this.dir = CommDirection::ToSrv;
         } else if msg.op() == UnOperation::InitDirFromSrv {
-            this.dir = UnixDirection::FromSrv;
+            this.dir = CommDirection::FromSrv;
         } else {
             return Err(err!(
                 "UnixConn: Got unexpected init message {:?}.",
@@ -95,12 +86,12 @@ impl UnixConn {
     }
 
     /// Get the channel ID.
-    pub fn chan_id(&self) -> u16 {
+    pub fn chan_id(&self) -> ChannelId {
         self.id
     }
 
     /// Get the communication direction.
-    pub fn dir(&self) -> UnixDirection {
+    pub fn dir(&self) -> CommDirection {
         self.dir
     }
 
@@ -140,7 +131,7 @@ impl UnixConn {
         let msg = UnMessage::deserialize(&msg)?;
 
         let allowed = match self.dir() {
-            UnixDirection::Undefined => match msg.op() {
+            CommDirection::Bidirectional => match msg.op() {
                 UnOperation::InitDirToSrv => true,
                 UnOperation::InitDirFromSrv => true,
                 UnOperation::InitReply => true,
@@ -150,7 +141,7 @@ impl UnixConn {
                 UnOperation::FromSrv => false,
                 UnOperation::Close => false,
             },
-            UnixDirection::ToSrv => match msg.op() {
+            CommDirection::ToSrv => match msg.op() {
                 UnOperation::InitDirToSrv => false,
                 UnOperation::InitDirFromSrv => false,
                 UnOperation::InitReply => false,
@@ -160,7 +151,7 @@ impl UnixConn {
                 UnOperation::FromSrv => false,
                 UnOperation::Close => false,
             },
-            UnixDirection::FromSrv => match msg.op() {
+            CommDirection::FromSrv => match msg.op() {
                 UnOperation::InitDirToSrv => false,
                 UnOperation::InitDirFromSrv => false,
                 UnOperation::InitReply => false,
@@ -211,8 +202,8 @@ impl UnixConn {
     /// Send a message on the Unix socket.
     pub async fn send(&self, msg: &UnMessage) -> ah::Result<()> {
         let allowed = match self.dir() {
-            UnixDirection::Undefined => false,
-            UnixDirection::ToSrv => match msg.op() {
+            CommDirection::Bidirectional => false,
+            CommDirection::ToSrv => match msg.op() {
                 UnOperation::InitDirToSrv => false,
                 UnOperation::InitDirFromSrv => false,
                 UnOperation::InitReply => true,
@@ -222,7 +213,7 @@ impl UnixConn {
                 UnOperation::FromSrv => false,
                 UnOperation::Close => true,
             },
-            UnixDirection::FromSrv => match msg.op() {
+            CommDirection::FromSrv => match msg.op() {
                 UnOperation::InitDirToSrv => false,
                 UnOperation::InitDirFromSrv => false,
                 UnOperation::InitReply => true,

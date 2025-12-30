@@ -26,7 +26,7 @@ use crate::{
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::{CommandFactory, Parser, Subcommand};
 use httun_conf::{Config, ConfigVariant};
-use httun_util::header::HttpHeader;
+use httun_util::{header::HttpHeader, ChannelId};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{runtime, signal::ctrl_c, sync::mpsc, task, time};
 
@@ -50,7 +50,7 @@ struct Opts {
 
     /// The httun server's channel ID to use for communication.
     #[arg(long, short = 'c', value_name = "ID")]
-    channel: Option<u16>,
+    channel: Option<ChannelId>,
 
     /// The User-Agent header to use for the HTTP connection.
     ///
