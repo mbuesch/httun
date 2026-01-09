@@ -22,6 +22,7 @@ use httun_unix_protocol::{UnMessage, UnOperation};
 /// On a [CommDirection::FromSrv] direction the server can
 /// receive [UnOperation::ReqFromSrv] messages and send [UnOperation::FromSrv] messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum CommDirection {
     /// Communication in both directions.
     Bidirectional,
