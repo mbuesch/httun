@@ -172,6 +172,7 @@ impl CommBackend {
     #[allow(dead_code)] //TODO
     pub fn dir(&self) -> CommDirection {
         match self {
+            #[cfg(target_family = "unix")]
             Self::Unix(b) => b.conn.dir(),
             Self::Http(_) => CommDirection::Bidirectional, //TODO?
         }
