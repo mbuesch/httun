@@ -12,9 +12,12 @@ use httun_protocol::{
     InitPayload, KexPublic, Message, MsgType, Operation, SequenceType, SessionKey,
 };
 use httun_util::{ChannelId, errors::DisconnectedError};
-use std::sync::{
-    Arc, RwLock as StdRwLock,
-    atomic::{self, AtomicBool},
+use std::{
+    collections::LinkedList,
+    sync::{
+        Arc, RwLock as StdRwLock,
+        atomic::{self, AtomicBool},
+    },
 };
 use tokio::{
     sync::{Mutex, OwnedSemaphorePermit},
@@ -383,7 +386,7 @@ impl Drop for ProtocolInstance {
 #[derive(Debug)]
 pub struct ProtocolManager {
     conf: Arc<Config>,
-    insts: Mutex<Vec<ProtocolInstance>>,
+    insts: Mutex<LinkedList<ProtocolInstance>>,
 }
 
 impl ProtocolManager {
@@ -391,7 +394,7 @@ impl ProtocolManager {
     pub fn new(conf: Arc<Config>) -> Arc<Self> {
         Arc::new(ProtocolManager {
             conf,
-            insts: Mutex::new(Vec::with_capacity(8)),
+            insts: Mutex::new(LinkedList::new()),
         })
     }
 
@@ -437,7 +440,7 @@ impl ProtocolManager {
 
         //TODO kill all old instances.
 
-        insts.push(ProtocolInstance::new(handle, prot));
+        insts.push_back(ProtocolInstance::new(handle, prot));
     }
 
     /// Kill old sessions for the given channel ID.
@@ -445,30 +448,38 @@ impl ProtocolManager {
     ///
     /// `chan_id`: Channel ID to kill old sessions for.
     /// `new_session_secret`: Session secret of the new session to keep.
-    async fn kill_old_sessions(self: &Arc<Self>, chan_id: ChannelId, new_session_key: &SessionKey) {
-        self.insts.lock().await.retain(|inst| {
-            if let Ok(id) = inst.prot.chan_id() {
-                if id == chan_id {
-                    if let Some(pinned_session) = inst.prot.pinned_session() {
-                        pinned_session == *new_session_key
-                    } else {
-                        false
+    async fn kill_old_sessions(&self, chan_id: ChannelId, new_session_key: &SessionKey) {
+        let mut insts = self.insts.lock().await;
+
+        insts
+            .extract_if(|inst| {
+                let mut retain = true;
+
+                if let Ok(id) = inst.prot.chan_id() {
+                    if id == chan_id
+                        && let Some(pinned_session) = inst.prot.pinned_session()
+                    {
+                        retain = pinned_session == *new_session_key
                     }
                 } else {
-                    true
+                    // TODO: It would be better to drop these after a timeout only.
+                    retain = false;
                 }
-            } else {
-                false
-            }
-        });
+
+                if !retain {
+                    inst.prot.set_dead();
+                }
+                !retain
+            })
+            .for_each(drop);
     }
 
     /// Perform periodic work for all protocol instances.
-    pub async fn periodic_work(self: &Arc<Self>) {
+    pub async fn periodic_work(&self) {
         let mut insts = self.insts.lock().await;
 
         // Remove dead instances.
-        insts.retain(|inst| !inst.prot.is_dead());
+        insts.extract_if(|inst| inst.prot.is_dead()).for_each(drop);
 
         // Perform periodic work for all instances.
         for inst in &*insts {

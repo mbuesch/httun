@@ -169,6 +169,7 @@ impl CommBackend {
     }
 
     /// Semantic communication direction.
+    #[allow(dead_code)] //TODO
     pub fn dir(&self) -> CommDirection {
         match self {
             Self::Unix(b) => b.conn.dir(),
