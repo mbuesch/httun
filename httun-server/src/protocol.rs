@@ -294,23 +294,27 @@ impl ProtocolHandler {
 
     /// Inner protocol handler function.
     async fn do_run(&self) -> ah::Result<()> {
-        match self.comm.recv().await? {
-            CommRxMsg::ToSrv(payload) => self.handle_tosrv(payload).await,
-            CommRxMsg::ReqFromSrv(payload) => {
-                if let Some(timeout_dur) = self.comm.get_reply_timeout_duration() {
-                    match timeout(timeout_dur, self.handle_fromsrv(payload)).await {
-                        Err(_) => self.comm.send_reply_timeout().await,
-                        Ok(ret) => ret,
+        if self.is_dead() {
+            Err(err!("Protocol handler is dead."))
+        } else {
+            match self.comm.recv().await? {
+                CommRxMsg::ToSrv(payload) => self.handle_tosrv(payload).await,
+                CommRxMsg::ReqFromSrv(payload) => {
+                    if let Some(timeout_dur) = self.comm.get_reply_timeout_duration() {
+                        match timeout(timeout_dur, self.handle_fromsrv(payload)).await {
+                            Err(_) => self.comm.send_reply_timeout().await,
+                            Ok(ret) => ret,
+                        }
+                    } else {
+                        self.handle_fromsrv(payload).await
                     }
-                } else {
-                    self.handle_fromsrv(payload).await
                 }
-            }
-            CommRxMsg::Keepalive => {
-                let chan = self.chan()?;
-                chan.log_activity();
-                log::trace!("{}: Unix socket: Received Keepalive", chan.id());
-                Ok(())
+                CommRxMsg::Keepalive => {
+                    let chan = self.chan()?;
+                    chan.log_activity();
+                    log::trace!("{}: Unix socket: Received Keepalive", chan.id());
+                    Ok(())
+                }
             }
         }
     }
