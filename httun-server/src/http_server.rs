@@ -542,7 +542,6 @@ impl HttpConn {
         extra_headers: Arc<[HttpHeader]>,
     ) -> ah::Result<Self> {
         stream.set_nodelay(true)?;
-        stream.set_linger(None)?;
         stream.set_ttl(255)?;
 
         let id = NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed);

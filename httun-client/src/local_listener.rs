@@ -92,7 +92,6 @@ pub struct LocalConn {
 impl LocalConn {
     fn new(stream: TcpStream) -> ah::Result<Self> {
         stream.set_nodelay(true)?;
-        stream.set_linger(None)?;
         stream.set_ttl(255)?;
         Ok(Self {
             stream: Arc::new(stream),
