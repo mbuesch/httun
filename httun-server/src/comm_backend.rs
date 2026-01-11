@@ -5,7 +5,7 @@
 use crate::http_server::HttpConn;
 use anyhow as ah;
 use httun_util::{ChannelId, timeouts::CHAN_R_TIMEOUT};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 #[cfg(target_family = "unix")]
 use crate::unix_sock::UnixConn;
@@ -54,7 +54,7 @@ pub struct CommBackendUnix {
 /// Communication backend over HTTP connections.
 #[derive(Debug)]
 pub struct CommBackendHttp {
-    conn: HttpConn,
+    conn: Arc<HttpConn>,
 }
 
 /// Communication backend abstraction over Unix socket and HTTP connections.
@@ -73,7 +73,7 @@ impl CommBackend {
     }
 
     /// Create a new HTTP communication backend.
-    pub fn new_http(conn: HttpConn) -> Self {
+    pub fn new_http(conn: Arc<HttpConn>) -> Self {
         Self::Http(Box::new(CommBackendHttp { conn }))
     }
 
