@@ -38,9 +38,11 @@ sd-notify = { workspace = true }
 [target.'cfg(target_family="unix")'.dependencies]
 nix = { workspace = true, features = [ "user" ] }
 
-[lints.clippy]
-undocumented_unsafe_blocks = "warn"
-
 [features]
 default = [ "tun" ]
 tun = [ "dep:httun-tun" ]
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+todo = "warn"
+dbg_macro = "warn"

@@ -23,3 +23,5 @@ tokio-fastcgi = { workspace = true }
 
 [lints.clippy]
 undocumented_unsafe_blocks = "warn"
+todo = "warn"
+dbg_macro = "warn"
