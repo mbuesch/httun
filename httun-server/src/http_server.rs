@@ -19,6 +19,7 @@ use httun_util::{
     net::tcp_send_all,
     query::Query,
     strings::{Direction, parse_path, split_delim},
+    timeouts::HTTP_CHANNEL_PIN_TIMEOUT,
 };
 use memchr::memmem::find;
 use std::{
@@ -31,8 +32,9 @@ use std::{
 };
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::{Mutex, mpsc},
+    sync::{Mutex, mpsc, watch},
     task::{self, JoinHandle},
+    time::timeout,
 };
 
 /// Maximum buffer size for receiving HTTP packets.
@@ -508,6 +510,13 @@ impl TryFrom<u32> for HttpError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChanPinState {
+    NoChannel,
+    HaveChannelId,
+    Aborted,
+}
+
 /// HTTP connection.
 #[derive(Debug)]
 pub struct HttpConn {
@@ -525,6 +534,10 @@ pub struct HttpConn {
     rx_w: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
     /// Pinned channel ID and auth. (None if not pinned yet).
     pinned_chan: StdOnceLock<(ChannelId, Option<HttpAuth>)>,
+    /// Channel pinning state (receiver).
+    pinned_state_rx: Mutex<watch::Receiver<ChanPinState>>,
+    /// Channel pinning state (sender).
+    pinned_state_tx: watch::Sender<ChanPinState>,
     /// Server configuration.
     conf: Arc<Config>,
     /// Extra HTTP headers to include in replies.
@@ -548,6 +561,8 @@ impl HttpConn {
         let id = NEXT_CONN_ID.fetch_add(1, atomic::Ordering::Relaxed);
         log::debug!("New connection: {id}");
 
+        let (pinned_state_tx, pinned_state_rx) = watch::channel(ChanPinState::NoChannel);
+
         Ok(Arc::new(Self {
             id,
             stream: Arc::new(stream),
@@ -556,6 +571,8 @@ impl HttpConn {
             rx_r: Mutex::new(None),
             rx_w: Mutex::new(None),
             pinned_chan: StdOnceLock::new(),
+            pinned_state_rx: Mutex::new(pinned_state_rx),
+            pinned_state_tx,
             conf,
             extra_headers,
         }))
@@ -593,6 +610,9 @@ impl HttpConn {
     /// Set the current error code.
     fn set_error(&self, error: HttpError) {
         self.error.store(error.into(), atomic::Ordering::Relaxed);
+        if let Err(e) = self.pinned_state_tx.send(ChanPinState::Aborted) {
+            log::warn!("Failed to abort pin state: {e:?}");
+        }
     }
 
     /// Get the current error code.
@@ -653,6 +673,10 @@ impl HttpConn {
             .pinned_chan
             .get_or_init(|| (req.chan_id, chan.http().basic_auth().clone()));
 
+        self.pinned_state_tx
+            .send(ChanPinState::HaveChannelId)
+            .context("Notify channel ID pinning")?;
+
         if pinned_chan.0 != req.chan_id {
             Err(err!(
                 "Http connection is already pinned to a different channel."
@@ -660,6 +684,21 @@ impl HttpConn {
         } else {
             Ok(())
         }
+    }
+
+    /// Wait until the channel is pinned.
+    pub async fn wait_pinned(&self) -> ah::Result<bool> {
+        let mut pinned_state_rx = self.pinned_state_rx.lock().await;
+
+        let state = timeout(
+            HTTP_CHANNEL_PIN_TIMEOUT,
+            pinned_state_rx.wait_for(|p| *p != ChanPinState::NoChannel),
+        )
+        .await
+        .context("Timeout waiting for channel ID")?
+        .context("Wait for channel ID")?;
+
+        Ok(*state == ChanPinState::HaveChannelId)
     }
 
     /// Receive a message from the httun client.

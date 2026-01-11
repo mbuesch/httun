@@ -61,12 +61,8 @@ impl ProtocolHandler {
     }
 
     /// Get the channel id for this protocol handler.
-    ///
-    /// Returns an error if the channel ID is not yet known.
-    pub fn chan_id(&self) -> ah::Result<ChannelId> {
-        self.comm
-            .chan_id()
-            .ok_or_else(|| err!("Channel ID is not known, yet."))
+    pub fn chan_id(&self) -> ChannelId {
+        self.comm.chan_id()
     }
 
     /// Get the channel.
@@ -74,7 +70,7 @@ impl ProtocolHandler {
     /// Returns an error if the channel is not configured.
     fn chan(&self) -> ah::Result<Arc<Channel>> {
         self.channels
-            .get(self.chan_id()?)
+            .get(self.chan_id())
             .ok_or_else(|| err!("Channel is not configured."))
     }
 
@@ -459,15 +455,10 @@ impl ProtocolManager {
             .extract_if(|inst| {
                 let mut retain = true;
 
-                if let Ok(id) = inst.prot.chan_id() {
-                    if id == chan_id
-                        && let Some(pinned_session) = inst.prot.pinned_session()
-                    {
-                        retain = pinned_session == *new_session_key
-                    }
-                } else {
-                    // TODO: It would be better to drop these after a timeout only.
-                    retain = false;
+                if inst.prot.chan_id() == chan_id
+                    && let Some(pinned_session) = inst.prot.pinned_session()
+                {
+                    retain = pinned_session == *new_session_key
                 }
 
                 if !retain {

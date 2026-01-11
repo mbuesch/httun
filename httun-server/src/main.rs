@@ -405,10 +405,24 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                     match http_srv.accept().await {
                         Ok(conn) => {
                             if let Ok(permit) = conn_semaphore.acquire_owned().await {
-                                conn.spawn_rx_task().await;
-                                protman
-                                    .spawn(CommBackend::new_http(conn), channels, permit)
-                                    .await;
+                                task::spawn(async move {
+                                    conn.spawn_rx_task().await;
+                                    match conn.wait_pinned().await {
+                                        Ok(true) => {
+                                            protman
+                                                .spawn(
+                                                    CommBackend::new_http(conn),
+                                                    channels,
+                                                    permit,
+                                                )
+                                                .await;
+                                        }
+                                        Ok(false) => (), // Ignore
+                                        Err(e) => {
+                                            log::error!("HTTP wait channel: {e:?}");
+                                        }
+                                    }
+                                });
                             }
                         }
                         Err(e) => {

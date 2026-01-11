@@ -29,6 +29,9 @@ pub const HTTP_W_TIMEOUT: Duration = Duration::from_secs(3);
 /// See tcp (7) man page.
 pub const HTTP_TCP_USER_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Standalone HTTP server pinning timeout.
+pub const HTTP_CHANNEL_PIN_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S);
+
 /// L7 tunnel timeout, in seconds.
 /// The socket to the target is closed after this timeout of inactivity.
 pub const L7_TIMEOUT_S: i64 = 30;
