@@ -263,9 +263,9 @@ impl Channel {
     }
 
     /// Perform periodic work, such as checking for timeouts.
-    pub async fn periodic_work(&self) {
+    pub fn periodic_work(&self) {
         if let Some(l7) = &self.l7 {
-            l7.check_timeout().await;
+            l7.check_timeout();
         }
     }
 }

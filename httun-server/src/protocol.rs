@@ -13,17 +13,13 @@ use httun_protocol::{
 };
 use httun_util::{ChannelId, errors::DisconnectedError};
 use std::{
-    collections::LinkedList,
+    collections::{HashMap, LinkedList},
     sync::{
-        Arc, RwLock as StdRwLock,
+        Arc, Mutex as StdMutex, RwLock as StdRwLock,
         atomic::{self, AtomicBool},
     },
 };
-use tokio::{
-    sync::{Mutex, OwnedSemaphorePermit},
-    task,
-    time::timeout,
-};
+use tokio::{sync::OwnedSemaphorePermit, task, time::timeout};
 
 /// Httun protocol handler on the server.
 #[derive(Debug)]
@@ -345,9 +341,9 @@ impl ProtocolHandler {
     }
 
     /// Perform periodic work for this protocol handler.
-    pub async fn periodic_work(&self) {
+    pub fn periodic_work(&self) {
         if let Ok(chan) = self.chan() {
-            chan.periodic_work().await;
+            chan.periodic_work();
         }
     }
 }
@@ -375,13 +371,15 @@ impl Drop for ProtocolInstance {
     }
 }
 
+type InstList = Arc<StdMutex<LinkedList<ProtocolInstance>>>;
+
 /// Httun protocol manager.
 ///
 /// This manager handles all protocol instances on the server.
 #[derive(Debug)]
 pub struct ProtocolManager {
     conf: Arc<Config>,
-    insts: Mutex<LinkedList<ProtocolInstance>>,
+    insts: StdRwLock<HashMap<ChannelId, InstList>>,
 }
 
 impl ProtocolManager {
@@ -389,8 +387,23 @@ impl ProtocolManager {
     pub fn new(conf: Arc<Config>) -> Arc<Self> {
         Arc::new(ProtocolManager {
             conf,
-            insts: Mutex::new(LinkedList::new()),
+            insts: StdRwLock::new(HashMap::new()),
         })
+    }
+
+    fn get_insts(&self, chan_id: ChannelId) -> InstList {
+        {
+            let insts = self.insts.read().expect("Lock poisoned");
+            if let Some(list) = insts.get(&chan_id) {
+                return Arc::clone(list);
+            }
+        }
+
+        let mut insts = self.insts.write().expect("Lock poisoned");
+        let list = insts
+            .entry(chan_id)
+            .or_insert_with(|| Arc::new(StdMutex::new(LinkedList::new())));
+        Arc::clone(list)
     }
 
     /// Spawn a new protocol handler instance task.
@@ -404,11 +417,11 @@ impl ProtocolManager {
         channels: Arc<Channels>,
         permit: OwnedSemaphorePermit,
     ) {
+        let chan_id = comm.chan_id();
+
         let prot = Arc::new(
             ProtocolHandler::new(Arc::clone(&self.conf), Arc::clone(self), comm, channels).await,
         );
-
-        let mut insts = self.insts.lock().await;
 
         // Spawn the protocol handler task.
         let handle = task::spawn({
@@ -427,15 +440,16 @@ impl ProtocolManager {
                 }
                 // The protocol handler is done.
                 prot.set_dead();
-                this.periodic_work().await;
+                this.periodic_work();
                 // Release the protocol instance permit.
                 drop(permit);
             }
         });
 
-        //TODO kill all old instances.
-
-        insts.push_back(ProtocolInstance::new(handle, prot));
+        self.get_insts(chan_id)
+            .lock()
+            .expect("Lock poisoned")
+            .push_back(ProtocolInstance::new(handle, prot));
     }
 
     /// Kill old sessions for the given channel ID.
@@ -444,16 +458,19 @@ impl ProtocolManager {
     /// `chan_id`: Channel ID to kill old sessions for.
     /// `new_session_secret`: Session secret of the new session to keep.
     async fn kill_old_sessions(&self, chan_id: ChannelId, new_session_key: &SessionKey) {
-        let mut insts = self.insts.lock().await;
+        let insts = self.get_insts(chan_id);
+        let mut insts = insts.lock().expect("Lock poisoned");
 
         insts
             .extract_if(|inst| {
                 let mut retain = true;
 
-                if inst.prot.chan_id() == chan_id
-                    && let Some(pinned_session) = inst.prot.pinned_session()
+                assert_eq!(inst.prot.chan_id(), chan_id);
+
+                if let Some(pinned_session) = inst.prot.pinned_session()
+                    && pinned_session != *new_session_key
                 {
-                    retain = pinned_session == *new_session_key
+                    retain = false;
                 }
 
                 if !retain {
@@ -465,15 +482,17 @@ impl ProtocolManager {
     }
 
     /// Perform periodic work for all protocol instances.
-    pub async fn periodic_work(&self) {
-        let mut insts = self.insts.lock().await;
+    pub fn periodic_work(&self) {
+        for insts in self.insts.read().expect("Lock poisoned").values() {
+            let mut insts = insts.lock().expect("Lock poisoned");
 
-        // Remove dead instances.
-        insts.extract_if(|inst| inst.prot.is_dead()).for_each(drop);
+            // Remove dead instances.
+            insts.extract_if(|inst| inst.prot.is_dead()).for_each(drop);
 
-        // Perform periodic work for all instances.
-        for inst in &*insts {
-            inst.prot.periodic_work().await;
+            // Perform periodic work for all instances.
+            for inst in &*insts {
+                inst.prot.periodic_work();
+            }
         }
     }
 }

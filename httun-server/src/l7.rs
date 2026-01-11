@@ -349,7 +349,7 @@ impl L7State {
     }
 
     /// Check for timeout and disconnect if timed out.
-    pub async fn check_timeout(&self) {
+    pub fn check_timeout(&self) {
         if timed_out_now(
             self.last_activity.load(atomic::Ordering::Relaxed),
             L7_TIMEOUT_S,
