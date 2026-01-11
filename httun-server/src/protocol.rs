@@ -167,11 +167,6 @@ impl ProtocolHandler {
             }
             Operation::TestToSrv if chan.test_enabled() => {
                 log::trace!("{}: Received Operation::TestToSrv", chan.id());
-                log::debug!(
-                    "{}: Received test mode ping: '{}'",
-                    chan.id(),
-                    String::from_utf8_lossy(msg.payload())
-                );
                 chan.put_ping(msg.into_payload()).await;
             }
             _ => {
