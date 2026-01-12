@@ -23,6 +23,7 @@ pub enum CommRxMsg {
     ToSrv(Vec<u8>),
     /// Request for data from server.
     ReqFromSrv(Vec<u8>),
+    #[cfg_attr(not(target_family = "unix"), allow(dead_code))]
     /// Keepalive message.
     Keepalive,
 }
