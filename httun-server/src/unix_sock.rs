@@ -2,12 +2,13 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::{WEBSERVER_GID, WEBSERVER_UID, comm_backend::CommDirection};
+use crate::{WEBSERVER_GID, WEBSERVER_UID};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::{Config, ConfigChannel};
 use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
 use httun_util::{
-    ChannelId, errors::DisconnectedError, header::HttpHeader, timeouts::UNIX_HANDSHAKE_TIMEOUT,
+    ChannelId, errors::DisconnectedError, header::HttpHeader, strings::Direction,
+    timeouts::UNIX_HANDSHAKE_TIMEOUT,
 };
 use std::{
     path::Path,
@@ -31,7 +32,7 @@ pub struct UnixConn {
     /// The channel ID.
     id: ChannelId,
     /// Direction.
-    dir: CommDirection,
+    dir: Option<Direction>,
     /// The underlying Unix stream.
     stream: UnixStream,
 }
@@ -47,7 +48,7 @@ impl UnixConn {
     ) -> ah::Result<Self> {
         let mut this = Self {
             id: ConfigChannel::ID_INVALID,
-            dir: CommDirection::Bidirectional,
+            dir: None,
             stream,
         };
 
@@ -57,9 +58,9 @@ impl UnixConn {
             .context("Handshake receive timeout")?
             .context("Handshake receive")?;
         if msg.op() == UnOperation::InitDirToSrv {
-            this.dir = CommDirection::ToSrv;
+            this.dir = Some(Direction::W);
         } else if msg.op() == UnOperation::InitDirFromSrv {
-            this.dir = CommDirection::FromSrv;
+            this.dir = Some(Direction::R);
         } else {
             return Err(err!(
                 "UnixConn: Got unexpected init message {:?}.",
@@ -91,8 +92,8 @@ impl UnixConn {
     }
 
     /// Get the communication direction.
-    pub fn dir(&self) -> CommDirection {
-        self.dir
+    pub fn dir(&self) -> Direction {
+        self.dir.expect("No Direction")
     }
 
     /// Receive raw data from the Unix socket.
@@ -130,8 +131,8 @@ impl UnixConn {
         let msg = self.do_recv(hdr.body_size()).await?;
         let msg = UnMessage::deserialize(&msg)?;
 
-        let allowed = match self.dir() {
-            CommDirection::Bidirectional => match msg.op() {
+        let allowed = match self.dir {
+            None => match msg.op() {
                 UnOperation::InitDirToSrv => true,
                 UnOperation::InitDirFromSrv => true,
                 UnOperation::InitReply => true,
@@ -141,7 +142,7 @@ impl UnixConn {
                 UnOperation::FromSrv => false,
                 UnOperation::Close => false,
             },
-            CommDirection::ToSrv => match msg.op() {
+            Some(Direction::W) => match msg.op() {
                 UnOperation::InitDirToSrv => false,
                 UnOperation::InitDirFromSrv => false,
                 UnOperation::InitReply => false,
@@ -151,7 +152,7 @@ impl UnixConn {
                 UnOperation::FromSrv => false,
                 UnOperation::Close => false,
             },
-            CommDirection::FromSrv => match msg.op() {
+            Some(Direction::R) => match msg.op() {
                 UnOperation::InitDirToSrv => false,
                 UnOperation::InitDirFromSrv => false,
                 UnOperation::InitReply => false,
@@ -201,9 +202,9 @@ impl UnixConn {
 
     /// Send a message on the Unix socket.
     pub async fn send(&self, msg: &UnMessage) -> ah::Result<()> {
-        let allowed = match self.dir() {
-            CommDirection::Bidirectional => false,
-            CommDirection::ToSrv => match msg.op() {
+        let allowed = match self.dir {
+            None => false,
+            Some(Direction::W) => match msg.op() {
                 UnOperation::InitDirToSrv => false,
                 UnOperation::InitDirFromSrv => false,
                 UnOperation::InitReply => true,
@@ -213,7 +214,7 @@ impl UnixConn {
                 UnOperation::FromSrv => false,
                 UnOperation::Close => true,
             },
-            CommDirection::FromSrv => match msg.op() {
+            Some(Direction::R) => match msg.op() {
                 UnOperation::InitDirToSrv => false,
                 UnOperation::InitDirFromSrv => false,
                 UnOperation::InitReply => true,

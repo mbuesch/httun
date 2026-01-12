@@ -4,7 +4,7 @@
 
 use crate::http_server::HttpConn;
 use anyhow as ah;
-use httun_util::{ChannelId, timeouts::CHAN_R_TIMEOUT};
+use httun_util::{ChannelId, strings::Direction, timeouts::CHAN_R_TIMEOUT};
 use std::{sync::Arc, time::Duration};
 
 #[cfg(target_family = "unix")]
@@ -16,22 +16,6 @@ use anyhow::{Context as _, format_err as err};
 #[cfg(target_family = "unix")]
 use httun_unix_protocol::{UnMessage, UnOperation};
 
-/// Dominant communication direction / Semantic data flow direction
-///
-/// For example:
-/// On a [CommDirection::FromSrv] direction the server can
-/// receive [UnOperation::ReqFromSrv] messages and send [UnOperation::FromSrv] messages.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum CommDirection {
-    /// Communication in both directions.
-    Bidirectional,
-    /// Communication from FastCGI to httun-server.
-    ToSrv,
-    /// Communication from httun-server to FastCGI.
-    FromSrv,
-}
-
 /// Message received from communication backend.
 #[derive(Debug)]
 pub enum CommRxMsg {
@@ -40,7 +24,6 @@ pub enum CommRxMsg {
     /// Request for data from server.
     ReqFromSrv(Vec<u8>),
     /// Keepalive message.
-    #[allow(dead_code)]
     Keepalive,
 }
 
@@ -167,12 +150,14 @@ impl CommBackend {
     }
 
     /// Semantic communication direction.
-    #[allow(dead_code)] //TODO
-    pub fn dir(&self) -> CommDirection {
+    pub fn dir(&self) -> Direction {
         match self {
             #[cfg(target_family = "unix")]
             Self::Unix(b) => b.conn.dir(),
-            Self::Http(_) => CommDirection::Bidirectional, //TODO?
+            Self::Http(b) => b
+                .conn
+                .dir()
+                .expect("Http connection with unknown channel direction"),
         }
     }
 }
