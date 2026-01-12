@@ -533,7 +533,7 @@ pub struct HttpConn {
     /// Receiver for W direction requests.
     rx_w: Mutex<Option<mpsc::Receiver<HttunHttpReq>>>,
     /// Pinned channel ID and auth. (None if not pinned yet).
-    pinned_chan: StdOnceLock<(ChannelId, Option<HttpAuth>)>,
+    pinned_chan: StdOnceLock<(ChannelId, Direction, Option<HttpAuth>)>,
     /// Channel pinning state (receiver).
     pinned_state_rx: Mutex<watch::Receiver<ChanPinState>>,
     /// Channel pinning state (sender).
@@ -607,6 +607,11 @@ impl HttpConn {
         self.pinned_chan.get().map(|c| &c.0).cloned()
     }
 
+    /// Get the pinned channel direction (if any).
+    pub fn dir(&self) -> Option<Direction> {
+        self.pinned_chan.get().map(|c| &c.1).cloned()
+    }
+
     /// Set the current error code.
     fn set_error(&self, error: HttpError) {
         self.error.store(error.into(), atomic::Ordering::Relaxed);
@@ -654,7 +659,7 @@ impl HttpConn {
     fn pin_channel(&self, req: &HttunHttpReq) -> ah::Result<()> {
         if let Some(pinned_chan) = self.pinned_chan.get() {
             if pinned_chan.0 == req.chan_id {
-                self.check_auth(req, &pinned_chan.1)?;
+                self.check_auth(req, &pinned_chan.2)?;
                 return Ok(());
             } else {
                 return Err(err!(
@@ -671,7 +676,7 @@ impl HttpConn {
 
         let pinned_chan = self
             .pinned_chan
-            .get_or_init(|| (req.chan_id, chan.http().basic_auth().clone()));
+            .get_or_init(|| (req.chan_id, req.direction, chan.http().basic_auth().clone()));
 
         self.pinned_state_tx
             .send(ChanPinState::HaveChannelId)
