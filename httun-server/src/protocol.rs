@@ -11,19 +11,30 @@ use httun_conf::Config;
 use httun_protocol::{
     InitPayload, KexPublic, Message, MsgType, Operation, SequenceType, SessionKey,
 };
-use httun_util::{ChannelId, errors::DisconnectedError};
+use httun_util::{ChannelId, errors::DisconnectedError, strings::Direction};
 use std::{
     collections::{HashMap, LinkedList},
     sync::{
         Arc, Mutex as StdMutex, RwLock as StdRwLock,
-        atomic::{self, AtomicBool},
+        atomic::{self, AtomicBool, AtomicI64},
     },
 };
 use tokio::{sync::OwnedSemaphorePermit, task, time::timeout};
 
+type ProtocolHandlerId = i64;
+static NEXT_HANDLER_ID: AtomicI64 = AtomicI64::new(0);
+
+fn next_handler_id() -> ProtocolHandlerId {
+    let id = NEXT_HANDLER_ID.fetch_add(1, atomic::Ordering::Relaxed);
+    assert!(id >= 0);
+    id
+}
+
 /// Httun protocol handler on the server.
 #[derive(Debug)]
 pub struct ProtocolHandler {
+    /// Identification number.
+    id: ProtocolHandlerId,
     /// Configuration file.
     conf: Arc<Config>,
     /// Protocol manager.
@@ -47,6 +58,7 @@ impl ProtocolHandler {
         channels: Arc<Channels>,
     ) -> Self {
         Self {
+            id: next_handler_id(),
             conf,
             protman,
             comm,
@@ -54,6 +66,11 @@ impl ProtocolHandler {
             pinned_session: StdRwLock::new(None),
             dead: AtomicBool::new(false),
         }
+    }
+
+    /// Get the protocol handler id.
+    pub fn prot_id(&self) -> ProtocolHandlerId {
+        self.id
     }
 
     /// Get the channel id for this protocol handler.
@@ -68,6 +85,11 @@ impl ProtocolHandler {
         self.channels
             .get(self.chan_id())
             .ok_or_else(|| err!("Channel is not configured."))
+    }
+
+    /// Get the direction.
+    pub fn dir(&self) -> Direction {
+        self.comm.dir()
     }
 
     /// Get the pinned session secret, if any.
@@ -147,6 +169,10 @@ impl ProtocolHandler {
         self.check_rx_sequence(&chan, &msg, SequenceType::B)
             .await
             .context("rx sequence validation SequenceType::B")?;
+
+        self.protman
+            .kill_old_connections(chan.id(), Direction::W, self.prot_id())
+            .await;
 
         match oper {
             Operation::L3ToSrv => {
@@ -238,6 +264,10 @@ impl ProtocolHandler {
             .await
             .context("rx sequence validation SequenceType::C")?;
 
+        self.protman
+            .kill_old_connections(chan.id(), Direction::R, self.prot_id())
+            .await;
+
         let (reply_oper, payload) = match oper {
             Operation::L3FromSrv => {
                 log::trace!("{}: Received Operation::L3FromSrv", chan.id());
@@ -326,9 +356,10 @@ impl ProtocolHandler {
 
     /// Check if the protocol handler is dead or channel activity has timed out.
     fn is_dead(&self) -> bool {
-        if self.dead.load(atomic::Ordering::Relaxed) {
-            return true;
-        }
+        self.dead.load(atomic::Ordering::Relaxed)
+    }
+
+    fn is_timed_out(&self) -> bool {
         self.chan()
             .map(|chan| {
                 let timed_out = chan.activity_timed_out();
@@ -481,13 +512,37 @@ impl ProtocolManager {
             .for_each(drop);
     }
 
+    /// Kill old connections for the given channel ID and direction.
+    ///
+    /// Keeps only the connection with the given protocol handler ID.
+    async fn kill_old_connections(
+        &self,
+        chan_id: ChannelId,
+        dir: Direction,
+        id: ProtocolHandlerId,
+    ) {
+        let insts = self.get_insts(chan_id);
+        let mut insts = insts.lock().expect("Lock poisoned");
+
+        insts
+            .extract_if(|inst| {
+                let inst_dir = inst.prot.dir();
+                let inst_id = inst.prot.prot_id();
+
+                inst_dir == dir && inst_id != id
+            })
+            .for_each(drop);
+    }
+
     /// Perform periodic work for all protocol instances.
     pub fn periodic_work(&self) {
         for insts in self.insts.read().expect("Lock poisoned").values() {
             let mut insts = insts.lock().expect("Lock poisoned");
 
             // Remove dead instances.
-            insts.extract_if(|inst| inst.prot.is_dead()).for_each(drop);
+            insts
+                .extract_if(|inst| inst.prot.is_dead() || inst.prot.is_timed_out())
+                .for_each(drop);
 
             // Perform periodic work for all instances.
             for inst in &*insts {
