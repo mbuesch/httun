@@ -521,6 +521,7 @@ impl ProtocolManager {
         dir: Direction,
         id: ProtocolHandlerId,
     ) {
+    /*
         let insts = self.get_insts(chan_id);
         let mut insts = insts.lock().expect("Lock poisoned");
 
@@ -532,6 +533,7 @@ impl ProtocolManager {
                 inst_dir == dir && inst_id != id
             })
             .for_each(drop);
+    */
     }
 
     /// Perform periodic work for all protocol instances.
