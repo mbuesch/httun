@@ -5,7 +5,7 @@
 use crate::{async_task_comm::AsyncTaskComm, error_delay};
 use anyhow::{self as ah, format_err as err};
 use httun_protocol::{Message, MsgType, Operation};
-use httun_util::strings::hex;
+use httun_util::{strings::hex, timeouts::PONG_RX_TIMEOUT};
 use movavg::MovAvg;
 use rand::prelude::*;
 use std::{
@@ -13,7 +13,11 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{sync::mpsc::Sender, task, time::interval};
+use tokio::{
+    sync::mpsc::Sender,
+    task,
+    time::{interval, timeout},
+};
 
 const NR_RAND_BYTES: usize = 1024 * 16;
 
@@ -63,12 +67,17 @@ pub async fn run_mode_test(
                     Err(e) => {
                         log::error!("Make httun packet failed: {e:?}");
                         error_delay().await;
+                        httun_comm.request_restart().await;
                         continue;
                     }
                 };
                 httun_comm.send_to_httun(msg).await;
 
-                let msg = httun_comm.recv_from_httun().await;
+                let Ok(msg) = timeout(PONG_RX_TIMEOUT, httun_comm.recv_from_httun()).await else {
+                    log::error!("Timeout receiving PONG.");
+                    httun_comm.request_restart().await;
+                    continue;
+                };
 
                 let reply_payload = String::from_utf8_lossy(msg.payload());
                 if reply_payload != expected_reply_payload {

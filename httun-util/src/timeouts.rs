@@ -40,4 +40,7 @@ pub const L7_TX_TIMEOUT: Duration = Duration::from_secs(10);
 /// L7 socket to target receive timeout.
 pub const L7_RX_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Timeout for receiving ping response.
+pub const PONG_RX_TIMEOUT: Duration = Duration::from_millis(1500);
+
 // vim: ts=4 sw=4 expandtab
