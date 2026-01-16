@@ -151,6 +151,7 @@ impl CommBackend {
     }
 
     /// Semantic communication direction.
+    #[allow(dead_code)]
     pub fn dir(&self) -> Direction {
         match self {
             #[cfg(target_family = "unix")]

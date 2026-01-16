@@ -88,6 +88,7 @@ impl ProtocolHandler {
     }
 
     /// Get the direction.
+    #[allow(dead_code)]
     pub fn dir(&self) -> Direction {
         self.comm.dir()
     }
@@ -517,11 +518,11 @@ impl ProtocolManager {
     /// Keeps only the connection with the given protocol handler ID.
     async fn kill_old_connections(
         &self,
-        chan_id: ChannelId,
-        dir: Direction,
-        id: ProtocolHandlerId,
+        _chan_id: ChannelId,
+        _dir: Direction,
+        _id: ProtocolHandlerId,
     ) {
-    /*
+        /*
         let insts = self.get_insts(chan_id);
         let mut insts = insts.lock().expect("Lock poisoned");
 
@@ -533,7 +534,7 @@ impl ProtocolManager {
                 inst_dir == dir && inst_id != id
             })
             .for_each(drop);
-    */
+        */
     }
 
     /// Perform periodic work for all protocol instances.
