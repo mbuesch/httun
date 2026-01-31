@@ -12,7 +12,7 @@ pub struct NetList {
     list: Option<Vec<IpNet>>,
 }
 
-/// Result of checking an address against a NetList.
+/// Result of checking an address against a `NetList`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetListCheck {
     NoList,
@@ -21,7 +21,7 @@ pub enum NetListCheck {
 }
 
 impl NetList {
-    /// Create a new NetList from an optional list of string representations of IP addresses or networks.
+    /// Create a new `NetList` from an optional list of string representations of IP addresses or networks.
     pub fn new(nets: Option<&[String]>) -> ah::Result<Self> {
         if let Some(nets) = nets {
             let mut list = Vec::with_capacity(nets.len());
@@ -53,7 +53,7 @@ impl NetList {
         }
     }
 
-    /// Check if the given socket address is contained in the NetList.
+    /// Check if the given socket address is contained in the `NetList`.
     #[must_use]
     pub fn check(&self, sock_addr: &SocketAddr) -> NetListCheck {
         if let Some(list) = &self.list {
@@ -69,24 +69,21 @@ impl NetList {
         }
     }
 
-    /// Log the contents of the NetList with the given name.
+    /// Log the contents of the `NetList` with the given name.
     pub fn log(&self, name: &str) {
         if log::log_enabled!(log::Level::Info) {
             if let Some(list) = &self.list {
-                let list: String = list.iter().map(|a| format!("\"{a:?}\", ")).collect();
-                log::info!("{name} = [ {list}]");
+                let list = itertools::join(list.iter().map(|a| format!("\"{a:?}\"")), ", ");
+                log::info!("{name} = [ {list} ]");
             } else {
                 log::info!("No {name}");
             }
         }
     }
 
-    /// Check if the NetList is empty.
+    /// Check if the `NetList` is empty.
     pub fn is_empty(&self) -> bool {
-        self.list
-            .as_ref()
-            .map(|list| list.is_empty())
-            .unwrap_or(true)
+        self.list.as_ref().is_none_or(Vec::is_empty)
     }
 }
 

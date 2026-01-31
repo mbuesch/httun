@@ -61,10 +61,10 @@ impl UnMessageHeader {
 /// Operation code for the Unix domain socket protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
 pub enum UnOperation {
-    /// Initialize a new ToSrv socket.
+    /// Initialize a new `ToSrv` socket.
     InitDirToSrv,
 
-    /// Initialize a new FromSrv socket.
+    /// Initialize a new `FromSrv` socket.
     InitDirFromSrv,
 
     /// Reply to `InitDirToSrv` or `InitDirFromSrv`.
@@ -76,7 +76,7 @@ pub enum UnOperation {
     /// To httun-server.
     ToSrv,
 
-    /// Request FromSrv.
+    /// Request `FromSrv`.
     ReqFromSrv,
 
     /// From httun-server.
@@ -89,14 +89,14 @@ pub enum UnOperation {
 /// Message for the Unix domain socket protocol.
 ///
 /// The Unix socket is used for communication between
-/// the FastCGI daemon (`httun-fcgi`) and the `httun-server``.
+/// the `FastCGI` daemon (`httun-fcgi`) and the `httun-server`.
 #[derive(Clone, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
 pub struct UnMessage {
     /// Operation code.
     op: UnOperation,
     /// Channel ID.
     chan_id: ChannelId,
-    /// Extra HTTP headers (only for FromSrvInit).
+    /// Extra HTTP headers (only for `FromSrvInit`).
     extra_headers: Vec<HttpHeader>,
     /// Payload data.
     payload: Vec<u8>,

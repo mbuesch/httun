@@ -18,7 +18,7 @@ use httun_util::{
 };
 use std::{
     collections::HashMap,
-    io::{Read, Write},
+    io::{Read as _, Write as _},
     path::Path,
     sync::Arc,
     sync::OnceLock,
@@ -153,7 +153,7 @@ async fn send_keepalive_to_httun_server(chan_id: ChannelId) -> ah::Result<()> {
     get_connection(chan_id, true).await?.send_keepalive().await
 }
 
-/// Send FastCGI response.
+/// Send `FastCGI` response.
 async fn fcgi_response(
     req: &FcgiRequest<'_>,
     status: &str,
@@ -207,7 +207,7 @@ async fn fcgi_response(
     FcgiRequestResult::Complete(0)
 }
 
-/// Send FastCGI error response.
+/// Send `FastCGI` error response.
 async fn fcgi_response_error(
     req: &FcgiRequest<'_>,
     status: &str,
@@ -223,7 +223,7 @@ async fn fcgi_response_error(
     .await
 }
 
-/// Handle FastCGI requests.
+/// Handle `FastCGI` requests.
 ///
 /// This is the main entry point for the FCGI application.
 pub async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
@@ -356,7 +356,7 @@ pub async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
     }
 }
 
-/// Initialize the FastCGI handler.
+/// Initialize the `FastCGI` handler.
 pub fn init_fcgi_handler() -> ah::Result<()> {
     CONNECTIONS
         .set(Mutex::new(HashMap::new()))

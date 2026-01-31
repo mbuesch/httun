@@ -169,7 +169,7 @@ pub struct DeSuspended {
 
 impl DeSuspended {
     #[inline]
-    pub fn resume<'a>(self, buf: &'a [u8]) -> De<'a> {
+    pub fn resume(self, buf: &[u8]) -> De<'_> {
         De {
             buf,
             range: self.range,

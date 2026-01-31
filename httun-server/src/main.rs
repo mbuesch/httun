@@ -50,10 +50,12 @@ use std::sync::atomic::{self, AtomicU32};
 #[cfg(target_family = "unix")]
 use tokio::signal::unix::{SignalKind, signal};
 
-/// The web server's UID (for FastCGI socket ownership).
+const WORKER_THREADS: usize = 6;
+
+/// The web server's UID (for `FastCGI` socket ownership).
 #[cfg(target_family = "unix")]
 static WEBSERVER_UID: AtomicU32 = AtomicU32::new(u32::MAX);
-/// The web server's GID (for FastCGI socket ownership).
+/// The web server's GID (for `FastCGI` socket ownership).
 #[cfg(target_family = "unix")]
 static WEBSERVER_GID: AtomicU32 = AtomicU32::new(u32::MAX);
 
@@ -149,14 +151,14 @@ struct Opts {
     #[arg(long)]
     no_drop_root: bool,
 
-    /// User name the web server FastCGI runs as.
+    /// User name the web server `FastCGI` runs as.
     ///
     /// This option is only used, if --http-listen is not used.
     #[cfg(target_family = "unix")]
     #[arg(long, value_name = "USER", default_value = "www-data")]
     webserver_user: String,
 
-    /// Group name the web server FastCGI runs as.
+    /// Group name the web server `FastCGI` runs as.
     ///
     /// This option is only used, if --http-listen is not used.
     #[cfg(target_family = "unix")]
@@ -170,9 +172,9 @@ struct Opts {
     #[arg(long, value_name = "PATH")]
     unix_socket: Option<PathBuf>,
 
-    /// Instead of running as an FastCGI backend run a simple HTTP server.
+    /// Instead of running as an `FastCGI` backend run a simple HTTP server.
     ///
-    /// If you don't specify this option, then httun-server will act as FastCGI backend.
+    /// If you don't specify this option, then httun-server will act as `FastCGI` backend.
     ///
     /// If you specify this option, then this is the address or address:port to listen on.
     /// For example:
@@ -181,15 +183,15 @@ struct Opts {
     ///
     /// `[::]:80` Listen on all IPv4 + IPv6 interfaces on port 80.
     ///
-    /// `192.168.1.1:8080` Listen on IPv4 192.168.1.1 on port 8080.
+    /// `192.168.1.1:8080` Listen on IPv4 `192.168.1.1` on port 8080.
     ///
     /// `all` Listen on all IPv4 + IPv6 on port 80
     ///
     /// `any` Listen on all IPv4 + IPv6 on port 80
     ///
-    /// `localhost` Listen on 127.0.0.1 port 80
+    /// `localhost` Listen on `127.0.0.1` port 80
     ///
-    /// 'ip6-localhost' Listen on ::1 port 80
+    /// 'ip6-localhost' Listen on `::1` port 80
     ///
     /// If you don't specify the port, then it will default to 80.
     #[arg(long, value_name = "ADDR:PORT")]
@@ -213,7 +215,7 @@ struct Opts {
 
     /// Enable `tokio-console` tracing support.
     ///
-    /// See https://crates.io/crates/tokio-console
+    /// See <https://crates.io/crates/tokio-console>
     #[arg(long, hide = true)]
     tokio_console: bool,
 
@@ -482,7 +484,6 @@ fn main() -> ah::Result<()> {
     }
 
     // Build Tokio runtime and run the async main function.
-    const WORKER_THREADS: usize = 6;
     runtime::Builder::new_multi_thread()
         .thread_keep_alive(Duration::from_millis(5000))
         .max_blocking_threads(WORKER_THREADS * 4)

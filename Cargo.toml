@@ -39,6 +39,7 @@ heapless = "0.9"
 hickory-resolver = "0.25"
 humansize = "2"
 ipnet = "2"
+itertools = "0.14"
 libc = "0.2"
 log = "0.4"
 memchr = "2"
@@ -64,6 +65,36 @@ httun-protocol = { path = "./httun-protocol", version = "1" }
 httun-tun = { path = "./httun-tun", version = "1" }
 httun-unix-protocol = { path = "./httun-unix-protocol", version = "1" }
 httun-util = { path = "./httun-util", version = "1" }
+
+[workspace.lints.clippy]
+# Lints from `cargo` group
+cargo = "warn"
+multiple-crate-versions = { level = "allow", priority = 1 }
+
+# Lints from `pedantic` group
+pedantic = "warn"
+cloned_instead_of_copied = { level = "allow", priority = 1 }
+default_trait_access = { level = "allow", priority = 1 }
+missing-errors-doc = { level = "allow", priority = 1 }
+missing-panics-doc = { level = "allow", priority = 1 }
+must_use_candidate = { level = "allow", priority = 1 }
+similar-names = { level = "allow", priority = 1 }
+struct-excessive-bools = { level = "allow", priority = 1 }
+too_many_lines = { level = "allow", priority = 1 }
+unused_async = { level = "allow", priority = 1 }
+
+# Lints from `restriction` group
+clone_on_ref_ptr = "warn"
+dbg_macro = "warn"
+mem_forget = "warn"
+precedence_bits = "warn"
+todo = "warn"
+try_err = "warn"
+undocumented_unsafe_blocks = "warn"
+unimplemented = "warn"
+unseparated_literal_suffix = "warn"
+unused_result_ok = "warn"
+unused_trait_names = "warn"
 
 [profile.dev]
 debug = "limited"

@@ -17,7 +17,5 @@ anyhow = { workspace = true }
 httun-util = { workspace = true }
 rkyv = { workspace = true }
 
-[lints.clippy]
-undocumented_unsafe_blocks = "warn"
-todo = "warn"
-dbg_macro = "warn"
+[lints]
+workspace = true

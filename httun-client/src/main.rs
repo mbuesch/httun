@@ -24,7 +24,7 @@ use crate::{
     resolver::ResMode,
 };
 use anyhow::{self as ah, Context as _, format_err as err};
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory as _, Parser, Subcommand};
 use httun_conf::{Config, ConfigVariant};
 use httun_util::{ChannelId, header::HttpHeader};
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -33,13 +33,15 @@ use tokio::{runtime, signal::ctrl_c, sync::mpsc, task, time};
 #[cfg(target_family = "unix")]
 use tokio::signal::unix::{SignalKind, signal};
 
+const WORKER_THREADS: usize = 6;
+
 /// Connect to a httun tunnel server.
 #[derive(Parser, Debug, Clone)]
 struct Opts {
     /// URL of the httun HTTP server.
     ///
     /// The URL is in the form of:
-    /// http://www.example.com/httun
+    /// <http://www.example.com/httun>
     ///
     /// Where '/httun' is the base path to the FCGI.
     server_url: Option<String>,
@@ -84,7 +86,7 @@ struct Opts {
 
     /// Enable `tokio-console` tracing support.
     ///
-    /// See https://crates.io/crates/tokio-console
+    /// See <https://crates.io/crates/tokio-console>
     #[arg(long, hide = true)]
     tokio_console: bool,
 
@@ -244,8 +246,8 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 
     // Get the resolver mode from the options.
     let res_mode = match (opts.resolve_ipv6, opts.resolve_ipv4) {
-        (true, false) | (true, true) => ResMode::Ipv6,
-        (false, false) | (false, true) => ResMode::Ipv4,
+        (true, false | true) => ResMode::Ipv6,
+        (false, false | true) => ResMode::Ipv4,
     };
 
     // Initialize communication between the async tasks.
@@ -264,7 +266,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 Some(Mode::Tun { .. }) => HttunClientMode::L3,
                 Some(Mode::Socket { .. }) => HttunClientMode::L7,
                 Some(Mode::Test { .. }) => HttunClientMode::Test,
-                None | Some(Mode::GenKey {}) | Some(Mode::GenUuid {}) => unreachable!(),
+                None | Some(Mode::GenKey {} | Mode::GenUuid {}) => unreachable!(),
             };
 
             // Connect to the httun server.
@@ -335,7 +337,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                         let _ = exit_tx.send(Err(e)).await;
                     }
                 }
-                None | Some(Mode::GenKey {}) | Some(Mode::GenUuid {}) => unreachable!(),
+                None | Some(Mode::GenKey {} | Mode::GenUuid {}) => unreachable!(),
             }
         }
     });
@@ -377,7 +379,6 @@ fn main() -> ah::Result<()> {
         return Ok(());
     }
 
-    const WORKER_THREADS: usize = 6;
     runtime::Builder::new_multi_thread()
         .thread_keep_alive(Duration::from_millis(5000))
         .max_blocking_threads(WORKER_THREADS * 4)

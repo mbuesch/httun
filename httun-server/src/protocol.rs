@@ -361,15 +361,13 @@ impl ProtocolHandler {
     }
 
     fn is_timed_out(&self) -> bool {
-        self.chan()
-            .map(|chan| {
-                let timed_out = chan.activity_timed_out();
-                if timed_out {
-                    log::debug!("Channel {} activity timed out", chan.id());
-                }
-                timed_out
-            })
-            .unwrap_or_default()
+        self.chan().is_ok_and(|chan| {
+            let timed_out = chan.activity_timed_out();
+            if timed_out {
+                log::debug!("Channel {} activity timed out", chan.id());
+            }
+            timed_out
+        })
     }
 
     /// Perform periodic work for this protocol handler.

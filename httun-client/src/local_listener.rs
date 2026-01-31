@@ -45,12 +45,11 @@ async fn local_rx(
         if buf.is_empty() {
             log::trace!("Local socket: Disconnected.");
             return Err(DisconnectedError.into());
-        } else {
-            log::trace!(
-                "Sending {} bytes from local socket to httun-server.",
-                buf.len()
-            );
         }
+        log::trace!(
+            "Sending {} bytes from local socket to httun-server.",
+            buf.len()
+        );
 
         let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
         let l7 = l7.serialize().context("L7 serialize")?;

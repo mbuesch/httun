@@ -42,11 +42,10 @@ impl TryFrom<u8> for MsgType {
     type Error = ah::Error;
 
     fn try_from(ty: u8) -> ah::Result<Self> {
-        let ty = ty & Self::MASK;
-
         const INIT: u8 = MsgType::Init as _;
         const DATA: u8 = MsgType::Data as _;
 
+        let ty = ty & Self::MASK;
         match ty {
             INIT => Ok(MsgType::Init),
             DATA => Ok(MsgType::Data),
@@ -328,6 +327,7 @@ impl Message {
     }
 
     /// Deserialize message from base64url encoded string.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn deserialize_b64u(buf: Vec<u8>, key: &SessionKey) -> ah::Result<Self> {
         Self::deserialize(Self::decode_b64u(&buf)?, key)
     }
@@ -342,7 +342,7 @@ impl Message {
     /// Peek message type (`MsgType`) from raw bytes.
     ///
     /// The returned information is not authenticated.
-    /// Use [Message::deserialize] to get authenticated data.
+    /// Use [`Message::deserialize`] to get authenticated data.
     pub fn peek_type(buf: &[u8]) -> ah::Result<MsgType> {
         // Deserialize the type field (first field).
         let mut de = De::new_min_max(

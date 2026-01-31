@@ -94,7 +94,7 @@ fn make_client(
 /// Append the serial to the URL.
 fn format_url_serial(url: &str, serial: u64) -> String {
     let url = url.trim_end_matches('/');
-    format!("{}/{:010X}", url, serial & 0x000000FF_FFFFFFFF)
+    format!("{}/{:010X}", url, serial & 0x0000_00FF_FFFF_FFFF)
 }
 
 /// Format the URL for a channel and direction.
@@ -168,7 +168,7 @@ impl DirectionR {
         )
         .context("httun HTTP-r build HTTP client")?;
 
-        let http_auth = self.chan_conf.http().basic_auth().clone();
+        let http_auth = self.chan_conf.http().basic_auth();
 
         ready.notify_one();
         loop {
@@ -209,7 +209,6 @@ impl DirectionR {
                         // This is normal behavior, if the inferface is idle.
                         tries = 0;
                         // Fast retry.
-                        continue 'http;
                     }
                     StatusCode::BAD_GATEWAY
                     | StatusCode::GATEWAY_TIMEOUT
@@ -217,7 +216,6 @@ impl DirectionR {
                     | StatusCode::TOO_MANY_REQUESTS => {
                         // Slow retry.
                         sleep(Duration::from_millis(100)).await;
-                        continue 'http;
                     }
                     status => {
                         // Hard error.
@@ -270,7 +268,7 @@ impl DirectionW {
         )
         .context("httun HTTP-w build HTTP client")?;
 
-        let http_auth = self.chan_conf.http().basic_auth().clone();
+        let http_auth = self.chan_conf.http().basic_auth();
 
         ready.notify_one();
         loop {
@@ -306,7 +304,6 @@ impl DirectionW {
                     }
                     StatusCode::REQUEST_TIMEOUT => {
                         // Fast retry.
-                        continue 'http;
                     }
                     StatusCode::BAD_GATEWAY
                     | StatusCode::GATEWAY_TIMEOUT
@@ -314,7 +311,6 @@ impl DirectionW {
                     | StatusCode::TOO_MANY_REQUESTS => {
                         // Slow retry.
                         sleep(Duration::from_millis(100)).await;
-                        continue 'http;
                     }
                     status => {
                         // Hard error.
@@ -339,7 +335,7 @@ async fn get_session(
     let client = make_client(user_agent, extra_headers, Duration::from_secs(5), chan_conf)
         .context("httun session build HTTP client")?;
 
-    let http_auth = chan_conf.http().basic_auth().clone();
+    let http_auth = chan_conf.http().basic_auth();
 
     for i in 0..SESSION_INIT_TRIES {
         let last_try = i == SESSION_INIT_TRIES - 1;
@@ -582,7 +578,7 @@ impl HttunClient {
 
             tokio::select! {
                 biased;
-                _ = comm.wait_for_restart_request() => (),
+                () = comm.wait_for_restart_request() => (),
                 ret = &mut r_task => {
                     w_task.abort();
                     let _ = w_task.await;

@@ -25,6 +25,7 @@ httun-protocol = { workspace = true }
 httun-unix-protocol = { workspace = true }
 httun-util = { workspace = true }
 ipnet = { workspace = true }
+itertools = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
 memchr = { workspace = true }
@@ -42,7 +43,5 @@ nix = { workspace = true, features = [ "user" ] }
 default = [ "tun" ]
 tun = [ "dep:httun-tun" ]
 
-[lints.clippy]
-undocumented_unsafe_blocks = "warn"
-todo = "warn"
-dbg_macro = "warn"
+[lints]
+workspace = true

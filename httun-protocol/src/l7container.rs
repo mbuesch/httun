@@ -30,13 +30,13 @@ impl L7Container {
     /// Length of the addr field.
     const ADDR_LEN: usize = 16;
 
-    /// Overhead of the L7Container in bytes.
+    /// Overhead of the `L7Container` in bytes.
     const OVERHEAD_LEN: usize = 16 + 2;
-    /// Maximum payload length of the L7Container in bytes.
+    /// Maximum payload length of the `L7Container` in bytes.
     pub const MAX_PAYLOAD_LEN: usize =
         crate::message::Message::MAX_PAYLOAD_LEN - Self::OVERHEAD_LEN;
 
-    /// Create a new L7Container.
+    /// Create a new `L7Container`.
     ///
     /// `addr` is the destination address for the L7 payload.
     /// `payload` is the L7 payload data.
@@ -59,7 +59,7 @@ impl L7Container {
         self.payload
     }
 
-    /// Serialize the L7Container into a byte vector.
+    /// Serialize the `L7Container` into a byte vector.
     pub fn serialize(&self) -> ah::Result<Vec<u8>> {
         // Type conversions.
         let addr = match self.addr.ip() {
@@ -81,7 +81,7 @@ impl L7Container {
         ser.into_vec()
     }
 
-    /// Deserialize a byte slice into an L7Container.
+    /// Deserialize a byte slice into an `L7Container`.
     pub fn deserialize(buf: &[u8]) -> ah::Result<Self> {
         // Deserialize all fields from the buffer.
         let mut de = De::new_min_max(

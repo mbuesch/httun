@@ -21,7 +21,5 @@ libc = { workspace = true }
 tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros" ] }
 tokio-fastcgi = { workspace = true }
 
-[lints.clippy]
-undocumented_unsafe_blocks = "warn"
-todo = "warn"
-dbg_macro = "warn"
+[lints]
+workspace = true

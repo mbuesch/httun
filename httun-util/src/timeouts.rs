@@ -4,17 +4,17 @@
 
 use std::time::Duration;
 
-/// Timeout for Unix domain socket FastCGI connection.
+/// Timeout for Unix domain socket `FastCGI` connection.
 /// The connection is closed after this timeout.
 pub const UNIX_TIMEOUT: Duration = Duration::from_secs(15);
 /// Timeout for initial Unix domain socket handshake.
 pub const UNIX_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Channel read timeout, in seconds.
-/// This is the internal channel timeout, excluding HTTP timings (see HTTP_R_TIMEOUT).
+/// This is the internal channel timeout, excluding HTTP timings (see `HTTP_R_TIMEOUT`).
 pub const CHAN_R_TIMEOUT_S: u64 = 5;
 /// Channel read timeout.
-/// This is the internal channel timeout, excluding HTTP timings (see HTTP_R_TIMEOUT).
+/// This is the internal channel timeout, excluding HTTP timings (see `HTTP_R_TIMEOUT`).
 pub const CHAN_R_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S);
 /// Channel activity timeout, in seconds.
 /// All channel state is invalidated after this timeout without activity.

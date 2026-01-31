@@ -93,8 +93,8 @@ impl PartialEq for HttpAuth {
         let self_user = self.user().as_bytes();
         let other_user = other.user().as_bytes();
 
-        let self_password = self.password().map(|p| p.as_bytes()).unwrap_or(b"");
-        let other_password = other.password().map(|p| p.as_bytes()).unwrap_or(b"");
+        let self_password = self.password().map_or(b"".as_ref(), |p| p.as_bytes());
+        let other_password = other.password().map_or(b"".as_ref(), |p| p.as_bytes());
 
         // Compare in constant time to avoid timing attacks.
         let user_eq = self_user.ct_eq(other_user);
@@ -133,7 +133,7 @@ impl TryFrom<&toml::Value> for ConfigParametersReceive {
                 .as_integer()
                 .ok_or_else(|| err!("parameters.receive: 'window-length' must be an integer"))
                 .and_then(|i| {
-                    if i <= 0 || i > i16::MAX as i64 {
+                    if i <= 0 || i > i64::from(i16::MAX) {
                         Err(err!(
                             "parameters.receive: 'window-length' must between 1 and 0xFFFF"
                         ))
@@ -221,7 +221,6 @@ impl TryFrom<&toml::Value> for ConfigL7Tunnel {
             for addr in v
                 .as_array()
                 .ok_or_else(|| err!("l7-tunnel: 'address-allowlist' must be an array"))?
-                .iter()
             {
                 address_allowlist.push(
                     addr.as_str()
@@ -239,7 +238,6 @@ impl TryFrom<&toml::Value> for ConfigL7Tunnel {
             for addr in v
                 .as_array()
                 .ok_or_else(|| err!("l7-tunnel: 'address-denylist' must be an array"))?
-                .iter()
             {
                 address_denylist.push(
                     addr.as_str()
@@ -324,7 +322,6 @@ impl TryFrom<&toml::Value> for ConfigChannelHttp {
             for hdr in v
                 .as_array()
                 .ok_or_else(|| err!("channel.http: 'extra-headers' must be an array"))?
-                .iter()
             {
                 let hdr = hdr.as_str().ok_or_else(|| {
                     err!("channel.http: 'extra-headers' elements must be strings")
@@ -341,8 +338,8 @@ impl TryFrom<&toml::Value> for ConfigChannelHttp {
 }
 
 impl ConfigChannelHttp {
-    pub fn basic_auth(&self) -> &Option<HttpAuth> {
-        &self.basic_auth
+    pub fn basic_auth(&self) -> Option<&HttpAuth> {
+        self.basic_auth.as_ref()
     }
 
     pub fn allow_compression(&self) -> bool {
@@ -414,7 +411,6 @@ impl TryFrom<&toml::Value> for ConfigChannel {
             for url in v
                 .as_array()
                 .ok_or_else(|| err!("channel: 'urls' must be an array"))?
-                .iter()
             {
                 this.urls.push(
                     url.as_str()
@@ -581,6 +577,7 @@ impl TryFrom<&toml::Value> for Config {
 }
 
 impl Config {
+    #[allow(clippy::single_match_else)]
     pub fn get_default_path(variant: ConfigVariant) -> PathBuf {
         // The build-time environment variable HTTUN_CONF_PREFIX can be
         // used to give an additional prefix.
@@ -624,7 +621,7 @@ impl Config {
     fn check(&self, variant: ConfigVariant) -> ah::Result<()> {
         if variant == ConfigVariant::Server {
             // Check whether channel IDs are unique.
-            let ids: HashSet<ChannelId> = self.channels.iter().map(|c| c.id()).collect();
+            let ids: HashSet<ChannelId> = self.channels.iter().map(ConfigChannel::id).collect();
             if ids.len() != self.channels.len() {
                 return Err(err!("The configuration contains duplicate channel IDs."));
             }
@@ -692,13 +689,12 @@ impl<'a> Iterator for ChanIter<'a> {
         loop {
             if self.index >= self.config.channels.len() {
                 return None;
-            } else {
-                let index = self.index;
-                self.index += 1;
-                let chan = &self.config.channels[index];
-                if !chan.disabled() {
-                    return Some(chan);
-                }
+            }
+            let index = self.index;
+            self.index += 1;
+            let chan = &self.config.channels[index];
+            if !chan.disabled() {
+                return Some(chan);
             }
         }
     }
@@ -727,8 +723,8 @@ fn parse_hex<const SIZE: usize>(s: &str) -> ah::Result<[u8; SIZE]> {
     }
     let mut ret = [0; SIZE];
     for i in 0..SIZE {
-        ret[i] = parse_hexdigit(&s[i * 2..i * 2 + 1])? << 4;
-        ret[i] |= parse_hexdigit(&s[i * 2 + 1..i * 2 + 2])?;
+        ret[i] = parse_hexdigit(&s[(i * 2)..=(i * 2)])? << 4;
+        ret[i] |= parse_hexdigit(&s[(i * 2 + 1)..=(i * 2 + 1)])?;
     }
     Ok(ret)
 }

@@ -76,7 +76,7 @@ impl RecvBuf {
             None => {
                 self.cont_len = 0;
             }
-        };
+        }
         Ok(())
     }
 }
@@ -113,9 +113,7 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
                     ));
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                continue;
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
             Err(e) => {
                 return Err(e.into());
             }
@@ -146,9 +144,7 @@ async fn recv_rest(stream: &TcpStream, mut buf: RecvBuf) -> ah::Result<RecvBuf> 
                         break;
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    continue;
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
                 Err(e) => {
                     return Err(e.into());
                 }
@@ -293,7 +289,7 @@ pub enum HttpRequest {
     Post,
 }
 
-/// Parse the HTTP request header line (first line, e.g., "GET /chan_id/r?m=... HTTP/1.1").
+/// Parse the HTTP request header line (first line, e.g., `GET /chan_id/r?m=... HTTP/1.1`).
 ///
 /// `line` is the HTTP request header line.
 ///
@@ -328,7 +324,7 @@ fn parse_request_header(line: &[u8]) -> ah::Result<(HttpRequest, ChannelId, Dire
 ///
 /// `value` is the value of the Authorization header.
 ///
-/// Returns the decoded HttpAuth if successful.
+/// Returns the decoded `HttpAuth` if successful.
 fn decode_auth_header(value: &[u8]) -> Option<HttpAuth> {
     let (mode, encoded) = split_delim(value.trim_ascii_start(), b' ')?;
     if !mode.trim_ascii().eq_ignore_ascii_case(b"Basic") {
@@ -484,7 +480,7 @@ enum HttpError {
 }
 
 impl From<HttpError> for u32 {
-    /// Convert HttpError to u32.
+    /// Convert `HttpError` to u32.
     fn from(value: HttpError) -> Self {
         value as _
     }
@@ -493,7 +489,7 @@ impl From<HttpError> for u32 {
 impl TryFrom<u32> for HttpError {
     type Error = ah::Error;
 
-    /// Convert u32 to HttpError.
+    /// Convert u32 to `HttpError`.
     fn try_from(value: u32) -> ah::Result<Self> {
         const NO_ERROR: u32 = HttpError::NoError as _;
         const PEER_DISCONNECTED: u32 = HttpError::PeerDisconnected as _;
@@ -545,7 +541,7 @@ pub struct HttpConn {
 }
 
 impl HttpConn {
-    /// Wrap a new TCP stream into an HttpConn.
+    /// Wrap a new TCP stream into an `HttpConn`.
     ///
     /// `stream` is the TCP stream.
     /// `conf` is the server configuration.
@@ -631,10 +627,10 @@ impl HttpConn {
     /// Check HTTP Basic Authorization.
     ///
     /// `req` is the HTTP request.
-    /// `conf_auth` is the configured HttpAuth for the channel.
+    /// `conf_auth` is the configured `HttpAuth` for the channel.
     ///
-    /// Returns Ok(()) if authorization is successful, Err otherwise.
-    fn check_auth(&self, req: &HttunHttpReq, conf_auth: &Option<HttpAuth>) -> ah::Result<()> {
+    /// Returns `Ok(())` if authorization is successful, Err otherwise.
+    fn check_auth(req: &HttunHttpReq, conf_auth: Option<&HttpAuth>) -> ah::Result<()> {
         if let Some(conf_auth) = conf_auth {
             if req.authorization.as_ref() != Some(conf_auth) {
                 return Err(err!(
@@ -659,35 +655,38 @@ impl HttpConn {
     fn pin_channel(&self, req: &HttunHttpReq) -> ah::Result<()> {
         if let Some(pinned_chan) = self.pinned_chan.get() {
             if pinned_chan.0 == req.chan_id {
-                self.check_auth(req, &pinned_chan.2)?;
+                Self::check_auth(req, pinned_chan.2.as_ref())?;
                 return Ok(());
-            } else {
-                return Err(err!(
-                    "Http connection is already pinned to a different channel."
-                ));
             }
+            return Err(err!(
+                "Http connection is already pinned to a different channel."
+            ));
         }
 
         let chan = self
             .conf
             .channel_by_id(req.chan_id)
             .context("Get channel from configuration")?;
-        self.check_auth(req, chan.http().basic_auth())?;
+        Self::check_auth(req, chan.http().basic_auth())?;
 
-        let pinned_chan = self
-            .pinned_chan
-            .get_or_init(|| (req.chan_id, req.direction, chan.http().basic_auth().clone()));
+        let pinned_chan = self.pinned_chan.get_or_init(|| {
+            (
+                req.chan_id,
+                req.direction,
+                chan.http().basic_auth().cloned(),
+            )
+        });
 
         self.pinned_state_tx
             .send(ChanPinState::HaveChannelId)
             .context("Notify channel ID pinning")?;
 
-        if pinned_chan.0 != req.chan_id {
+        if pinned_chan.0 == req.chan_id {
+            Ok(())
+        } else {
             Err(err!(
                 "Http connection is already pinned to a different channel."
             ))
-        } else {
-            Ok(())
         }
     }
 
@@ -827,7 +826,7 @@ impl HttpServer {
 
     /// Accept a new HTTP connection.
     ///
-    /// Returns the accepted HttpConn.
+    /// Returns the accepted `HttpConn`.
     pub async fn accept(&self) -> ah::Result<Arc<HttpConn>> {
         let (stream, _addr) = self.listener.accept().await.context("HTTP accept")?;
         HttpConn::new(

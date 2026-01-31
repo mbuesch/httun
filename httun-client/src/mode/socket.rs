@@ -20,8 +20,8 @@ fn split_host_port_string(hostport: &str) -> ah::Result<(&str, u16)> {
         return Err(err!("Invalid address. No colon/port."));
     };
     let mut host = &hostport[..pos];
-    if host.starts_with("[") {
-        if !host.ends_with("]") {
+    if host.starts_with('[') {
+        if !host.ends_with(']') {
             return Err(err!("Invalid IPv6 address. No closing ]."));
         }
         if host.len() <= 2 {

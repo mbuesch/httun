@@ -14,7 +14,7 @@ use tokio::{
     task,
 };
 
-/// Maximum number of connections from the FastCGI server.
+/// Maximum number of connections from the `FastCGI` server.
 pub const MAX_NUM_CONNECTIONS: u8 = 64;
 
 pub async fn async_main() -> ah::Result<()> {

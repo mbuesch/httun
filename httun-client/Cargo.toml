@@ -38,7 +38,5 @@ httun-tun = { workspace = true, optional = true }
 default = [ "tun" ]
 tun = [ "dep:httun-tun" ]
 
-[lints.clippy]
-undocumented_unsafe_blocks = "warn"
-todo = "warn"
-dbg_macro = "warn"
+[lints]
+workspace = true

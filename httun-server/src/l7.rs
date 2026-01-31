@@ -32,7 +32,7 @@ const RX_BUF_SIZE: usize = L7Container::MAX_PAYLOAD_LEN;
 /// Used to connect to a remote TCP address with optional binding to a specific
 /// network interface.
 ///
-/// Converts into a non-blocking tokio [TcpStream].
+/// Converts into a non-blocking tokio [`TcpStream`].
 #[derive(Debug)]
 struct L7Socket {
     socket: Socket,
@@ -80,7 +80,7 @@ impl L7Socket {
 impl TryFrom<L7Socket> for TcpStream {
     type Error = ah::Error;
 
-    /// Convert L7Socket into a non-blocking tokio TcpStream.
+    /// Convert `L7Socket` into a non-blocking tokio `TcpStream`.
     fn try_from(socket: L7Socket) -> ah::Result<Self> {
         let stream: StdTcpStream = socket.socket.into();
         stream
@@ -266,7 +266,7 @@ impl L7State {
                     Ok(Err(e)) => {
                         return Err(e.context("L7 stream send_all"));
                     }
-                    Ok(Ok(_)) => (),
+                    Ok(Ok(())) => (),
                 }
             } else {
                 return Err(err!("Stream disconnected."));
@@ -304,7 +304,7 @@ impl L7State {
 
                 buf = tokio::select! {
                     biased;
-                    _ = self.disconnect_notify.notified() => {
+                    () = self.disconnect_notify.notified() => {
                         // disconnected
                         continue 'a;
                     }
@@ -326,7 +326,7 @@ impl L7State {
                 }
             } else {
                 return Err(err!("L7 recv: Stream is not connected"));
-            };
+            }
             drop(stream);
 
             // Check if the remote disconnected (the receive buffer is empty).

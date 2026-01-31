@@ -15,7 +15,7 @@ pub struct PingState {
 }
 
 impl PingState {
-    /// Creates a new PingState instance.
+    /// Creates a new `PingState` instance.
     pub fn new() -> Self {
         Self {
             notify: Notify::new(),

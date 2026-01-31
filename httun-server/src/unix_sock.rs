@@ -26,7 +26,7 @@ use std::os::unix::net::UnixListener as StdUnixListener;
 
 /// A connection on the Unix socket.
 ///
-/// This is where the FastCGI requests are received from the httun FastCGI daemon.
+/// This is where the `FastCGI` requests are received from the httun `FastCGI` daemon.
 #[derive(Debug)]
 pub struct UnixConn {
     /// The channel ID.
@@ -38,7 +38,7 @@ pub struct UnixConn {
 }
 
 impl UnixConn {
-    /// Create a new UnixConn from an accepted UnixStream.
+    /// Create a new `UnixConn` from an accepted `UnixStream`.
     ///
     /// This performs the initialization handshake.
     async fn new(
@@ -114,9 +114,7 @@ impl UnixConn {
                         return Ok(data);
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    continue;
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
                 Err(e) => {
                     return Err(e.into());
                 }
@@ -125,6 +123,7 @@ impl UnixConn {
     }
 
     /// Receive a message from the Unix socket.
+    #[allow(clippy::match_same_arms)]
     pub async fn recv(&self) -> ah::Result<UnMessage> {
         let hdr = self.do_recv(UnMessageHeader::header_size()).await?;
         let hdr = UnMessageHeader::deserialize(&hdr)?;
@@ -201,6 +200,7 @@ impl UnixConn {
     }
 
     /// Send a message on the Unix socket.
+    #[allow(clippy::match_same_arms)]
     pub async fn send(&self, msg: &UnMessage) -> ah::Result<()> {
         let allowed = match self.dir {
             None => false,
@@ -242,7 +242,7 @@ impl UnixConn {
 
 /// The Unix socket server.
 ///
-/// This listens for connections from the httun FastCGI daemon.
+/// This listens for connections from the httun `FastCGI` daemon.
 #[derive(Debug)]
 pub struct UnixSock {
     /// The Unix listener.

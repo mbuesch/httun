@@ -69,7 +69,7 @@ pub struct SessionKey(CipherKey);
 impl SessionKey {
     /// Generate the session key.
     ///
-    /// SKEY := SHA3_256(USER_SHARED_SECRET | SESSION_SHARED_SECRET)
+    /// `SKEY := SHA3_256(USER_SHARED_SECRET | SESSION_SHARED_SECRET)`
     fn new(user_shared_secret: &UserSharedSecret, session_shared_secret: &KexSharedSecret) -> Self {
         let mut h = Sha3_256::new();
         h.update(user_shared_secret.as_raw_bytes());
@@ -169,6 +169,7 @@ pub struct KexSharedSecret([u8; KEY_SIZE]);
 
 impl KexSharedSecret {
     /// Create a new shared secret from key exchange.
+    #[allow(clippy::needless_pass_by_value)]
     fn new_from_kex(shared_secret: x25519_dalek::SharedSecret) -> Self {
         Self(shared_secret.to_bytes())
     }

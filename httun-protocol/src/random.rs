@@ -6,9 +6,11 @@
 pub fn secure_random<const SZ: usize>() -> [u8; SZ] {
     // Get secure random bytes from the operating system.
     let mut buf: [u8; SZ] = [0; SZ];
-    if getrandom::fill(&mut buf).is_err() {
-        panic!("Failed to read secure random bytes from the operating system. (getrandom failed)");
-    }
+    let result = getrandom::fill(&mut buf);
+    assert!(
+        result.is_ok(),
+        "Failed to read secure random bytes from the operating system. (getrandom failed)",
+    );
 
     // For lengths bigger than 11 bytes the likelyhood of the sanity checks below
     // triggering on good generator is low enough.

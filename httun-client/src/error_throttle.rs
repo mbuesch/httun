@@ -63,7 +63,7 @@ impl ErrorThrottle {
 
         // Calculate the delay from the error count.
         // Higher count -> longer delay.
-        let fact = count as f64 / ERR_BASE as f64;
+        let fact = f64::from(count) / f64::from(ERR_BASE);
         let delay = (DELAY_BASE_S * fact).max(DELAY_MIN_S);
         let delay = Duration::from_secs_f64(delay);
         let delay = delay.min(Duration::from_secs_f64(DELAY_MAX_S));

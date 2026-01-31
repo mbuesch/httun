@@ -21,6 +21,9 @@ use tokio::{
 
 const NR_RAND_BYTES: usize = 1024 * 16;
 
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_precision_loss)]
+#[allow(clippy::cast_sign_loss)]
 pub async fn run_mode_test(
     exit_tx: Arc<Sender<ah::Result<()>>>,
     httun_comm: Arc<AsyncTaskComm>,

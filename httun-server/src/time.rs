@@ -20,6 +20,7 @@ pub fn now() -> u64 {
 /// The result is `a - b`, wrapped around on overflow.
 /// If `a` is later than `b`, the result is positive.
 /// if `a` is earlier than `b`, the result is negative.
+#[allow(clippy::cast_possible_wrap)]
 pub fn tdiff(a: u64, b: u64) -> i64 {
     a.wrapping_sub(b) as _
 }

@@ -23,7 +23,5 @@ subtle = { workspace = true }
 uuid = { workspace = true }
 x25519-dalek = { workspace = true, features = [ "getrandom", "static_secrets" ]}
 
-[lints.clippy]
-undocumented_unsafe_blocks = "warn"
-todo = "warn"
-dbg_macro = "warn"
+[lints]
+workspace = true

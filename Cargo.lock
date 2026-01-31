@@ -1064,6 +1064,7 @@ dependencies = [
  "httun-unix-protocol",
  "httun-util",
  "ipnet",
+ "itertools",
  "libc",
  "log",
  "memchr",
