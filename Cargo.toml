@@ -44,7 +44,7 @@ libc = "0.2"
 log = "0.4"
 memchr = "2"
 movavg = "2"
-nix = { version = "0.30", default-features = false }
+nix = { version = "0.31", default-features = false }
 rand = "0.9"
 reqwest = { version = "0.13", default-features = false }
 rkyv = "0.8"

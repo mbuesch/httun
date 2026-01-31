@@ -1068,7 +1068,7 @@ dependencies = [
  "libc",
  "log",
  "memchr",
- "nix 0.30.1",
+ "nix",
  "sd-notify",
  "socket2 0.6.2",
  "tokio",
@@ -1602,18 +1602,6 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
-]
-
-[[package]]
-name = "nix"
-version = "0.30.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
-dependencies = [
- "bitflags",
- "cfg-if",
- "cfg_aliases",
- "libc",
 ]
 
 [[package]]
@@ -2653,7 +2641,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2688a909b49d133bf55f2e29271fb3a81ff1e1a0b99c366da9ffd9af69b933a"
 dependencies = [
  "libc",
- "nix 0.31.1",
+ "nix",
  "tokio",
 ]
 
