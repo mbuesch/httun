@@ -75,12 +75,14 @@ multiple-crate-versions = { level = "allow", priority = 1 }
 pedantic = "warn"
 cloned_instead_of_copied = { level = "allow", priority = 1 }
 default_trait_access = { level = "allow", priority = 1 }
+ignored_unit_patterns = { level = "allow", priority = 1 }
 missing-errors-doc = { level = "allow", priority = 1 }
 missing-panics-doc = { level = "allow", priority = 1 }
 must_use_candidate = { level = "allow", priority = 1 }
 similar-names = { level = "allow", priority = 1 }
 struct-excessive-bools = { level = "allow", priority = 1 }
 too_many_lines = { level = "allow", priority = 1 }
+unnecessary_wraps = { level = "allow", priority = 1 }
 unused_async = { level = "allow", priority = 1 }
 
 # Lints from `restriction` group
