@@ -28,6 +28,7 @@ disable_services
 install_dirs
 install_httun_server
 install_httun_fcgi
+do_systemctl daemon-reload
 enable_services_fcgi
 start_services_fcgi
 
