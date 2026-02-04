@@ -34,7 +34,7 @@ base64 = "0.22"
 clap = { version = "4", features = [ "derive", "wrap_help", "unicode" ] }
 console-subscriber = "0.5"
 env_logger = "0.11"
-getrandom = "0.3"
+getrandom = "0.4"
 heapless = "0.9"
 hickory-resolver = "0.25"
 humansize = "2"
