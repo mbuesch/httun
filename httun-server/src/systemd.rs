@@ -116,7 +116,7 @@ impl SystemdSocket {
 
 /// Notify ready-status to systemd.
 pub fn systemd_notify_ready() -> ah::Result<()> {
-    sd_notify::notify(false, &[sd_notify::NotifyState::Ready])?;
+    sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
     Ok(())
 }
 
