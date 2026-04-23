@@ -95,7 +95,7 @@ fn get_record_type(mode: ResMode) -> (RecordType, &'static str) {
 }
 
 /// Return the first address that matches the requested address resolution mode.
-fn get_first_result(lookup: Lookup, host: &str, mode: ResMode) -> ah::Result<IpAddr> {
+fn get_first_result(lookup: &Lookup, host: &str, mode: ResMode) -> ah::Result<IpAddr> {
     for answer in lookup.answers() {
         match (mode, &answer.data) {
             (ResMode::Ipv6, RData::AAAA(addr)) => return Ok(addr.0.into()),
@@ -138,7 +138,7 @@ pub async fn resolve(host: &str, cfg: &ResConf) -> ah::Result<IpAddr> {
                 TokioResolver::builder_with_config($conf, TokioRuntimeProvider::default()).build()
                 && let Ok(lookup) = resolver.lookup(host, record_type).await
             {
-                return get_first_result(lookup, host, cfg.mode);
+                return get_first_result(&lookup, host, cfg.mode);
             }
         };
     }
@@ -148,7 +148,7 @@ pub async fn resolve(host: &str, cfg: &ResConf) -> ah::Result<IpAddr> {
             && let Ok(resolver) = builder.build()
             && let Ok(lookup) = resolver.lookup(host, record_type).await
         {
-            return get_first_result(lookup, host, cfg.mode);
+            return get_first_result(&lookup, host, cfg.mode);
         }
         #[cfg(not(target_os = "android"))]
         eprintln!(

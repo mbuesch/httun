@@ -24,7 +24,7 @@ fn main() -> ah::Result<()> {
         const WORKER_THREADS: usize = 6;
 
         tokio::runtime::Builder::new_multi_thread()
-            .thread_keep_alive(std::time::Duration::from_millis(5000))
+            .thread_keep_alive(std::time::Duration::from_secs(5))
             .max_blocking_threads(WORKER_THREADS * 4)
             .worker_threads(WORKER_THREADS)
             .enable_all()

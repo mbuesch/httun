@@ -485,7 +485,7 @@ fn main() -> ah::Result<()> {
 
     // Build Tokio runtime and run the async main function.
     runtime::Builder::new_multi_thread()
-        .thread_keep_alive(Duration::from_millis(5000))
+        .thread_keep_alive(Duration::from_secs(5))
         .max_blocking_threads(WORKER_THREADS * 4)
         .worker_threads(WORKER_THREADS)
         .enable_all()
