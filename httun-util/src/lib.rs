@@ -8,6 +8,7 @@ pub mod errors;
 pub mod header;
 pub mod net;
 pub mod query;
+pub mod signal;
 pub mod strings;
 pub mod timeouts;
 

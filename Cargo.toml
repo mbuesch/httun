@@ -5,6 +5,7 @@ members = [
     "httun-client",
     "httun-conf",
     "httun-fcgi",
+    "httun-httpserver",
     "httun-protocol",
     "httun-server",
     "httun-tun",

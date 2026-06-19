@@ -2,15 +2,13 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::{
-    channel::{Channel, Channels},
-    comm_backend::{CommBackend, CommRxMsg},
-};
+use crate::channel::{Channel, Channels};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::Config;
 use httun_protocol::{
     InitPayload, KexPublic, Message, MsgType, Operation, SequenceType, SessionKey,
 };
+use httun_unix_protocol::IpcRxMessage;
 use httun_util::{ChannelId, errors::DisconnectedError, strings::Direction};
 use std::{
     collections::{HashMap, LinkedList},
@@ -19,7 +17,12 @@ use std::{
         atomic::{self, AtomicBool, AtomicI64},
     },
 };
-use tokio::{sync::OwnedSemaphorePermit, task, time::timeout};
+use tokio::{sync::OwnedSemaphorePermit, task};
+
+#[cfg(target_family = "unix")]
+use crate::unix_sock::IpcServerConn;
+#[cfg(target_family = "windows")]
+use crate::win_pipe::IpcServerConn;
 
 type ProtocolHandlerId = i64;
 static NEXT_HANDLER_ID: AtomicI64 = AtomicI64::new(0);
@@ -39,8 +42,8 @@ pub struct ProtocolHandler {
     conf: Arc<Config>,
     /// Protocol manager.
     protman: Arc<ProtocolManager>,
-    /// Communication backend.
-    comm: CommBackend,
+    /// IPC connection.
+    comm: IpcServerConn,
     /// Shared channel manager.
     channels: Arc<Channels>,
     /// Pinned session secret, if yet assigned.
@@ -54,7 +57,7 @@ impl ProtocolHandler {
     pub async fn new(
         conf: Arc<Config>,
         protman: Arc<ProtocolManager>,
-        comm: CommBackend,
+        comm: IpcServerConn,
         channels: Arc<Channels>,
     ) -> Self {
         Self {
@@ -159,7 +162,7 @@ impl ProtocolHandler {
         let chan = self.chan()?;
         let session = chan.get_session_and_update_tx_sequence();
         let Some(session_key) = &session.key else {
-            return Err(err!("No session key in UnOperation::ToSrv context"));
+            return Err(err!("No session key in IPC ToSrv context"));
         };
 
         log::debug!("{}: W direction packet received", chan.id());
@@ -193,7 +196,7 @@ impl ProtocolHandler {
                 chan.put_ping(msg.into_payload()).await;
             }
             _ => {
-                return Err(err!("Received {oper:?} in UnOperation::ToSrv context"));
+                return Err(err!("Received {oper:?} in IPC ToSrv context"));
             }
         }
 
@@ -253,7 +256,7 @@ impl ProtocolHandler {
         let chan = self.chan()?;
         let session = chan.get_session_and_update_tx_sequence();
         let Some(session_key) = &session.key else {
-            return Err(err!("No session key in UnOperation::ReqFromSrv context"));
+            return Err(err!("No session key in IPC ReqFromSrv context"));
         };
 
         log::debug!("{}: R direction packet received", chan.id());
@@ -289,7 +292,7 @@ impl ProtocolHandler {
                 (Operation::TestFromSrv, chan.get_pong().await)
             }
             _ => {
-                return Err(err!("Received {oper:?} in UnOperation::ReqFromSrv context"));
+                return Err(err!("Received {oper:?} in IPC ReqFromSrv context"));
             }
         };
 
@@ -316,18 +319,9 @@ impl ProtocolHandler {
             Err(err!("Protocol handler is dead."))
         } else {
             match self.comm.recv().await? {
-                CommRxMsg::ToSrv(payload) => self.handle_tosrv(payload).await,
-                CommRxMsg::ReqFromSrv(payload) => {
-                    if let Some(timeout_dur) = self.comm.get_reply_timeout_duration() {
-                        match timeout(timeout_dur, self.handle_fromsrv(payload)).await {
-                            Err(_) => self.comm.send_reply_timeout().await,
-                            Ok(ret) => ret,
-                        }
-                    } else {
-                        self.handle_fromsrv(payload).await
-                    }
-                }
-                CommRxMsg::Keepalive => {
+                IpcRxMessage::ToSrv(payload) => self.handle_tosrv(payload).await,
+                IpcRxMessage::ReqFromSrv(payload) => self.handle_fromsrv(payload).await,
+                IpcRxMessage::Keepalive => {
                     let chan = self.chan()?;
                     chan.log_activity();
                     log::trace!("{}: Unix socket: Received Keepalive", chan.id());
@@ -438,12 +432,12 @@ impl ProtocolManager {
 
     /// Spawn a new protocol handler instance task.
     ///
-    /// `comm`: Communication backend for this protocol instance.
+    /// `comm`: Unix socket connection for this protocol instance.
     /// `channels`: Shared channel manager.
     /// `permit`: Semaphore permit to limit the number of concurrent protocol instances.
     pub async fn spawn(
         self: &Arc<Self>,
-        comm: CommBackend,
+        comm: IpcServerConn,
         channels: Arc<Channels>,
         permit: OwnedSemaphorePermit,
     ) {

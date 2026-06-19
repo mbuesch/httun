@@ -14,8 +14,11 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+httun-conf = { workspace = true }
 httun-util = { workspace = true }
+log = { workspace = true }
 rkyv = { workspace = true }
+tokio = { workspace = true, features = [ "io-util", "sync", "time" ] }
 
 [lints]
 workspace = true

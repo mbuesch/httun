@@ -17,7 +17,7 @@ anyhow = { workspace = true }
 atoi = { workspace = true }
 memchr = { workspace = true }
 rkyv = { workspace = true }
-tokio = { workspace = true, features = [ "net" ] }
+tokio = { workspace = true, features = [ "net", "time" ] }
 
 [lints]
 workspace = true

@@ -1,5 +1,5 @@
 [package]
-name = "httun-server"
+name = "httun-httpserver"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,7 +14,8 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
-arc-swap = { workspace = true }
+atoi = { workspace = true }
+base64 = { workspace = true }
 clap = { workspace = true }
 console-subscriber = { workspace = true }
 env_logger = { workspace = true }
@@ -22,23 +23,9 @@ httun-conf = { workspace = true }
 httun-protocol = { workspace = true }
 httun-unix-protocol = { workspace = true }
 httun-util = { workspace = true }
-ipnet = { workspace = true }
-itertools = { workspace = true }
-libc = { workspace = true }
 log = { workspace = true }
-socket2 = { workspace = true }
+memchr = { workspace = true }
 tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros", "tracing", "io-util" ] }
-
-[target.'cfg(target_os="linux")'.dependencies]
-httun-tun = { workspace = true, optional = true }
-sd-notify = { workspace = true }
-
-[target.'cfg(target_family="unix")'.dependencies]
-nix = { workspace = true, features = [ "user" ] }
-
-[features]
-default = [ "tun" ]
-tun = [ "dep:httun-tun" ]
 
 [lints]
 workspace = true

@@ -4,19 +4,15 @@
 
 use crate::{WEBSERVER_GID, WEBSERVER_UID};
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_conf::{Config, ConfigChannel};
-use httun_unix_protocol::{UnMessage, UnMessageHeader, UnOperation};
-use httun_util::{
-    ChannelId, errors::DisconnectedError, header::HttpHeader, strings::Direction,
-    timeouts::UNIX_HANDSHAKE_TIMEOUT,
-};
+use httun_conf::Config;
+use httun_util::header::HttpHeader;
 use std::{
     path::Path,
     sync::{Arc, atomic},
 };
 use tokio::{
+    io::{ReadHalf, WriteHalf, split},
     net::{UnixListener, UnixStream},
-    time::timeout,
 };
 
 #[cfg(target_os = "linux")]
@@ -24,221 +20,9 @@ use crate::systemd::SystemdSocket;
 #[cfg(target_os = "linux")]
 use std::os::unix::net::UnixListener as StdUnixListener;
 
-/// A connection on the Unix socket.
-///
-/// This is where the `FastCGI` requests are received from the httun `FastCGI` daemon.
-#[derive(Debug)]
-pub struct UnixConn {
-    /// The channel ID.
-    id: ChannelId,
-    /// Direction.
-    dir: Option<Direction>,
-    /// The underlying Unix stream.
-    stream: UnixStream,
-}
-
-impl UnixConn {
-    /// Create a new `UnixConn` from an accepted `UnixStream`.
-    ///
-    /// This performs the initialization handshake.
-    async fn new(
-        stream: UnixStream,
-        conf: &Config,
-        extra_headers: &[HttpHeader],
-    ) -> ah::Result<Self> {
-        let mut this = Self {
-            id: ConfigChannel::ID_INVALID,
-            dir: None,
-            stream,
-        };
-
-        // Receive the initialization handshake.
-        let msg = timeout(UNIX_HANDSHAKE_TIMEOUT, this.recv())
-            .await
-            .context("Handshake receive timeout")?
-            .context("Handshake receive")?;
-        if msg.op() == UnOperation::InitDirToSrv {
-            this.dir = Some(Direction::W);
-        } else if msg.op() == UnOperation::InitDirFromSrv {
-            this.dir = Some(Direction::R);
-        } else {
-            return Err(err!(
-                "UnixConn: Got unexpected init message {:?}.",
-                msg.op(),
-            ));
-        }
-        if msg.chan_id() > ConfigChannel::ID_MAX {
-            return Err(err!("UnixConn: Got invalid channel ID."));
-        }
-        this.id = msg.chan_id();
-
-        // Send the initialization handshake reply.
-        let mut extra_headers = extra_headers.to_vec();
-        if let Some(chan_conf) = conf.channel_by_id(this.chan_id()) {
-            extra_headers.extend_from_slice(chan_conf.http().extra_headers());
-        }
-        this.send(&UnMessage::new_init_reply(this.chan_id(), extra_headers))
-            .await
-            .context("Handshake reply")?;
-
-        log::debug!("Connected: id={}", this.chan_id());
-
-        Ok(this)
-    }
-
-    /// Get the channel ID.
-    pub fn chan_id(&self) -> ChannelId {
-        self.id
-    }
-
-    /// Get the communication direction.
-    pub fn dir(&self) -> Direction {
-        self.dir.expect("No Direction")
-    }
-
-    /// Receive raw data from the Unix socket.
-    async fn do_recv(&self, size: usize) -> ah::Result<Vec<u8>> {
-        let mut count = 0;
-        let mut data = vec![0_u8; size];
-        loop {
-            self.stream.readable().await?;
-
-            match self.stream.try_read(&mut data[count..]) {
-                Ok(n) => {
-                    if n == 0 {
-                        return Err(DisconnectedError.into());
-                    }
-                    count += n;
-                    assert!(count <= size);
-                    if count == size {
-                        return Ok(data);
-                    }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
-                Err(e) => {
-                    return Err(e.into());
-                }
-            }
-        }
-    }
-
-    /// Receive a message from the Unix socket.
-    #[allow(clippy::match_same_arms)]
-    pub async fn recv(&self) -> ah::Result<UnMessage> {
-        let hdr = self.do_recv(UnMessageHeader::header_size()).await?;
-        let hdr = UnMessageHeader::deserialize(&hdr)?;
-        let msg = self.do_recv(hdr.body_size()).await?;
-        let msg = UnMessage::deserialize(&msg)?;
-
-        let allowed = match self.dir {
-            None => match msg.op() {
-                UnOperation::InitDirToSrv => true,
-                UnOperation::InitDirFromSrv => true,
-                UnOperation::InitReply => true,
-                UnOperation::Keepalive => false,
-                UnOperation::ToSrv => false,
-                UnOperation::ReqFromSrv => false,
-                UnOperation::FromSrv => false,
-                UnOperation::Close => false,
-            },
-            Some(Direction::W) => match msg.op() {
-                UnOperation::InitDirToSrv => false,
-                UnOperation::InitDirFromSrv => false,
-                UnOperation::InitReply => false,
-                UnOperation::Keepalive => true,
-                UnOperation::ToSrv => true,
-                UnOperation::ReqFromSrv => false,
-                UnOperation::FromSrv => false,
-                UnOperation::Close => false,
-            },
-            Some(Direction::R) => match msg.op() {
-                UnOperation::InitDirToSrv => false,
-                UnOperation::InitDirFromSrv => false,
-                UnOperation::InitReply => false,
-                UnOperation::Keepalive => true,
-                UnOperation::ToSrv => false,
-                UnOperation::ReqFromSrv => true,
-                UnOperation::FromSrv => false,
-                UnOperation::Close => false,
-            },
-        };
-        if !allowed {
-            return Err(err!(
-                "Unix recv: Received invalid message {:?} for {:?}.",
-                msg.op(),
-                self.dir()
-            ));
-        }
-
-        if self.chan_id() <= ConfigChannel::ID_MAX && msg.chan_id() != self.chan_id() {
-            return Err(err!("Unix recv: Received message for wrong channel."));
-        }
-
-        Ok(msg)
-    }
-
-    /// Send raw data on the Unix socket.
-    async fn do_send(&self, data: &[u8]) -> ah::Result<()> {
-        let mut count = 0;
-        loop {
-            self.stream.writable().await?;
-
-            match self.stream.try_write(&data[count..]) {
-                Ok(n) => {
-                    count += n;
-                    assert!(count <= data.len());
-                    if count == data.len() {
-                        return Ok(());
-                    }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
-                Err(e) => {
-                    return Err(e.into());
-                }
-            }
-        }
-    }
-
-    /// Send a message on the Unix socket.
-    #[allow(clippy::match_same_arms)]
-    pub async fn send(&self, msg: &UnMessage) -> ah::Result<()> {
-        let allowed = match self.dir {
-            None => false,
-            Some(Direction::W) => match msg.op() {
-                UnOperation::InitDirToSrv => false,
-                UnOperation::InitDirFromSrv => false,
-                UnOperation::InitReply => true,
-                UnOperation::Keepalive => false,
-                UnOperation::ToSrv => false,
-                UnOperation::ReqFromSrv => false,
-                UnOperation::FromSrv => false,
-                UnOperation::Close => true,
-            },
-            Some(Direction::R) => match msg.op() {
-                UnOperation::InitDirToSrv => false,
-                UnOperation::InitDirFromSrv => false,
-                UnOperation::InitReply => true,
-                UnOperation::Keepalive => false,
-                UnOperation::ToSrv => false,
-                UnOperation::ReqFromSrv => false,
-                UnOperation::FromSrv => true,
-                UnOperation::Close => true,
-            },
-        };
-        if !allowed {
-            return Err(err!(
-                "Unix send: Trying to send invalid message {:?} for {:?}.",
-                msg.op(),
-                self.dir()
-            ));
-        }
-
-        let mut msg = msg.serialize()?;
-        let mut buf = UnMessageHeader::new(msg.len())?.serialize()?;
-        buf.append(&mut msg);
-        self.do_send(&buf).await
-    }
-}
+/// IPC connection carried by a Unix domain socket.
+pub type IpcServerConn =
+    httun_unix_protocol::IpcServerConn<ReadHalf<UnixStream>, WriteHalf<UnixStream>>;
 
 /// The Unix socket server.
 ///
@@ -309,7 +93,7 @@ impl UnixSock {
     }
 
     /// Accept a connection on the Unix socket.
-    pub async fn accept(&self) -> ah::Result<UnixConn> {
+    pub async fn accept(&self) -> ah::Result<IpcServerConn> {
         let (stream, _addr) = self.listener.accept().await?;
 
         // Get the credentials of the connected process.
@@ -341,7 +125,8 @@ impl UnixSock {
             ));
         }
 
-        UnixConn::new(stream, &self.conf, &self.extra_headers).await
+        let (reader, writer) = split(stream);
+        IpcServerConn::new(reader, writer, &self.conf, &self.extra_headers).await
     }
 }
 

@@ -1008,6 +1008,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "httun-httpserver"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "atoi",
+ "base64 0.23.1",
+ "clap",
+ "console-subscriber",
+ "env_logger",
+ "httun-conf",
+ "httun-protocol",
+ "httun-unix-protocol",
+ "httun-util",
+ "log",
+ "memchr",
+ "tokio",
+]
+
+[[package]]
 name = "httun-protocol"
 version = "1.0.0"
 dependencies = [
@@ -1028,8 +1047,6 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
- "atoi",
- "base64 0.23.1",
  "clap",
  "console-subscriber",
  "env_logger",
@@ -1042,7 +1059,6 @@ dependencies = [
  "itertools 0.15.0",
  "libc",
  "log",
- "memchr",
  "nix",
  "sd-notify",
  "socket2",
@@ -1063,8 +1079,11 @@ name = "httun-unix-protocol"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "httun-conf",
  "httun-util",
+ "log",
  "rkyv",
+ "tokio",
 ]
 
 [[package]]

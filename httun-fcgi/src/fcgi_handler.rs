@@ -4,7 +4,7 @@
 
 use crate::{
     fcgi::{FcgiRequest, FcgiRequestResult, FcgiRole},
-    server_conn::ServerUnixConn,
+    server_conn::{IpcClientConn, connect},
 };
 use anyhow::{self as ah, format_err as err};
 use httun_protocol::Message;
@@ -33,14 +33,14 @@ use tokio::{
 #[derive(Debug, Clone)]
 struct Connection {
     /// Connection to the `httun-server`.
-    conn: Arc<ServerUnixConn>,
+    conn: Arc<IpcClientConn>,
     /// Last activity time.
     last_activity: Instant,
 }
 
 impl Connection {
     /// Create a new connection to the `httun-server`.
-    fn new(conn: Arc<ServerUnixConn>) -> Self {
+    fn new(conn: Arc<IpcClientConn>) -> Self {
         Self {
             conn,
             last_activity: Instant::now(),
@@ -74,14 +74,14 @@ async fn get_connections<'a>() -> MutexGuard<'a, HashMap<ConnectionsKey, Connect
 }
 
 /// Get a connection for the given channel ID and direction.
-async fn get_connection(chan_id: ChannelId, send: bool) -> ah::Result<Arc<ServerUnixConn>> {
+async fn get_connection(chan_id: ChannelId, send: bool) -> ah::Result<Arc<IpcClientConn>> {
     let key = (chan_id, send);
     let mut connections = get_connections().await;
     if let Some(conn) = connections.get_mut(&key) {
         conn.log_activity();
         Ok(Arc::clone(&conn.conn))
     } else {
-        let conn = Arc::new(ServerUnixConn::new(Path::new(UNIX_SOCK), chan_id, send).await?);
+        let conn = Arc::new(connect(Path::new(UNIX_SOCK), chan_id, send).await?);
         connections.insert(key, Connection::new(Arc::clone(&conn)));
         Ok(conn)
     }

@@ -3,8 +3,6 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
 mod channel;
-mod comm_backend;
-mod http_server;
 mod l7;
 mod net_list;
 mod ping;
@@ -16,21 +14,18 @@ mod systemd;
 
 #[cfg(target_family = "unix")]
 mod unix_sock;
+#[cfg(target_family = "windows")]
+mod win_pipe;
 
-use crate::{
-    channel::Channels, comm_backend::CommBackend, http_server::HttpServer,
-    protocol::ProtocolManager,
-};
+use crate::{channel::Channels, protocol::ProtocolManager};
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::Parser;
 use httun_conf::{Config, ConfigVariant};
-use httun_util::header::HttpHeader;
-use std::{
-    net::{IpAddr, Ipv6Addr, SocketAddr},
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
+use httun_util::{
+    header::HttpHeader,
+    signal::{recv_signal, register_signal},
 };
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     runtime,
     signal::ctrl_c,
@@ -43,6 +38,10 @@ use crate::systemd::systemd_notify_ready;
 
 #[cfg(target_family = "unix")]
 use crate::unix_sock::UnixSock;
+#[cfg(target_family = "windows")]
+use crate::win_pipe::WinPipe;
+#[cfg(target_family = "windows")]
+use httun_unix_protocol::WINDOWS_PIPE;
 #[cfg(target_family = "unix")]
 use nix::unistd::{Group, User, setgid, setuid};
 #[cfg(target_family = "unix")]
@@ -103,42 +102,6 @@ fn get_webserver_uid_gid(opts: &Opts) -> ah::Result<()> {
     Ok(())
 }
 
-#[cfg(target_family = "unix")]
-macro_rules! register_signal {
-    ($kind:ident) => {
-        signal(SignalKind::$kind())
-    };
-}
-
-#[cfg(not(target_family = "unix"))]
-macro_rules! register_signal {
-    ($kind:ident) => {{
-        let result: ah::Result<u32> = Ok(0_u32);
-        result
-    }};
-}
-
-#[cfg(target_family = "unix")]
-macro_rules! recv_signal {
-    ($sig:ident) => {
-        $sig.recv()
-    };
-}
-
-#[cfg(not(target_family = "unix"))]
-async fn signal_dummy<T>(_: &mut T) {
-    loop {
-        tokio::time::sleep(Duration::MAX).await;
-    }
-}
-
-#[cfg(not(target_family = "unix"))]
-macro_rules! recv_signal {
-    ($sig:ident) => {
-        signal_dummy(&mut $sig)
-    };
-}
-
 /// Command line options.
 #[derive(Parser, Debug, Clone)]
 struct Opts {
@@ -151,51 +114,27 @@ struct Opts {
     #[arg(long)]
     no_drop_root: bool,
 
-    /// User name the web server `FastCGI` runs as.
-    ///
-    /// This option is only used, if --http-listen is not used.
+    /// User name the web server `FastCGI` or httun-httpserver runs as.
     #[cfg(target_family = "unix")]
     #[arg(long, value_name = "USER", default_value = "www-data")]
     webserver_user: String,
 
-    /// Group name the web server `FastCGI` runs as.
-    ///
-    /// This option is only used, if --http-listen is not used.
+    /// Group name the web server `FastCGI` or httun-httpserver runs as.
     #[cfg(target_family = "unix")]
     #[arg(long, value_name = "GROUP", default_value = "www-data")]
     webserver_group: String,
 
-    /// Optional path to the socket for communication with httun-fcgi.
+    /// Optional path to the socket for communication with httun-fcgi / httun-httpserver.
     ///
     /// If not given and if on Linux, the socket will be fetched from systemd.
     #[cfg(target_family = "unix")]
     #[arg(long, value_name = "PATH")]
     unix_socket: Option<PathBuf>,
 
-    /// Instead of running as an `FastCGI` backend run a simple HTTP server.
-    ///
-    /// If you don't specify this option, then httun-server will act as `FastCGI` backend.
-    ///
-    /// If you specify this option, then this is the address or address:port to listen on.
-    /// For example:
-    ///
-    /// `0.0.0.0:80` Listen on all IPv4 interfaces on port 80.
-    ///
-    /// `[::]:80` Listen on all IPv4 + IPv6 interfaces on port 80.
-    ///
-    /// `192.168.1.1:8080` Listen on IPv4 `192.168.1.1` on port 8080.
-    ///
-    /// `all` Listen on all IPv4 + IPv6 on port 80
-    ///
-    /// `any` Listen on all IPv4 + IPv6 on port 80
-    ///
-    /// `localhost` Listen on `127.0.0.1` port 80
-    ///
-    /// 'ip6-localhost' Listen on `::1` port 80
-    ///
-    /// If you don't specify the port, then it will default to 80.
-    #[arg(long, value_name = "ADDR:PORT")]
-    http_listen: Option<String>,
+    /// Name of the named pipe for communication with httun-httpserver.
+    #[cfg(target_family = "windows")]
+    #[arg(long, value_name = "NAME")]
+    win_pipe: Option<PathBuf>,
 
     /// Pass an arbitrary extra HTTP header with every request sent on the HTTP connection.
     ///
@@ -233,46 +172,6 @@ impl Opts {
             Config::get_default_path(ConfigVariant::Server)
         }
     }
-
-    /// Get the --http-listen option.
-    pub fn get_http_listen(&self) -> ah::Result<Option<SocketAddr>> {
-        const DEFAULT_ADDR: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
-        const DEFAULT_PORT: u16 = 80;
-
-        if let Some(http_listen) = &self.http_listen {
-            if let Ok(addr) = http_listen.parse::<SocketAddr>() {
-                Ok(Some(addr))
-            } else if let Ok(addr) = http_listen.parse::<IpAddr>() {
-                Ok(Some(SocketAddr::new(addr, DEFAULT_PORT)))
-            } else {
-                let (host, port) = if let Some(p) = http_listen.rfind(':') {
-                    (
-                        &http_listen[..p],
-                        http_listen[p + 1..]
-                            .parse::<u16>()
-                            .context("Parse port number")?,
-                    )
-                } else {
-                    (http_listen.as_str(), DEFAULT_PORT)
-                };
-                let host = host.trim().to_lowercase();
-
-                if ["all", "any"].contains(&host.as_str()) {
-                    Ok(Some(SocketAddr::new(DEFAULT_ADDR, port)))
-                } else if host == "localhost" {
-                    Ok(Some(SocketAddr::new("127.0.0.1".parse().unwrap(), port)))
-                } else if host == "ip6-localhost" {
-                    Ok(Some(SocketAddr::new("::1".parse().unwrap(), port)))
-                } else {
-                    Err(err!(
-                        "Failed to parse the command line option --http-listen"
-                    ))
-                }
-            }
-        } else {
-            Ok(None)
-        }
-    }
 }
 
 async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
@@ -291,32 +190,29 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             .context("Parse configuration")?,
     );
 
-    // Either start simple standalone HTTP server or Unix socket for FastCGI.
-    let mut http_srv = None;
+    // Create the Unix socket for communication with httun-fcgi / httun-httpserver.
     #[cfg(target_family = "unix")]
-    let mut unix_sock = None;
-    if let Some(addr) = opts.get_http_listen()? {
-        http_srv = Some(
-            HttpServer::new(addr, Arc::clone(&conf), (&*opts.extra_headers).into())
-                .await
-                .context("HTTP server init")?,
-        );
-        log::info!("HTTP server listening on {addr}");
-    } else {
-        #[cfg(target_family = "unix")]
-        {
-            get_webserver_uid_gid(&opts).context("Get web server UID/GID")?;
-            unix_sock = Some(
-                UnixSock::new(
-                    Arc::clone(&conf),
-                    opts.unix_socket.as_deref(),
-                    (&*opts.extra_headers).into(),
-                )
-                .await
-                .context("Unix socket init")?,
-            );
-        }
-    }
+    let local_ipc = {
+        get_webserver_uid_gid(&opts).context("Get web server UID/GID")?;
+        UnixSock::new(
+            Arc::clone(&conf),
+            opts.unix_socket.as_deref(),
+            (&*opts.extra_headers).into(),
+        )
+        .await
+        .context("Unix socket init")?
+    };
+
+    // Create the Windows named pipe for communication with httun-httpserver.
+    #[cfg(target_family = "windows")]
+    let local_ipc = {
+        let pipe_name = opts
+            .win_pipe
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new(WINDOWS_PIPE));
+        WinPipe::new(Arc::clone(&conf), pipe_name, (&*opts.extra_headers).into())
+            .context("Windows named pipe init")?
+    };
 
     // Initialize channel manager.
     let channels = Arc::new(
@@ -355,87 +251,35 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         }
     });
 
-    // Spawn task: Unix socket handler (from/to FastCGI).
-    #[cfg(target_family = "unix")]
-    if let Some(unix_sock) = unix_sock {
-        task::spawn({
-            let opts = Arc::clone(&opts);
-            let exit_tx = Arc::clone(&exit_tx);
-            let channels = Arc::clone(&channels);
-            let protman = Arc::clone(&protman);
+    // Spawn task: IPC to/from fcgi or httun-httpserver.
+    task::spawn({
+        let opts = Arc::clone(&opts);
+        let exit_tx = Arc::clone(&exit_tx);
+        let channels = Arc::clone(&channels);
+        let protman = Arc::clone(&protman);
 
-            async move {
-                let conn_semaphore = Arc::new(Semaphore::new(opts.num_connections));
-                loop {
-                    let exit_tx = Arc::clone(&exit_tx);
-                    let channels = Arc::clone(&channels);
-                    let protman = Arc::clone(&protman);
-                    let conn_semaphore = Arc::clone(&conn_semaphore);
+        async move {
+            let conn_semaphore = Arc::new(Semaphore::new(opts.num_connections));
+            loop {
+                let exit_tx = Arc::clone(&exit_tx);
+                let channels = Arc::clone(&channels);
+                let protman = Arc::clone(&protman);
+                let conn_semaphore = Arc::clone(&conn_semaphore);
 
-                    match unix_sock.accept().await {
-                        Ok(conn) => {
-                            if let Ok(permit) = conn_semaphore.acquire_owned().await {
-                                protman
-                                    .spawn(CommBackend::new_unix(conn), channels, permit)
-                                    .await;
-                            }
+                match local_ipc.accept().await {
+                    Ok(conn) => {
+                        if let Ok(permit) = conn_semaphore.acquire_owned().await {
+                            protman.spawn(conn, channels, permit).await;
                         }
-                        Err(e) => {
-                            let _ = exit_tx.send(Err(e)).await;
-                            break;
-                        }
+                    }
+                    Err(e) => {
+                        let _ = exit_tx.send(Err(e)).await;
+                        break;
                     }
                 }
             }
-        });
-    }
-
-    // Spawn task: HTTP server handler.
-    if let Some(http_srv) = http_srv {
-        task::spawn({
-            let opts = Arc::clone(&opts);
-            let channels = Arc::clone(&channels);
-            let protman = Arc::clone(&protman);
-
-            async move {
-                let conn_semaphore = Arc::new(Semaphore::new(opts.num_connections));
-                loop {
-                    let channels = Arc::clone(&channels);
-                    let protman = Arc::clone(&protman);
-                    let conn_semaphore = Arc::clone(&conn_semaphore);
-
-                    match http_srv.accept().await {
-                        Ok(conn) => {
-                            if let Ok(permit) = conn_semaphore.acquire_owned().await {
-                                task::spawn(async move {
-                                    conn.spawn_rx_task().await;
-                                    match conn.wait_pinned().await {
-                                        Ok(true) => {
-                                            protman
-                                                .spawn(
-                                                    CommBackend::new_http(conn),
-                                                    channels,
-                                                    permit,
-                                                )
-                                                .await;
-                                        }
-                                        Ok(false) => (), // Ignore
-                                        Err(e) => {
-                                            log::error!("HTTP wait channel: {e:?}");
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("HTTP accept: {e:?}");
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-    }
+        }
+    });
 
     // Task: Main loop.
     loop {

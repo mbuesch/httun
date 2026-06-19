@@ -26,7 +26,11 @@ use crate::{
 use anyhow::{self as ah, Context as _, format_err as err};
 use clap::{CommandFactory as _, Parser, Subcommand};
 use httun_conf::{Config, ConfigVariant};
-use httun_util::{ChannelId, header::HttpHeader};
+use httun_util::{
+    ChannelId,
+    header::HttpHeader,
+    signal::{recv_signal, register_signal},
+};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{runtime, signal::ctrl_c, sync::mpsc, task, time};
 
@@ -165,42 +169,6 @@ enum Mode {
 /// Default delay after errors before retrying.
 pub async fn error_delay() {
     time::sleep(Duration::from_millis(100)).await;
-}
-
-#[cfg(target_family = "unix")]
-macro_rules! register_signal {
-    ($kind:ident) => {
-        signal(SignalKind::$kind())
-    };
-}
-
-#[cfg(not(target_family = "unix"))]
-macro_rules! register_signal {
-    ($kind:ident) => {{
-        let result: ah::Result<u32> = Ok(0_u32);
-        result
-    }};
-}
-
-#[cfg(target_family = "unix")]
-macro_rules! recv_signal {
-    ($sig:ident) => {
-        $sig.recv()
-    };
-}
-
-#[cfg(not(target_family = "unix"))]
-async fn signal_dummy<T>(_: &mut T) {
-    loop {
-        time::sleep(Duration::MAX).await;
-    }
-}
-
-#[cfg(not(target_family = "unix"))]
-macro_rules! recv_signal {
-    ($sig:ident) => {
-        signal_dummy(&mut $sig)
-    };
 }
 
 async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {

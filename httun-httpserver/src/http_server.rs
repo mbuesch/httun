@@ -6,7 +6,6 @@
 //!
 //! This HTTP server only implements what's necessary to run a httun tunnel.
 
-use crate::comm_backend::CommRxMsg;
 use anyhow::{self as ah, Context as _, format_err as err};
 use atoi::atoi;
 use base64::prelude::*;
@@ -372,6 +371,16 @@ impl HttunHttpReq {
         }
     }
 
+    /// Get the httun direction (R/W).
+    pub fn direction(&self) -> Direction {
+        self.direction
+    }
+
+    /// Consume self and return the body payload.
+    pub fn into_body(self) -> Vec<u8> {
+        self.body
+    }
+
     /// Parse an HTTP request from the given buffer.
     ///
     /// `id` is the connection ID.
@@ -604,6 +613,7 @@ impl HttpConn {
     }
 
     /// Get the pinned channel direction (if any).
+    #[allow(dead_code)]
     pub fn dir(&self) -> Option<Direction> {
         self.pinned_chan.get().map(|c| &c.1).cloned()
     }
@@ -708,7 +718,7 @@ impl HttpConn {
     /// Receive a message from the httun client.
     ///
     /// Returns the received message.
-    pub async fn recv(&self) -> ah::Result<CommRxMsg> {
+    pub async fn recv(&self) -> ah::Result<HttunHttpReq> {
         let mut rx_r = self.rx_r.lock().await;
         let mut rx_w = self.rx_w.lock().await;
         let error;
@@ -719,7 +729,7 @@ impl HttpConn {
                 drop((rx_r, rx_w)); // drop locks
 
                 if let Some(req) = req {
-                    Ok(CommRxMsg::ReqFromSrv(req.body))
+                    Ok(req)
                 } else {
                     Err(err!("RX channel closed"))
                 }
@@ -729,8 +739,7 @@ impl HttpConn {
                 drop((rx_r, rx_w)); // drop locks
 
                 if let Some(req) = req {
-                    self.send_reply_ok(&[]).await.context("Send POST reply")?;
-                    Ok(CommRxMsg::ToSrv(req.body))
+                    Ok(req)
                 } else {
                     Err(err!("RX channel closed"))
                 }
@@ -767,21 +776,48 @@ impl HttpConn {
         Ok(())
     }
 
+    fn merged_headers(&self, extra: &[HttpHeader]) -> Vec<HttpHeader> {
+        let mut headers = self.extra_headers.to_vec();
+        headers.extend_from_slice(extra);
+        headers
+    }
+
     /// Send an HTTP 200 OK reply with the given payload.
     ///
     /// `payload` is the body of the HTTP reply.
-    pub async fn send_reply_ok(&self, payload: &[u8]) -> ah::Result<()> {
-        send_http_reply_ok(&self.stream, payload, &self.extra_headers).await
+    /// `extra_headers` are additional headers.
+    pub async fn send_reply_ok(
+        &self,
+        payload: &[u8],
+        extra_headers: &[HttpHeader],
+    ) -> ah::Result<()> {
+        if extra_headers.is_empty() {
+            send_http_reply_ok(&self.stream, payload, &self.extra_headers).await
+        } else {
+            send_http_reply_ok(&self.stream, payload, &self.merged_headers(extra_headers)).await
+        }
     }
 
     /// Send an HTTP 408 Request Timeout reply.
-    pub async fn send_reply_timeout(&self) -> ah::Result<()> {
-        send_http_reply_timeout(&self.stream, &self.extra_headers).await
+    ///
+    /// `extra_headers` are additional headers.
+    pub async fn send_reply_timeout(&self, extra_headers: &[HttpHeader]) -> ah::Result<()> {
+        if extra_headers.is_empty() {
+            send_http_reply_timeout(&self.stream, &self.extra_headers).await
+        } else {
+            send_http_reply_timeout(&self.stream, &self.merged_headers(extra_headers)).await
+        }
     }
 
     /// Send an HTTP 400 Bad Request reply.
-    pub async fn send_reply_badrequest(&self) -> ah::Result<()> {
-        send_http_reply_badrequest(&self.stream, &self.extra_headers).await
+    ///
+    /// `extra_headers` are additional headers.
+    pub async fn send_reply_badrequest(&self, extra_headers: &[HttpHeader]) -> ah::Result<()> {
+        if extra_headers.is_empty() {
+            send_http_reply_badrequest(&self.stream, &self.extra_headers).await
+        } else {
+            send_http_reply_badrequest(&self.stream, &self.merged_headers(extra_headers)).await
+        }
     }
 }
 
