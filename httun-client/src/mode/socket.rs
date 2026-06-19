@@ -5,7 +5,7 @@
 use crate::{
     async_task_comm::AsyncTaskComm,
     local_listener::LocalListener,
-    resolver::{ResConf, ResMode, resolve},
+    resolver::{ResMode, resolve},
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_util::errors::DisconnectedError;
@@ -46,15 +46,9 @@ pub async fn run_mode_socket(
     let (target_host, target_port) =
         split_host_port_string(target).context("Parse target address")?;
 
-    let target_addr = resolve(
-        target_host,
-        &ResConf {
-            mode: res_mode,
-            ..Default::default()
-        },
-    )
-    .await
-    .context("Resolve host name")?;
+    let target_addr = resolve(target_host, res_mode)
+        .await
+        .context("Resolve host name")?;
 
     let local = LocalListener::bind(local_port)
         .await

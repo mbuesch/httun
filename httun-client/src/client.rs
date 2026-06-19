@@ -4,7 +4,7 @@
 
 use crate::{
     async_task_comm::AsyncTaskComm,
-    resolver::{ResConf, ResMode, resolve},
+    resolver::{ResMode, resolve},
 };
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::{Config, ConfigChannel};
@@ -473,15 +473,9 @@ impl HttunClient {
         let mut base_url = Url::parse(base_url).context("Parse server URL")?;
         if let Some(Host::Domain(domain)) = base_url.host() {
             // Resolve the domain with the given settings.
-            let server_ip = resolve(
-                domain,
-                &ResConf {
-                    mode: res_mode,
-                    ..Default::default()
-                },
-            )
-            .await
-            .context("Resolve server URL domain")?;
+            let server_ip = resolve(domain, res_mode)
+                .await
+                .context("Resolve server URL domain")?;
 
             // Replace the host part of the URL.
             if let Err(e) = base_url.set_ip_host(server_ip) {

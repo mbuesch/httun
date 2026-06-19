@@ -16,9 +16,9 @@ publish = false
 anyhow = { workspace = true }
 clap = { workspace = true }
 console-subscriber = { workspace = true }
+dns-lookup = { workspace = true }
 env_logger = { workspace = true }
 heapless = { workspace = true }
-hickory-resolver = { workspace = true, features = [ "system-config", "tokio", "tls-ring", "https-ring", "quic-ring", "webpki-roots", "dnssec-ring" ] }
 httun-conf = { workspace = true }
 httun-protocol = { workspace = true }
 httun-util = { workspace = true }
