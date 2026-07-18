@@ -26,7 +26,7 @@ categories = [ "network-programming", "web-programming::http-client", "web-progr
 keywords = [ "http", "tun", "network", "tunnel", "encrypted" ]
 
 [workspace.dependencies]
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 anyhow = "1"
 arc-swap = "1"
 atoi = "3"
@@ -58,7 +58,7 @@ tokio-tun = "0.15"
 toml = "1.1"
 url = "2"
 uuid = "1"
-x25519-dalek = "2"
+x25519-dalek = "3"
 
 httun-conf = { path = "./httun-conf", version = "1" }
 httun-protocol = { path = "./httun-protocol", version = "1" }

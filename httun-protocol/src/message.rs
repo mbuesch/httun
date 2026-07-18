@@ -6,7 +6,7 @@ use crate::{
     key::{KexPublic, SessionKey},
     ser::{De, Ser},
 };
-use aes_gcm::aead::{AeadCore as _, AeadInPlace as _, KeyInit as _, OsRng};
+use aes_gcm::aead::{AeadInOut as _, Generate as _, KeyInit as _};
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
 use rand::prelude::*;
@@ -220,7 +220,7 @@ impl Message {
     pub fn serialize(&self, key: &SessionKey) -> ah::Result<Vec<u8>> {
         // Type conversions.
         let type_: u8 = self.type_.into();
-        let nonce = Aes256GcmN160::generate_nonce(&mut OsRng);
+        let nonce = aes_gcm::aead::Nonce::<Aes256GcmN160>::generate();
         let oper: u8 = self.oper.into();
         let sequence: u64 = self.sequence;
         let payload_len: u16 = self
@@ -245,10 +245,10 @@ impl Message {
         let assoc_data = [type_];
         let cipher = Aes256GcmN160::new(key.key().as_raw_bytes().into());
         let authtag = cipher
-            .encrypt_in_place_detached(
+            .encrypt_inout_detached(
                 &nonce,
                 &assoc_data,
-                &mut ser.as_slice_mut()[Self::AREA_ASSOC_LEN + Self::NONCE_LEN..],
+                (&mut ser.as_slice_mut()[Self::AREA_ASSOC_LEN + Self::NONCE_LEN..]).into(),
             )
             .map_err(|_| err!("AEAD encryption of httun message failed"))?;
 
@@ -290,10 +290,10 @@ impl Message {
         let assoc_data = [type_];
         let cipher = Aes256GcmN160::new(key.key().as_raw_bytes().into());
         cipher
-            .decrypt_in_place_detached(
+            .decrypt_inout_detached(
                 &nonce.into(),
                 &assoc_data,
-                &mut buf[crypt_begin..crypt_end],
+                (&mut buf[crypt_begin..crypt_end]).into(),
                 &authtag.into(),
             )
             .map_err(|_| err!("AEAD decryption of httun message failed."))?;
