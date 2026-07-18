@@ -25,7 +25,7 @@ pub async fn tcp_recv_until_blocking(stream: &TcpStream, buf_size: usize) -> ah:
                 return Ok(buf);
             }
             Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                buf.truncate(0);
+                buf.clear();
                 return Ok(buf);
             }
             Err(e) => {

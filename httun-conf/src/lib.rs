@@ -520,9 +520,7 @@ impl ConfigChannel {
     }
 
     pub fn l7_tunnel(&self) -> Option<&ConfigL7Tunnel> {
-        self.l7_tunnel
-            .as_ref()
-            .and_then(|l| if l.disabled() { None } else { Some(l) })
+        self.l7_tunnel.as_ref().filter(|&l| !l.disabled())
     }
 
     pub fn http(&self) -> &ConfigChannelHttp {

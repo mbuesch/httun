@@ -18,7 +18,7 @@ pub enum Direction {
 /// A path can contain alphanumeric characters, '-', '_', and '/'.
 fn path_is_valid(path: &[u8]) -> bool {
     path.iter()
-        .all(|c| c.is_ascii_alphanumeric() || [b'-', b'_', b'/'].contains(c))
+        .all(|c| c.is_ascii_alphanumeric() || b"-_/".contains(c))
 }
 
 /// Returns the next path component and the remaining path as a tuple.
