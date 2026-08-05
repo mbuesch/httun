@@ -26,10 +26,10 @@ humansize = { workspace = true }
 log = { workspace = true }
 movavg = { workspace = true }
 rand = { workspace = true }
-reqwest = { workspace = true, features = [ "http2", "native-tls", "gzip", "brotli", "zstd", "deflate", "charset", "hickory-dns", "query" ] }
+reqwest = { workspace = true, features = [ "http2", "native-tls", "gzip", "brotli", "zstd", "deflate", "charset", "query" ] }
 tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros", "tracing" ] }
 url = { workspace = true }
-uuid = { workspace = true }
+uuid = { workspace = true, features = [ "v4" ] }
 
 [target.'cfg(target_os="linux")'.dependencies]
 httun-tun = { workspace = true, optional = true }

@@ -63,8 +63,6 @@ fn make_client(
     c = c.brotli(chan_conf.http().allow_compression());
     c = c.zstd(chan_conf.http().allow_compression());
 
-    c = c.hickory_dns(true);
-
     // Allow proxies (or any other MiM) to manipulate the TLS connection.
     c = c.danger_accept_invalid_hostnames(chan_conf.http().ignore_tls_errors());
     c = c.danger_accept_invalid_certs(chan_conf.http().ignore_tls_errors());
