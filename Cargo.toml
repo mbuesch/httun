@@ -30,7 +30,7 @@ aes-gcm = "0.11"
 anyhow = "1"
 arc-swap = "1"
 atoi = "3"
-base64 = "0.22"
+base64 = "0.23"
 clap = { version = "4", features = [ "derive", "wrap_help", "unicode" ] }
 console-subscriber = "0.5"
 dns-lookup = "3"
