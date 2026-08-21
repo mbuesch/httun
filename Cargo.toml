@@ -84,6 +84,7 @@ struct-excessive-bools = { level = "allow", priority = 1 }
 too_many_lines = { level = "allow", priority = 1 }
 unnecessary_wraps = { level = "allow", priority = 1 }
 unused_async = { level = "allow", priority = 1 }
+unused_async_trait_impl = { level = "allow", priority = 1 }
 
 # Lints from `restriction` group
 clone_on_ref_ptr = "warn"
