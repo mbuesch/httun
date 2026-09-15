@@ -1507,12 +1507,11 @@ dependencies = [
 
 [[package]]
 name = "movavg"
-version = "2.5.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30c189125d8c0755b71758a81262c41f843f8de42acba3b47c03c6f737cfffe6"
+checksum = "8cd7e6ce6aaaff599e8d7717fee9c9a918ec1c8689f7ca4e38ca932b6b377897"
 dependencies = [
  "autocfg",
- "num-traits",
 ]
 
 [[package]]
