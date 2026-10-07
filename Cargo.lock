@@ -1054,7 +1054,6 @@ name = "httun-tun"
 version = "1.0.0"
 dependencies = [
  "anyhow",
- "httun-protocol",
  "log",
  "tokio-tun",
 ]
@@ -1074,7 +1073,6 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "atoi",
- "log",
  "memchr",
  "rkyv",
  "tokio",
