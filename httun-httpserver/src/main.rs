@@ -33,12 +33,56 @@ use tokio::{
 };
 
 #[cfg(target_family = "unix")]
+use nix::unistd::{Group, User, setgid, setuid};
+#[cfg(target_family = "unix")]
 use tokio::signal::unix::{SignalKind, signal};
 
 mod http_server;
 mod server_conn;
 
 const WORKER_THREADS: usize = 4;
+
+/// Drop root privileges.
+#[cfg(target_family = "unix")]
+fn drop_privileges(user_name: Option<&str>, group_name: Option<&str>) -> ah::Result<()> {
+    let user = if let Some(user_name) = user_name {
+        Some(
+            User::from_name(user_name)
+                .context("Get uid from /etc/passwd")?
+                .ok_or_else(|| err!("User '{user_name}' not found in /etc/passwd"))?,
+        )
+    } else {
+        None
+    };
+    let group = if let Some(group_name) = group_name {
+        Some(
+            Group::from_name(group_name)
+                .context("Get gid from /etc/group")?
+                .ok_or_else(|| err!("Group '{group_name}' not found in /etc/group"))?,
+        )
+    } else {
+        None
+    };
+
+    if let Some(group) = group {
+        log::info!(
+            "Dropping root privileges: Setting group to {}:{}",
+            group.gid,
+            group.name
+        );
+        setgid(group.gid).context("Drop privileges: Set group id")?;
+    }
+    if let Some(user) = user {
+        log::info!(
+            "Dropping root privileges: Setting user to {}:{}",
+            user.uid,
+            user.name
+        );
+        setuid(user.uid).context("Drop privileges: Set user id")?;
+    }
+
+    Ok(())
+}
 
 /// Command line options.
 #[derive(Parser, Debug, Clone)]
@@ -68,6 +112,18 @@ struct Opts {
     /// If you don't specify the port, then it will default to 80.
     #[arg(long, short = 'l', value_name = "ADDR:PORT")]
     listen: Option<String>,
+
+    /// After starting as root, drop privileges to this user.
+    ///
+    /// This option is only relevant when the server is started as root.
+    #[arg(long, short = 'U', value_name = "USER")]
+    user: Option<String>,
+
+    /// After starting as root, drop privileges to this group.
+    ///
+    /// This option is only relevant when the server is started as root.
+    #[arg(long, short = 'G', value_name = "GROUP")]
+    group: Option<String>,
 
     /// Path to the Unix socket for communication with httun-server.
     ///
@@ -327,15 +383,19 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     );
 
     let addr = opts.get_listen().context("Parse --listen")?;
-    #[cfg(target_family = "unix")]
-    let ipc_path: Arc<Path> = Arc::from(opts.get_unix_sock().as_path());
-    #[cfg(target_family = "windows")]
-    let ipc_path: Arc<Path> = Arc::from(opts.get_ipc_pipe().as_path());
-
     let http_srv = HttpServer::new(addr, Arc::clone(&conf), (&*opts.extra_headers).into())
         .await
         .context("HTTP server init")?;
     log::info!("HTTP server listening on {addr}");
+
+    // Drop root privileges, if specified.
+    #[cfg(target_family = "unix")]
+    drop_privileges(opts.user.as_deref(), opts.group.as_deref())?;
+
+    #[cfg(target_family = "unix")]
+    let ipc_path: Arc<Path> = Arc::from(opts.get_unix_sock().as_path());
+    #[cfg(target_family = "windows")]
+    let ipc_path: Arc<Path> = Arc::from(opts.get_ipc_pipe().as_path());
 
     // Spawn task: HTTP connection handler.
     task::spawn({

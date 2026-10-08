@@ -1023,6 +1023,7 @@ dependencies = [
  "httun-util",
  "log",
  "memchr",
+ "nix",
  "tokio",
 ]
 

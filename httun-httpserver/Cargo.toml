@@ -25,6 +25,7 @@ httun-unix-protocol = { workspace = true }
 httun-util = { workspace = true }
 log = { workspace = true }
 memchr = { workspace = true }
+nix = { workspace = true }
 tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros", "tracing", "io-util" ] }
 
 [lints]
