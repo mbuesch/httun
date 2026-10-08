@@ -131,13 +131,20 @@ install_httun_server()
 {
     # server.conf
     if [ -e /opt/httun/etc/httun/server.conf ]; then
-        do_chown root:root /opt/httun/etc/httun/server.conf
+        do_chown root:www-data /opt/httun/etc/httun/server.conf
         do_chmod 0640 /opt/httun/etc/httun/server.conf
     else
         do_install \
-            -o root -g root -m 0640 \
+            -o root -g www-data -m 0640 \
             "$basedir/httun-server/server.conf" \
             /opt/httun/etc/httun/server.conf
+
+        info "Re-generate the UUID"
+        local new_uuid="$("$target/httun-client" gen-uuid)"
+        [ -n "$new_uuid" ] || die "httun-client gen-uuid failed"
+        sed -i "s|^uuid = .*|$new_uuid|" \
+            /opt/httun/etc/httun/server.conf \
+            || die "Failed to replace uuid in server.conf"
     fi
 
     # server-start-pre.sh
@@ -164,22 +171,22 @@ install_httun_server()
 
     # http-server-start-pre.sh
     if [ -e /opt/httun/etc/httun/http-server-start-pre.sh ]; then
-        do_chown root:root /opt/httun/etc/httun/http-server-start-pre.sh
+        do_chown root:www-data /opt/httun/etc/httun/http-server-start-pre.sh
         do_chmod 0750 /opt/httun/etc/httun/http-server-start-pre.sh
     else
         do_install \
-            -o root -g root -m 0750 \
+            -o root -g www-data -m 0750 \
             "$basedir/httun-httpserver/http-server-start-pre.sh" \
             /opt/httun/etc/httun/http-server-start-pre.sh
     fi
 
     # http-server-start-post.sh
     if [ -e /opt/httun/etc/httun/http-server-start-post.sh ]; then
-        do_chown root:root /opt/httun/etc/httun/http-server-start-post.sh
+        do_chown root:www-data /opt/httun/etc/httun/http-server-start-post.sh
         do_chmod 0750 /opt/httun/etc/httun/http-server-start-post.sh
     else
         do_install \
-            -o root -g root -m 0750 \
+            -o root -g www-data -m 0750 \
             "$basedir/httun-httpserver/http-server-start-post.sh" \
             /opt/httun/etc/httun/http-server-start-post.sh
     fi

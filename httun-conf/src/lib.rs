@@ -636,9 +636,18 @@ impl Config {
             {
                 return Err(err!(
                     "The values of shared-secret and http_basic_auth.password \
-                            are the same. Don't do that! \
-                            This destroys httun's security. \
-                            Please choose a unique http password."
+                    are the same. Don't do that! \
+                    This destroys httun's security. \
+                    Please choose a unique http password."
+                ));
+            }
+
+            // If the channel is enabled, the shared-secret must be valid.
+            if !chan.disabled() && !chan.shared_secret().is_valid() {
+                return Err(err!(
+                    "The shared-secret is not valid. \
+                    It must consist of random bytes. \
+                    Use the command 'httun-client genkey' it."
                 ));
             }
         }

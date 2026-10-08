@@ -24,6 +24,13 @@ impl UserSharedSecret {
     pub fn as_raw_bytes(&self) -> &[u8; KEY_SIZE] {
         &self.0
     }
+
+    /// Check whether the user-shared-secret is valid.
+    /// A valid secret must not consist of identical bytes.
+    pub fn is_valid(&self) -> bool {
+        let first_byte = self.0[0];
+        !self.0.iter().all(|&b| b == first_byte)
+    }
 }
 
 impl From<[u8; KEY_SIZE]> for UserSharedSecret {
