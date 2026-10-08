@@ -62,6 +62,8 @@ jobs:
       - if: matrix.toolchain.name == 'stable'
         run: cargo clippy --tests -- --deny warnings
       - run: cargo test
+      - if: matrix.os.name == 'linux'
+        run: sh ./tests/run.sh --debug --full
 
       # Minimal build and tests.
       - run: cargo build --no-default-features
@@ -70,11 +72,17 @@ jobs:
       - if: matrix.toolchain.name == 'stable'
         run: cargo clippy --no-default-features --tests -- --deny warnings
       - run: cargo test --no-default-features
+      - if: matrix.os.name == 'linux'
+        run: sh ./tests/run.sh --debug --minimal
 
-      # Dev build with Cranelift backend.
+      # Build and tests with Cranelift backend.
       - if: matrix.toolchain.name == 'nightly'
         run: cargo clean
       - if: matrix.toolchain.name == 'nightly'
         run: sh ./scripts/build-dev-cranelift.sh
+      - if: matrix.toolchain.name == 'nightly'
+        run: sh ./scripts/build-dev-cranelift.sh test
+      - if: matrix.toolchain.name == 'nightly' && matrix.os.name == 'linux'
+        run: sh ./tests/run.sh --debug --full
 
 # vim: ts=2 sw=2 expandtab
