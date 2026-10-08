@@ -155,8 +155,14 @@ enum Mode {
         /// By default test messages are sent as fast as possible.
         /// But this options lets you reduce the test message frequency
         /// by increasing the period.
-        #[arg(long, short, default_value = "0.0")]
+        #[arg(long, short = 'p', default_value = "0.0")]
         period: f32,
+
+        /// Total duration of the test.
+        ///
+        /// If not specified, the test will run indefinitely.
+        #[arg(long, short = 'd', value_name = "SECONDS")]
+        duration: Option<f32>,
     },
 
     /// Generate a new truly random key.
@@ -298,9 +304,14 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                         let _ = exit_tx.send(Err(e)).await;
                     }
                 }
-                Some(Mode::Test { period }) => {
-                    if let Err(e) =
-                        run_mode_test(Arc::clone(&exit_tx), Arc::clone(&task_comm), *period).await
+                Some(Mode::Test { period, duration }) => {
+                    if let Err(e) = run_mode_test(
+                        Arc::clone(&exit_tx),
+                        Arc::clone(&task_comm),
+                        *period,
+                        *duration,
+                    )
+                    .await
                     {
                         let _ = exit_tx.send(Err(e)).await;
                     }

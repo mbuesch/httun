@@ -28,6 +28,7 @@ pub async fn run_mode_test(
     exit_tx: Arc<Sender<ah::Result<()>>>,
     httun_comm: Arc<AsyncTaskComm>,
     period_secs: f32,
+    duration_secs: Option<f32>,
 ) -> ah::Result<()> {
     // Spawn task: Test handler.
     task::spawn({
@@ -48,6 +49,14 @@ pub async fn run_mode_test(
             let mut avgrate_tx: MovAvg<f32, f32, 3> = MovAvg::new();
             let mut avgrate_rx: MovAvg<f32, f32, 3> = MovAvg::new();
             let mut meas_start = Instant::now();
+            let end_time = if let Some(duration_secs) = duration_secs
+                && duration_secs.is_finite()
+                && duration_secs >= 0.0
+            {
+                Some(meas_start + Duration::from_secs_f32(duration_secs))
+            } else {
+                None
+            };
 
             loop {
                 if let Some(inter) = &mut inter {
@@ -106,6 +115,13 @@ pub async fn run_mode_test(
                     let rate_tx = humansize::format_size(rate_tx as u64, fmt);
                     let rate_rx = humansize::format_size(rate_rx as u64, fmt);
                     log::info!("Test Ok. Payload data rate tx: {rate_tx}/s, rx: {rate_rx}/s.");
+                }
+                if let Some(end_time) = end_time
+                    && now >= end_time
+                {
+                    log::debug!("Test duration reached. Exiting.");
+                    let _ = exit_tx.send(Ok(())).await;
+                    break;
                 }
 
                 count += 1;
