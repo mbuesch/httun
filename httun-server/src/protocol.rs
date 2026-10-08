@@ -43,7 +43,7 @@ pub struct ProtocolHandler {
     /// Protocol manager.
     protman: Arc<ProtocolManager>,
     /// IPC connection.
-    comm: IpcServerConn,
+    ipc: IpcServerConn,
     /// Shared channel manager.
     channels: Arc<Channels>,
     /// Pinned session secret, if yet assigned.
@@ -57,14 +57,14 @@ impl ProtocolHandler {
     pub async fn new(
         conf: Arc<Config>,
         protman: Arc<ProtocolManager>,
-        comm: IpcServerConn,
+        ipc: IpcServerConn,
         channels: Arc<Channels>,
     ) -> Self {
         Self {
             id: next_handler_id(),
             conf,
             protman,
-            comm,
+            ipc,
             channels,
             pinned_session: StdRwLock::new(None),
             dead: AtomicBool::new(false),
@@ -78,7 +78,7 @@ impl ProtocolHandler {
 
     /// Get the channel id for this protocol handler.
     pub fn chan_id(&self) -> ChannelId {
-        self.comm.chan_id()
+        self.ipc.chan_id()
     }
 
     /// Get the channel.
@@ -88,12 +88,6 @@ impl ProtocolHandler {
         self.channels
             .get(self.chan_id())
             .ok_or_else(|| err!("Channel is not configured."))
-    }
-
-    /// Get the direction.
-    #[allow(dead_code)]
-    pub fn dir(&self) -> Direction {
-        self.comm.dir()
     }
 
     /// Get the pinned session secret, if any.
@@ -141,7 +135,7 @@ impl ProtocolHandler {
     /// Close this protocol handler.
     async fn close(&self) -> ah::Result<()> {
         self.set_dead();
-        self.comm.close().await
+        self.ipc.close().await
     }
 
     /// Send a reply message.
@@ -154,7 +148,7 @@ impl ProtocolHandler {
             .serialize(session_key)
             .context("Serialize httun message")?;
 
-        self.comm.send_reply(payload).await
+        self.ipc.send_reply(payload).await
     }
 
     /// Handle data communication from client to server.
@@ -318,7 +312,7 @@ impl ProtocolHandler {
         if self.is_dead() {
             Err(err!("Protocol handler is dead."))
         } else {
-            match self.comm.recv().await? {
+            match self.ipc.recv().await? {
                 IpcRxMessage::ToSrv(payload) => self.handle_tosrv(payload).await,
                 IpcRxMessage::ReqFromSrv(payload) => self.handle_fromsrv(payload).await,
                 IpcRxMessage::Keepalive => {
@@ -432,19 +426,19 @@ impl ProtocolManager {
 
     /// Spawn a new protocol handler instance task.
     ///
-    /// `comm`: Unix socket connection for this protocol instance.
+    /// `ipc`: Unix socket connection for this protocol instance.
     /// `channels`: Shared channel manager.
     /// `permit`: Semaphore permit to limit the number of concurrent protocol instances.
     pub async fn spawn(
         self: &Arc<Self>,
-        comm: IpcServerConn,
+        ipc: IpcServerConn,
         channels: Arc<Channels>,
         permit: OwnedSemaphorePermit,
     ) {
-        let chan_id = comm.chan_id();
+        let chan_id = ipc.chan_id();
 
         let prot = Arc::new(
-            ProtocolHandler::new(Arc::clone(&self.conf), Arc::clone(self), comm, channels).await,
+            ProtocolHandler::new(Arc::clone(&self.conf), Arc::clone(self), ipc, channels).await,
         );
 
         // Spawn the protocol handler task.
