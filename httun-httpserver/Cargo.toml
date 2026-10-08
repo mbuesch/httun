@@ -28,5 +28,8 @@ memchr = { workspace = true }
 nix = { workspace = true }
 tokio = { workspace = true, features = [ "rt-multi-thread", "signal", "sync", "net", "time", "macros", "tracing", "io-util" ] }
 
+[target.'cfg(target_os="linux")'.dependencies]
+sd-notify = { workspace = true }
+
 [lints]
 workspace = true

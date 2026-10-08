@@ -1024,6 +1024,7 @@ dependencies = [
  "log",
  "memchr",
  "nix",
+ "sd-notify",
  "tokio",
 ]
 

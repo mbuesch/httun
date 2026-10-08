@@ -32,6 +32,8 @@ use tokio::{
     time::timeout,
 };
 
+#[cfg(target_os = "linux")]
+use crate::systemd::systemd_notify_ready;
 #[cfg(target_family = "unix")]
 use nix::unistd::{Group, User, setgid, setuid};
 #[cfg(target_family = "unix")]
@@ -39,6 +41,9 @@ use tokio::signal::unix::{SignalKind, signal};
 
 mod http_server;
 mod server_conn;
+
+#[cfg(target_os = "linux")]
+mod systemd;
 
 const WORKER_THREADS: usize = 4;
 
@@ -66,17 +71,17 @@ fn drop_privileges(user_name: Option<&str>, group_name: Option<&str>) -> ah::Res
 
     if let Some(group) = group {
         log::info!(
-            "Dropping root privileges: Setting group to {}:{}",
-            group.gid,
-            group.name
+            "Dropping root privileges: Setting group to {} ({})",
+            group.name,
+            group.gid
         );
         setgid(group.gid).context("Drop privileges: Set group id")?;
     }
     if let Some(user) = user {
         log::info!(
-            "Dropping root privileges: Setting user to {}:{}",
-            user.uid,
-            user.name
+            "Dropping root privileges: Setting user to {} ({})",
+            user.name,
+            user.uid
         );
         setuid(user.uid).context("Drop privileges: Set user id")?;
     }
@@ -396,6 +401,10 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     let ipc_path: Arc<Path> = Arc::from(opts.get_unix_sock().as_path());
     #[cfg(target_family = "windows")]
     let ipc_path: Arc<Path> = Arc::from(opts.get_ipc_pipe().as_path());
+
+    // Notify systemd that we are ready.
+    #[cfg(target_os = "linux")]
+    systemd_notify_ready()?;
 
     // Spawn task: HTTP connection handler.
     task::spawn({
