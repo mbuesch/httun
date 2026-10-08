@@ -45,7 +45,7 @@ use httun_unix_protocol::WINDOWS_PIPE;
 #[cfg(target_family = "unix")]
 use nix::unistd::{Group, User, setgid, setuid};
 #[cfg(target_family = "unix")]
-use std::sync::atomic::{self, AtomicU32};
+use std::sync::atomic::{self, AtomicBool, AtomicU32};
 #[cfg(target_family = "unix")]
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -57,6 +57,9 @@ static WEBSERVER_UID: AtomicU32 = AtomicU32::new(u32::MAX);
 /// The web server's GID (for `FastCGI` socket ownership).
 #[cfg(target_family = "unix")]
 static WEBSERVER_GID: AtomicU32 = AtomicU32::new(u32::MAX);
+/// Verification of the web server's UID and GID for unix socket connections is disabled?
+#[cfg(target_family = "unix")]
+static WEBSERVER_CRED_CHECK_DISABLED: AtomicBool = AtomicBool::new(false);
 
 /// Drop root privileges.
 #[cfg(target_family = "unix")]
@@ -82,22 +85,32 @@ fn drop_privileges() -> ah::Result<()> {
 /// Get web server UID and GID.
 #[cfg(target_family = "unix")]
 fn get_webserver_uid_gid(opts: &Opts) -> ah::Result<()> {
-    let user_name = &opts.webserver_user;
-    let group_name = &opts.webserver_group;
+    if opts.no_webserver_cred_check {
+        WEBSERVER_CRED_CHECK_DISABLED.store(true, atomic::Ordering::Relaxed);
+        log::warn!(
+            "The peer credentials of processes connecting \
+            to the httun-server unix socket will not be verified \
+            (--no-webserver-cred-check)."
+        );
+    } else {
+        let user_name = &opts.webserver_user;
+        let group_name = &opts.webserver_group;
 
-    let uid = User::from_name(user_name)
-        .context("Get web server uid from /etc/passwd")?
-        .ok_or_else(|| err!("User '{user_name}' not found in /etc/passwd"))?
-        .uid
-        .as_raw();
-    let gid = Group::from_name(group_name)
-        .context("Get web server gid from /etc/group")?
-        .ok_or_else(|| err!("Group '{group_name}' not found in /etc/group"))?
-        .gid
-        .as_raw();
+        let uid = User::from_name(user_name)
+            .context("Get web server uid from /etc/passwd")?
+            .ok_or_else(|| err!("User '{user_name}' not found in /etc/passwd"))?
+            .uid
+            .as_raw();
+        let gid = Group::from_name(group_name)
+            .context("Get web server gid from /etc/group")?
+            .ok_or_else(|| err!("Group '{group_name}' not found in /etc/group"))?
+            .gid
+            .as_raw();
 
-    WEBSERVER_UID.store(uid, atomic::Ordering::Relaxed);
-    WEBSERVER_GID.store(gid, atomic::Ordering::Relaxed);
+        WEBSERVER_UID.store(uid, atomic::Ordering::Relaxed);
+        WEBSERVER_GID.store(gid, atomic::Ordering::Relaxed);
+        WEBSERVER_CRED_CHECK_DISABLED.store(false, atomic::Ordering::Relaxed);
+    }
 
     Ok(())
 }
@@ -123,6 +136,17 @@ struct Opts {
     #[cfg(target_family = "unix")]
     #[arg(long, value_name = "GROUP", default_value = "www-data")]
     webserver_group: String,
+
+    /// Disable verification of the web server user and group for unix socket connections.
+    ///
+    /// When this option is set, the httun-server will not check the UID and GID of the
+    /// connecting process against --webserver-user and --webserver-group.
+    ///
+    /// This option is not meant to be used in production environments.
+    /// Only use this option for testing.
+    #[cfg(target_family = "unix")]
+    #[arg(long)]
+    no_webserver_cred_check: bool,
 
     /// Optional path to the socket for communication with httun-fcgi / httun-httpserver.
     ///

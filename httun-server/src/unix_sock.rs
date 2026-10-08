@@ -2,7 +2,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::{WEBSERVER_GID, WEBSERVER_UID};
+use crate::{WEBSERVER_CRED_CHECK_DISABLED, WEBSERVER_GID, WEBSERVER_UID};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::Config;
 use httun_util::header::HttpHeader;
@@ -103,11 +103,12 @@ impl UnixSock {
 
         let web_uid = WEBSERVER_UID.load(atomic::Ordering::Relaxed);
         let web_gid = WEBSERVER_GID.load(atomic::Ordering::Relaxed);
+        let web_cred_check_disabled = WEBSERVER_CRED_CHECK_DISABLED.load(atomic::Ordering::Relaxed);
 
         let peer_uid = cred.uid();
         let peer_gid = cred.gid();
 
-        if peer_uid != web_uid {
+        if !web_cred_check_disabled && peer_uid != web_uid {
             return Err(err!(
                 "Unix socket: \
                 The connected uid {peer_uid} is not the web server's uid ({web_uid}). \
@@ -116,7 +117,7 @@ impl UnixSock {
             ));
         }
 
-        if peer_gid != web_gid {
+        if !web_cred_check_disabled && peer_gid != web_gid {
             return Err(err!(
                 "Unix socket: \
                 The connected gid {peer_gid} is not the web server's gid ({web_gid}). \

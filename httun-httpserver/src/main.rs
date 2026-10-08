@@ -232,7 +232,11 @@ async fn handle_connection(conn: Arc<HttpConn>, unix_sock_path: Arc<Path>) {
                     match connect(&unix_sock_path, chan_id, false).await {
                         Ok(c) => from_srv = Some(c),
                         Err(e) => {
-                            log::error!("Unix connect (FromSrv, chan {chan_id}): {e:?}");
+                            log::error!(
+                                "Connect to httun-server unix socket '{}' \
+                                (FromSrv, chan {chan_id}): {e:?}",
+                                unix_sock_path.display()
+                            );
                             let _ = conn.send_reply_badrequest(&[]).await;
                             break;
                         }
@@ -272,7 +276,11 @@ async fn handle_connection(conn: Arc<HttpConn>, unix_sock_path: Arc<Path>) {
                     match connect(&unix_sock_path, chan_id, true).await {
                         Ok(c) => to_srv = Some(c),
                         Err(e) => {
-                            log::error!("Unix connect (ToSrv, chan {chan_id}): {e:?}");
+                            log::error!(
+                                "Connect to httun-server unix socket '{}' \
+                                (ToSrv, chan {chan_id}): {e:?}",
+                                unix_sock_path.display()
+                            );
                             let _ = conn.send_reply_badrequest(&[]).await;
                             break;
                         }
