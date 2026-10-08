@@ -1,0 +1,28 @@
+[Unit]
+Description=httun HTTP server daemon
+Requires=httun-server.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStartPre=/opt/httun/etc/httun/http-server-start-pre.sh
+ExecStart=/opt/httun/bin/httun-httpserver
+ExecStartPost=/opt/httun/etc/httun/http-server-start-post.sh
+RuntimeDirectory=httun-httpserver
+RuntimeDirectoryMode=0755
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=10
+Nice=0
+
+Environment=RUST_BACKTRACE=1 RUST_LIB_BACKTRACE=0
+Environment=HTTUN_LOG=info HTTUN_LOG_STYLE=never
+
+# Start with web server privileges.
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target

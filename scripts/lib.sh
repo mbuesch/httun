@@ -55,36 +55,40 @@ stop_services()
 {
     try_systemctl stop httun-server.socket
     try_systemctl stop httun-server.service
-    try_systemctl stop httun-server-standalone.service
+    try_systemctl stop httun-httpserver.service
 }
 
 disable_services()
 {
     try_systemctl disable httun-server.service
     try_systemctl disable httun-server.socket
-    try_systemctl disable httun-server-standalone.service
+    try_systemctl disable httun-httpserver.service
 }
 
 enable_services_fcgi()
 {
     do_systemctl enable httun-server.socket
-    #do_systemctl enable httun-server.service
 }
 
 enable_services_standalone()
 {
-    do_systemctl enable httun-server-standalone.service
+    do_systemctl enable httun-server.socket
+    do_systemctl enable httun-httpserver.service
 }
 
 start_services_fcgi()
 {
+    try_systemctl restart apache2.service
+    try_systemctl restart lighttpd.service
     do_systemctl start httun-server.socket
     do_systemctl start httun-server.service
 }
 
 start_services_standalone()
 {
-    do_systemctl start httun-server-standalone.service
+    do_systemctl start httun-server.socket
+    do_systemctl start httun-server.service
+    do_systemctl start httun-httpserver.service
 }
 
 install_entry_checks()
@@ -125,6 +129,7 @@ install_dirs()
 
 install_httun_server()
 {
+    # server.conf
     if [ -e /opt/httun/etc/httun/server.conf ]; then
         do_chown root:root /opt/httun/etc/httun/server.conf
         do_chmod 0640 /opt/httun/etc/httun/server.conf
@@ -135,6 +140,7 @@ install_httun_server()
             /opt/httun/etc/httun/server.conf
     fi
 
+    # server-start-pre.sh
     if [ -e /opt/httun/etc/httun/server-start-pre.sh ]; then
         do_chown root:root /opt/httun/etc/httun/server-start-pre.sh
         do_chmod 0750 /opt/httun/etc/httun/server-start-pre.sh
@@ -145,6 +151,7 @@ install_httun_server()
             /opt/httun/etc/httun/server-start-pre.sh
     fi
 
+    # server-start-post.sh
     if [ -e /opt/httun/etc/httun/server-start-post.sh ]; then
         do_chown root:root /opt/httun/etc/httun/server-start-post.sh
         do_chmod 0750 /opt/httun/etc/httun/server-start-post.sh
@@ -155,40 +162,68 @@ install_httun_server()
             /opt/httun/etc/httun/server-start-post.sh
     fi
 
+    # http-server-start-pre.sh
+    if [ -e /opt/httun/etc/httun/http-server-start-pre.sh ]; then
+        do_chown root:root /opt/httun/etc/httun/http-server-start-pre.sh
+        do_chmod 0750 /opt/httun/etc/httun/http-server-start-pre.sh
+    else
+        do_install \
+            -o root -g root -m 0750 \
+            "$basedir/httun-httpserver/http-server-start-pre.sh" \
+            /opt/httun/etc/httun/http-server-start-pre.sh
+    fi
+
+    # http-server-start-post.sh
+    if [ -e /opt/httun/etc/httun/http-server-start-post.sh ]; then
+        do_chown root:root /opt/httun/etc/httun/http-server-start-post.sh
+        do_chmod 0750 /opt/httun/etc/httun/http-server-start-post.sh
+    else
+        do_install \
+            -o root -g root -m 0750 \
+            "$basedir/httun-httpserver/http-server-start-post.sh" \
+            /opt/httun/etc/httun/http-server-start-post.sh
+    fi
+
+    # httun-server binary
     do_install \
         -o root -g root -m 0755 \
         "$target/httun-server" \
         /opt/httun/bin/
 
+    # httun-httpserver binary
     do_install \
-        -o root -g root -m 0644 \
-        "$basedir/httun-server/httun-server.service" \
-        /etc/systemd/system/
+        -o root -g root -m 0755 \
+        "$target/httun-httpserver" \
+        /opt/httun/bin/
 
-    do_install \
-        -o root -g root -m 0644 \
-        "$basedir/httun-server/httun-server.socket" \
-        /etc/systemd/system/
-
-    do_install \
-        -o root -g root -m 0644 \
-        "$basedir/httun-server/httun-server-standalone.service" \
-        /etc/systemd/system/
-}
-
-install_httun_fcgi()
-{
+    # httun-fcgi binary
     do_install \
         -o root -g root -m 0755 \
         "$target/httun-fcgi" \
         /opt/httun/lib/fcgi-bin/
 
-    try_systemctl restart apache2.service
-    try_systemctl restart lighttpd.service
+    # httun-server.service
+    do_install \
+        -o root -g root -m 0644 \
+        "$basedir/httun-server/httun-server.service" \
+        /etc/systemd/system/
+
+    # httun-server.socket
+    do_install \
+        -o root -g root -m 0644 \
+        "$basedir/httun-server/httun-server.socket" \
+        /etc/systemd/system/
+
+    # httun-httpserver.service
+    do_install \
+        -o root -g root -m 0644 \
+        "$basedir/httun-httpserver/httun-httpserver.service" \
+        /etc/systemd/system/
 }
 
 install_httun_client()
 {
+    # client.conf
     if [ -e /opt/httun/etc/httun/client.conf ]; then
         do_chown root:root /opt/httun/etc/httun/client.conf
         do_chmod 0644 /opt/httun/etc/httun/client.conf
@@ -199,6 +234,7 @@ install_httun_client()
             /opt/httun/etc/httun/client.conf
     fi
 
+    # httun-client binary
     do_install \
         -o root -g root -m 0755 \
         "$target/httun-client" \
