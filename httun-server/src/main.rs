@@ -23,6 +23,7 @@ use clap::Parser;
 use httun_conf::{Config, ConfigVariant};
 use httun_util::{
     header::HttpHeader,
+    log::setup_logging,
     signal::{recv_signal, register_signal},
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -182,6 +183,10 @@ struct Opts {
     #[arg(long, hide = true)]
     tokio_console: bool,
 
+    /// Maximum number of log messages per second.
+    #[arg(long, value_name = "MSG_PER_SEC", default_value = "100.0")]
+    log_rate_limit: f32,
+
     /// Show version information and exit.
     #[arg(long, short = 'v')]
     version: bool,
@@ -330,15 +335,11 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 }
 
 fn main() -> ah::Result<()> {
-    // Initialize logging.
-    env_logger::init_from_env(
-        env_logger::Env::new()
-            .filter_or("HTTUN_LOG", "info")
-            .write_style_or("HTTUN_LOG_STYLE", "auto"),
-    );
-
     // Parse command line options.
     let opts = Arc::new(Opts::parse());
+
+    // Initialize logging.
+    setup_logging(opts.log_rate_limit);
 
     // Initialize tokio-console for debugging if requested.
     if opts.tokio_console {

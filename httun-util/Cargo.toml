@@ -15,6 +15,9 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 atoi = { workspace = true }
+env_logger = { workspace = true }
+heapless = { workspace = true }
+log = { workspace = true }
 memchr = { workspace = true }
 rkyv = { workspace = true }
 tokio = { workspace = true, features = [ "net", "time" ] }

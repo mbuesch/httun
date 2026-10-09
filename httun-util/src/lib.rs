@@ -6,6 +6,7 @@
 
 pub mod errors;
 pub mod header;
+pub mod log;
 pub mod net;
 pub mod query;
 pub mod signal;

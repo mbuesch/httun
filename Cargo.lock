@@ -1094,6 +1094,9 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "atoi",
+ "env_logger",
+ "heapless",
+ "log",
  "memchr",
  "rkyv",
  "tokio",
