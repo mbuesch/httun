@@ -63,7 +63,9 @@ jobs:
         run: cargo clippy --tests -- --deny warnings
       - run: cargo test
       - if: matrix.os.name == 'linux'
-        run: sh ./tests/run.sh --debug --full
+        run: sh ./tests/run.sh --debug
+      - if: matrix.os.name == 'linux'
+        run: sudo sh ./tests/run.sh --debug
 
       # Minimal build and tests.
       - run: cargo build --no-default-features
@@ -83,6 +85,6 @@ jobs:
       - if: matrix.toolchain.name == 'nightly'
         run: sh ./scripts/build-dev-cranelift.sh test
       - if: matrix.toolchain.name == 'nightly' && matrix.os.name == 'linux'
-        run: sh ./tests/run.sh --debug --full
+        run: sh ./tests/run.sh --debug
 
 # vim: ts=2 sw=2 expandtab

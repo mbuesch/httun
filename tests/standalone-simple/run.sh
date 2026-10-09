@@ -2,66 +2,22 @@
 # -*- coding: utf-8 -*-
 set -e
 basedir="$(realpath "$0" | xargs dirname)"
+. "$basedir/../testlib.sh"
 
-#export HTTUN_LOG=debug
+skip_if_root
 
-httpserver_pid=
-server_pid=
-
-cleanup()
-{
-    if [ -n "$httpserver_pid" ]; then
-        kill "$httpserver_pid"
-        httpserver_pid=
-    fi
-    if [ -n "$server_pid" ]; then
-        kill "$server_pid"
-        server_pid=
-    fi
-}
-
-cleanup_and_exit()
-{
-    cleanup
-    exit 1
-}
-
-trap cleanup_and_exit INT TERM
-trap cleanup EXIT
-
-release="debug"
-while [ $# -ge 1 ]; do
-    case "$1" in
-        --debug|-d)
-            release="debug"
-            ;;
-        --release|-r)
-            release="release"
-            ;;
-        --full)
-            ;;
-        --minimal)
-            ;;
-        *)
-            die "Invalid option: $1"
-            ;;
-    esac
-    shift
-done
-target="$basedir/../../target/$release"
-
-echo "Starting servers..."
+info "Starting servers..."
 
 rm -f "$basedir/httun-server.sock"
 
-"$target/httun-httpserver" \
+"$target_dir/httun-httpserver" \
     --config "$basedir/httun.conf" \
     --unix-socket "$basedir/httun-server.sock" \
     --listen localhost:8090 \
     &
 httpserver_pid=$!
 
-"$target/httun-server" \
+"$target_dir/httun-server" \
     --config "$basedir/httun.conf" \
     --unix-socket "$basedir/httun-server.sock" \
     --no-drop-root \
@@ -71,16 +27,16 @@ server_pid=$!
 
 sleep 1
 
-echo "Running the test..."
+info "Running the test..."
 
-"$target/httun-client" \
+"$target_dir/httun-client" \
     --config "$basedir/httun.conf" \
     --alias local \
     http://localhost:8090 \
     test \
     --duration 3.0
 
-echo "Exiting..."
+info "Exiting..."
 cleanup
 wait
 rm -f "$basedir/httun-server.sock"

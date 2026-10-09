@@ -1,7 +1,7 @@
 #!/bin/sh
 # -*- coding: utf-8 -*-
 set -e
-basedir="$(realpath "$0" | xargs dirname)"
+basedir="$(dirname "$(realpath "$0")")"
 
 for d in "$basedir"/*; do
     if [ -d "$d" ] && [ -x "$d/run.sh" ]; then
