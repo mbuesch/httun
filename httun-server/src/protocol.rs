@@ -12,6 +12,7 @@ use httun_unix_protocol::IpcRxMessage;
 use httun_util::{ChannelId, errors::DisconnectedError, strings::Direction};
 use std::{
     collections::{HashMap, LinkedList},
+    future::Future,
     sync::{
         Arc, Mutex as StdMutex, RwLock as StdRwLock,
         atomic::{self, AtomicBool, AtomicI64},
@@ -50,6 +51,8 @@ pub struct ProtocolHandler {
     pinned_session: StdRwLock<Option<SessionKey>>,
     /// Is the protocol handler dead?
     dead: AtomicBool,
+    /// IPC message received while waiting for data, to be processed next.
+    pending_rx: StdMutex<Option<IpcRxMessage>>,
 }
 
 impl ProtocolHandler {
@@ -68,6 +71,7 @@ impl ProtocolHandler {
             channels,
             pinned_session: StdRwLock::new(None),
             dead: AtomicBool::new(false),
+            pending_rx: StdMutex::new(None),
         }
     }
 
@@ -245,6 +249,28 @@ impl ProtocolHandler {
         Ok(())
     }
 
+    /// Wait for data from the channel while watching the IPC connection.
+    /// Returns `None`, if the request was superseded by a newer IPC message.
+    async fn recv_and_watch_ipc(
+        &self,
+        chan: &Channel,
+        recv: impl Future<Output = ah::Result<Vec<u8>>>,
+    ) -> ah::Result<Option<Vec<u8>>> {
+        tokio::pin!(recv);
+        loop {
+            tokio::select! {
+                res = &mut recv => return res.map(Some),
+                msg = self.ipc.recv() => match msg? {
+                    IpcRxMessage::Keepalive => chan.log_activity(),
+                    msg => {
+                        *self.pending_rx.lock().expect("Lock poisoned") = Some(msg);
+                        return Ok(None);
+                    }
+                },
+            }
+        }
+    }
+
     /// Handle data communication from server to client.
     async fn handle_fromsrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
@@ -269,17 +295,25 @@ impl ProtocolHandler {
         let (reply_oper, payload) = match oper {
             Operation::L3FromSrv => {
                 log::trace!("{}: Received Operation::L3FromSrv", chan.id());
-                (
-                    Operation::L3FromSrv,
-                    chan.l3recv().await.context("Channel L3 receive")?,
-                )
+                let Some(data) = self
+                    .recv_and_watch_ipc(&chan, chan.l3recv())
+                    .await
+                    .context("Channel L3 receive")?
+                else {
+                    return Ok(());
+                };
+                (Operation::L3FromSrv, data)
             }
             Operation::L7FromSrv => {
                 log::trace!("{}: Received Operation::L7FromSrv", chan.id());
-                (
-                    Operation::L7FromSrv,
-                    chan.l7recv().await.context("Channel L7 receive")?,
-                )
+                let Some(data) = self
+                    .recv_and_watch_ipc(&chan, chan.l7recv())
+                    .await
+                    .context("Channel L7 receive")?
+                else {
+                    return Ok(());
+                };
+                (Operation::L7FromSrv, data)
             }
             Operation::TestFromSrv if chan.test_enabled() => {
                 log::trace!("{}: Received Operation::TestFromSrv", chan.id());
@@ -312,7 +346,12 @@ impl ProtocolHandler {
         if self.is_dead() {
             Err(err!("Protocol handler is dead."))
         } else {
-            match self.ipc.recv().await? {
+            let pending = self.pending_rx.lock().expect("Lock poisoned").take();
+            let msg = match pending {
+                Some(msg) => msg,
+                None => self.ipc.recv().await?,
+            };
+            match msg {
                 IpcRxMessage::ToSrv(payload) => self.handle_tosrv(payload).await,
                 IpcRxMessage::ReqFromSrv(payload) => self.handle_fromsrv(payload).await,
                 IpcRxMessage::Keepalive => {

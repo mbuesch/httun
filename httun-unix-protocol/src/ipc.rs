@@ -32,7 +32,8 @@ pub enum IpcRxMessage {
 pub struct IpcClientConn<R, W> {
     chan_id: ChannelId,
     extra_headers: Vec<HttpHeader>,
-    reader: Mutex<R>,
+    /// Reader and the buffer of partially received data.
+    reader: Mutex<(R, Vec<u8>)>,
     writer: Mutex<W>,
 }
 
@@ -46,7 +47,7 @@ where
         let mut this = Self {
             chan_id,
             extra_headers: vec![],
-            reader: Mutex::new(reader),
+            reader: Mutex::new((reader, vec![])),
             writer: Mutex::new(writer),
         };
 
@@ -118,9 +119,16 @@ where
         write_message(&mut *writer, msg).await
     }
 
+    /// Receive one message.
+    ///
+    /// This function is cancellation safe.
     async fn recv_message(&self) -> ah::Result<IpcMessage> {
-        let mut reader = self.reader.lock().await;
-        read_message(&mut *reader).await
+        let msg = {
+            let mut guard = self.reader.lock().await;
+            let (reader, buf) = &mut *guard;
+            read_message_buffered(reader, buf).await?
+        };
+        Ok(msg)
     }
 }
 
@@ -129,7 +137,8 @@ where
 pub struct IpcServerConn<R, W> {
     id: ChannelId,
     dir: Option<Direction>,
-    reader: Mutex<R>,
+    /// Reader and the buffer of partially received data.
+    reader: Mutex<(R, Vec<u8>)>,
     writer: Mutex<W>,
 }
 
@@ -148,7 +157,7 @@ where
         let mut this = Self {
             id: ConfigChannel::ID_INVALID,
             dir: None,
-            reader: Mutex::new(reader),
+            reader: Mutex::new((reader, vec![])),
             writer: Mutex::new(writer),
         };
 
@@ -215,10 +224,13 @@ where
     }
 
     /// Receive and validate one message.
+    ///
+    /// This function is cancellation safe.
     pub async fn recv_message(&self) -> ah::Result<IpcMessage> {
         let msg = {
-            let mut reader = self.reader.lock().await;
-            read_message(&mut *reader).await?
+            let mut guard = self.reader.lock().await;
+            let (reader, buf) = &mut *guard;
+            read_message_buffered(reader, buf).await?
         };
 
         let allowed = match self.dir {
@@ -271,25 +283,27 @@ where
     }
 }
 
-async fn read_message<R: AsyncRead + Unpin>(reader: &mut R) -> ah::Result<IpcMessage> {
-    let mut header = vec![0; IpcMessageHeader::header_size()];
-    match reader.read_exact(&mut header).await {
-        Ok(_) => (),
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+/// Cancellation safe message reader.
+/// Partially received data is kept in `buf`.
+async fn read_message_buffered<R: AsyncRead + Unpin>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+) -> ah::Result<IpcMessage> {
+    let hdr_size = IpcMessageHeader::header_size();
+    loop {
+        if buf.len() >= hdr_size {
+            let header = IpcMessageHeader::deserialize(&buf[..hdr_size])?;
+            let total = hdr_size + header.body_size();
+            if buf.len() >= total {
+                let body = buf[hdr_size..total].to_vec();
+                buf.drain(..total);
+                return IpcMessage::deserialize(&body);
+            }
+        }
+        if reader.read_buf(buf).await? == 0 {
             return Err(DisconnectedError.into());
         }
-        Err(e) => return Err(e.into()),
     }
-    let header = IpcMessageHeader::deserialize(&header)?;
-    let mut body = vec![0; header.body_size()];
-    match reader.read_exact(&mut body).await {
-        Ok(_) => (),
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-            return Err(DisconnectedError.into());
-        }
-        Err(e) => return Err(e.into()),
-    }
-    IpcMessage::deserialize(&body)
 }
 
 async fn write_message<W: AsyncWrite + Unpin>(writer: &mut W, msg: &IpcMessage) -> ah::Result<()> {
