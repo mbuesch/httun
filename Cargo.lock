@@ -987,9 +987,9 @@ name = "httun-conf"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "ctutils",
  "httun-protocol",
  "httun-util",
- "subtle",
  "toml",
  "uuid",
 ]
@@ -1035,10 +1035,10 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "base64 0.23.1",
+ "ctutils",
  "getrandom 0.4.3",
  "rand",
  "sha3",
- "subtle",
  "uuid",
  "x25519-dalek",
 ]

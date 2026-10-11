@@ -4,8 +4,8 @@
 
 use crate::random::secure_random;
 use anyhow as ah;
+use ctutils::CtEq as _;
 use sha3::{Digest as _, Sha3_256};
-use subtle::ConstantTimeEq as _;
 
 /// All keys are 256 bit in size.
 const KEY_SIZE: usize = 256 / 8;

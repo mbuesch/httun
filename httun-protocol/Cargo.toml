@@ -16,10 +16,10 @@ publish = false
 aes-gcm = { workspace = true }
 anyhow = { workspace = true }
 base64 = { workspace = true }
+ctutils = { workspace = true }
 getrandom = { workspace = true }
 rand = { workspace = true }
 sha3 = { workspace = true }
-subtle = { workspace = true }
 uuid = { workspace = true }
 x25519-dalek = { workspace = true, features = [ "getrandom", "static_secrets" ]}
 

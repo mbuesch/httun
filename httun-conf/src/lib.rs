@@ -3,6 +3,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
 use anyhow::{self as ah, Context as _, format_err as err};
+use ctutils::CtEq as _;
 use httun_protocol::UserSharedSecret;
 use httun_util::{ChannelId, header::HttpHeader, strings::hex};
 use std::{
@@ -10,7 +11,6 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
 };
-use subtle::ConstantTimeEq as _;
 use uuid::Uuid;
 
 /// The default server configuration path, relative to the install prefix.
