@@ -9,13 +9,13 @@ use httun_protocol::{
     InitPayload, KexPublic, Message, MsgType, Operation, SequenceType, SessionKey,
 };
 use httun_unix_protocol::IpcRxMessage;
-use httun_util::{ChannelId, errors::DisconnectedError, strings::Direction};
+use httun_util::{ChannelId, errors::DisconnectedError};
 use std::{
     collections::{HashMap, LinkedList},
     future::Future,
     sync::{
         Arc, Mutex as StdMutex, RwLock as StdRwLock,
-        atomic::{self, AtomicBool, AtomicI64},
+        atomic::{self, AtomicBool},
     },
 };
 use tokio::{sync::OwnedSemaphorePermit, task};
@@ -25,20 +25,9 @@ use crate::unix_sock::IpcServerConn;
 #[cfg(target_family = "windows")]
 use crate::win_pipe::IpcServerConn;
 
-type ProtocolHandlerId = i64;
-static NEXT_HANDLER_ID: AtomicI64 = AtomicI64::new(0);
-
-fn next_handler_id() -> ProtocolHandlerId {
-    let id = NEXT_HANDLER_ID.fetch_add(1, atomic::Ordering::Relaxed);
-    assert!(id >= 0);
-    id
-}
-
 /// Httun protocol handler on the server.
 #[derive(Debug)]
 pub struct ProtocolHandler {
-    /// Identification number.
-    id: ProtocolHandlerId,
     /// Configuration file.
     conf: Arc<Config>,
     /// Protocol manager.
@@ -64,7 +53,6 @@ impl ProtocolHandler {
         channels: Arc<Channels>,
     ) -> Self {
         Self {
-            id: next_handler_id(),
             conf,
             protman,
             ipc,
@@ -73,11 +61,6 @@ impl ProtocolHandler {
             dead: AtomicBool::new(false),
             pending_rx: StdMutex::new(None),
         }
-    }
-
-    /// Get the protocol handler id.
-    pub fn prot_id(&self) -> ProtocolHandlerId {
-        self.id
     }
 
     /// Get the channel id for this protocol handler.
@@ -171,10 +154,6 @@ impl ProtocolHandler {
         self.check_rx_sequence(&chan, &msg, SequenceType::B)
             .await
             .context("rx sequence validation SequenceType::B")?;
-
-        self.protman
-            .kill_old_connections(chan.id(), Direction::W, self.prot_id())
-            .await;
 
         match oper {
             Operation::L3ToSrv => {
@@ -287,10 +266,6 @@ impl ProtocolHandler {
         self.check_rx_sequence(&chan, &msg, SequenceType::C)
             .await
             .context("rx sequence validation SequenceType::C")?;
-
-        self.protman
-            .kill_old_connections(chan.id(), Direction::R, self.prot_id())
-            .await;
 
         let (reply_oper, payload) = match oper {
             Operation::L3FromSrv => {
@@ -543,30 +518,6 @@ impl ProtocolManager {
                 !retain
             })
             .for_each(drop);
-    }
-
-    /// Kill old connections for the given channel ID and direction.
-    ///
-    /// Keeps only the connection with the given protocol handler ID.
-    async fn kill_old_connections(
-        &self,
-        _chan_id: ChannelId,
-        _dir: Direction,
-        _id: ProtocolHandlerId,
-    ) {
-        /*
-        let insts = self.get_insts(chan_id);
-        let mut insts = insts.lock().expect("Lock poisoned");
-
-        insts
-            .extract_if(|inst| {
-                let inst_dir = inst.prot.dir();
-                let inst_id = inst.prot.prot_id();
-
-                inst_dir == dir && inst_id != id
-            })
-            .for_each(drop);
-        */
     }
 
     /// Perform periodic work for all protocol instances.
