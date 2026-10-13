@@ -216,7 +216,7 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
 
     let conf = Arc::new(
         Config::new_parse_file(&opts.get_config(), ConfigVariant::Server)
-            .context("Parse configuration")?,
+            .with_context(|| format!("Parse configuration: '{}'", opts.get_config().display()))?,
     );
 
     // Create the Unix socket for communication with httun-fcgi / httun-httpserver.
