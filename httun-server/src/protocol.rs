@@ -317,7 +317,14 @@ impl ProtocolHandler {
             }
             Operation::TestFromSrv if chan.test_enabled() => {
                 log::trace!("{}: Received Operation::TestFromSrv", chan.id());
-                (Operation::TestFromSrv, chan.get_pong().await)
+                let Some(data) = self
+                    .recv_and_watch_ipc(&chan, async { Ok(chan.get_pong().await) })
+                    .await
+                    .context("Channel test receive")?
+                else {
+                    return Ok(());
+                };
+                (Operation::TestFromSrv, data)
             }
             _ => {
                 return Err(err!("Received {oper:?} in IPC ReqFromSrv context"));

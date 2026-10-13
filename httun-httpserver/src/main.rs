@@ -313,7 +313,14 @@ async fn handle_connection(conn: Arc<HttpConn>, unix_sock_path: Arc<Path>) {
                 let extra_headers = from_srv.extra_headers().to_vec();
                 let body = req.into_body();
 
-                let result = timeout(CHAN_R_TIMEOUT, from_srv.recv(body)).await;
+                let result = tokio::select! {
+                    biased;
+                    r = timeout(CHAN_R_TIMEOUT, from_srv.recv(body)) => r,
+                    () = conn.wait_disconnected() => {
+                        log::debug!("HTTP connection closed while reading (chan {chan_id})");
+                        break;
+                    }
+                };
 
                 match result {
                     Err(_) => {

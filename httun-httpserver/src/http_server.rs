@@ -705,6 +705,12 @@ impl HttpConn {
         Ok(*state == ChanPinState::HaveChannelId)
     }
 
+    /// Wait until the connection is aborted or the peer disconnected.
+    pub async fn wait_disconnected(&self) {
+        let mut rx = self.pinned_state_tx.subscribe();
+        let _ = rx.wait_for(|p| *p == ChanPinState::Aborted).await;
+    }
+
     /// Receive a message from the httun client.
     ///
     /// Returns the received message.
