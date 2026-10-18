@@ -24,6 +24,13 @@ use std::os::unix::net::UnixListener as StdUnixListener;
 pub type IpcServerConn =
     httun_unix_protocol::IpcServerConn<ReadHalf<UnixStream>, WriteHalf<UnixStream>>;
 
+#[derive(Debug)]
+pub enum AcceptResult {
+    Connected(IpcServerConn),
+    Fatal(ah::Error),
+    Nonfatal(ah::Error),
+}
+
 /// The Unix socket server.
 ///
 /// This listens for connections from the httun `FastCGI` daemon.
@@ -93,13 +100,16 @@ impl UnixSock {
     }
 
     /// Accept a connection on the Unix socket.
-    pub async fn accept(&self) -> ah::Result<IpcServerConn> {
-        let (stream, _addr) = self.listener.accept().await?;
+    pub async fn accept(&self) -> AcceptResult {
+        let (stream, _addr) = match self.listener.accept().await {
+            Ok(res) => res,
+            Err(e) => return AcceptResult::Fatal(e.into()),
+        };
 
         // Get the credentials of the connected process.
-        let cred = stream
-            .peer_cred()
-            .context("Get Unix socket peer credentials")?;
+        let Ok(cred) = stream.peer_cred() else {
+            return AcceptResult::Fatal(err!("Failed to get peer credentials"));
+        };
 
         let web_uid = WEBSERVER_UID.load(atomic::Ordering::Relaxed);
         let web_gid = WEBSERVER_GID.load(atomic::Ordering::Relaxed);
@@ -109,7 +119,7 @@ impl UnixSock {
         let peer_gid = cred.gid();
 
         if !web_cred_check_disabled && peer_uid != web_uid {
-            return Err(err!(
+            return AcceptResult::Nonfatal(err!(
                 "Unix socket: \
                 The connected uid {peer_uid} is not the web server's uid ({web_uid}). \
                 Rejecting connection. \
@@ -118,7 +128,7 @@ impl UnixSock {
         }
 
         if !web_cred_check_disabled && peer_gid != web_gid {
-            return Err(err!(
+            return AcceptResult::Nonfatal(err!(
                 "Unix socket: \
                 The connected gid {peer_gid} is not the web server's gid ({web_gid}). \
                 Rejecting connection. \
@@ -127,7 +137,10 @@ impl UnixSock {
         }
 
         let (reader, writer) = split(stream);
-        IpcServerConn::new(reader, writer, &self.conf, &self.extra_headers).await
+        match IpcServerConn::new(reader, writer, &self.conf, &self.extra_headers).await {
+            Ok(c) => AcceptResult::Connected(c),
+            Err(e) => AcceptResult::Nonfatal(e),
+        }
     }
 }
 

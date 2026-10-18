@@ -32,15 +32,16 @@ use tokio::{
     signal::ctrl_c,
     sync::{self, Semaphore},
     task,
+    time::sleep,
 };
 
 #[cfg(target_os = "linux")]
 use crate::systemd::systemd_notify_ready;
 
 #[cfg(target_family = "unix")]
-use crate::unix_sock::UnixSock;
+use crate::unix_sock::{AcceptResult, UnixSock};
 #[cfg(target_family = "windows")]
-use crate::win_pipe::WinPipe;
+use crate::win_pipe::{AcceptResult, WinPipe};
 #[cfg(target_family = "windows")]
 use httun_unix_protocol::WINDOWS_PIPE;
 #[cfg(target_family = "unix")]
@@ -296,12 +297,17 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                 let conn_semaphore = Arc::clone(&conn_semaphore);
 
                 match local_ipc.accept().await {
-                    Ok(conn) => {
+                    AcceptResult::Connected(conn) => {
                         if let Ok(permit) = conn_semaphore.acquire_owned().await {
                             protman.spawn(conn, channels, permit).await;
                         }
                     }
-                    Err(e) => {
+                    AcceptResult::Nonfatal(e) => {
+                        log::error!("IPC accept error: {e}");
+                        sleep(Duration::from_millis(1)).await;
+                        break;
+                    }
+                    AcceptResult::Fatal(e) => {
                         let _ = exit_tx.send(Err(e)).await;
                         break;
                     }

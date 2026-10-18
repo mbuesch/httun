@@ -2,7 +2,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use anyhow::{self as ah, Context as _, format_err as err};
+use anyhow::{self as ah, format_err as err};
 use httun_conf::Config;
 use httun_util::header::HttpHeader;
 use std::{
@@ -20,6 +20,13 @@ use tokio::{
 /// IPC connection carried by a Windows named pipe.
 pub type IpcServerConn =
     httun_unix_protocol::IpcServerConn<ReadHalf<NamedPipeServer>, WriteHalf<NamedPipeServer>>;
+
+#[derive(Debug)]
+pub enum AcceptResult {
+    Connected(IpcServerConn),
+    Fatal(ah::Error),
+    Nonfatal(ah::Error),
+}
 
 /// Windows named-pipe listener used by httun-httpserver.
 #[derive(Debug)]
@@ -47,20 +54,27 @@ impl WinPipe {
         })
     }
 
-    pub async fn accept(&self) -> ah::Result<IpcServerConn> {
+    pub async fn accept(&self) -> AcceptResult {
         let first_instance = self.first_instance.load(Ordering::Acquire);
-        let stream = ServerOptions::new()
+        let stream = match ServerOptions::new()
             .first_pipe_instance(first_instance)
             .create(&self.pipe_name)
-            .context("Create Windows named pipe instance")?;
+        {
+            Ok(s) => s,
+            Err(e) => {
+                return AcceptResult::Fatal(err!("Create Windows named pipe instance failed: {e}"));
+            }
+        };
         if first_instance {
             self.first_instance.store(false, Ordering::Release);
         }
-        stream
-            .connect()
-            .await
-            .context("Accept Windows named pipe connection")?;
+        if let Err(e) = stream.connect().await {
+            return AcceptResult::Fatal(err!("Accept Windows named pipe connection: {e}"));
+        }
         let (reader, writer) = split(stream);
-        IpcServerConn::new(reader, writer, &self.conf, &self.extra_headers).await
+        match IpcServerConn::new(reader, writer, &self.conf, &self.extra_headers).await {
+            Ok(c) => AcceptResult::Connected(c),
+            Err(e) => AcceptResult::Nonfatal(e),
+        }
     }
 }
