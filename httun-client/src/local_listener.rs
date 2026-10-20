@@ -40,23 +40,29 @@ async fn local_rx(
     target_port: u16,
 ) -> ah::Result<()> {
     loop {
-        let buf = tcp_recv_until_blocking(&stream, RX_BUF_SIZE).await?;
+        let buf = match tcp_recv_until_blocking(&stream, RX_BUF_SIZE).await {
+            Ok(buf) => buf,
+            Err(e) if e.downcast_ref::<DisconnectedError>().is_some() => {
+                log::trace!("Local socket: Disconnected.");
+                return Err(e);
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        };
+        if !buf.is_empty() {
+            log::trace!(
+                "Sending {} bytes from local socket to httun-server.",
+                buf.len()
+            );
 
-        if buf.is_empty() {
-            log::trace!("Local socket: Disconnected.");
-            return Err(DisconnectedError.into());
+            let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
+            let l7 = l7.serialize().context("L7 serialize")?;
+            let msg =
+                Message::new(MsgType::Data, Operation::L7ToSrv, l7).context("Make httun packet")?;
+
+            comm.send_to_httun(msg).await;
         }
-        log::trace!(
-            "Sending {} bytes from local socket to httun-server.",
-            buf.len()
-        );
-
-        let l7 = L7Container::new(SocketAddr::new(target_addr, target_port), buf);
-        let l7 = l7.serialize().context("L7 serialize")?;
-        let msg =
-            Message::new(MsgType::Data, Operation::L7ToSrv, l7).context("Make httun packet")?;
-
-        comm.send_to_httun(msg).await;
     }
 }
 

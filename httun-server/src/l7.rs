@@ -11,6 +11,7 @@ use arc_swap::ArcSwapOption;
 use httun_conf::ConfigL7Tunnel;
 use httun_protocol::L7Container;
 use httun_util::{
+    errors::DisconnectedError,
     net::{tcp_recv_until_blocking, tcp_send_all},
     timeouts::{L7_RX_TIMEOUT, L7_TIMEOUT_S, L7_TX_TIMEOUT},
 };
@@ -314,9 +315,17 @@ impl L7State {
                                 // timeout
                                 continue 'a;
                             }
+                            Ok(Ok(buf)) if buf.is_empty() => {
+                                // spurious wakeup. Try again.
+                                continue 'a;
+                            }
                             Ok(Ok(buf)) => {
                                 // received a buffer
                                 buf
+                            }
+                            Ok(Err(e)) if e.downcast_ref::<DisconnectedError>().is_some() => {
+                                // disconnected
+                                vec![]
                             }
                             Ok(Err(e)) => {
                                 return Err(e.context("L7 stream recv"));

@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
+use crate::errors::DisconnectedError;
 use anyhow as ah;
+use std::io::ErrorKind;
 use tokio::net::TcpStream;
 
 /// Receives data from a TCP stream until the stream is no longer readable
@@ -15,18 +17,24 @@ pub async fn tcp_recv_until_blocking(stream: &TcpStream, buf_size: usize) -> ah:
         match stream.try_read(&mut buf[count..]) {
             Ok(n) => {
                 count += n;
+                if count == 0 {
+                    return Err(DisconnectedError.into());
+                }
                 if n == 0 || count >= buf.len() {
                     buf.truncate(count);
                     return Ok(buf);
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+            Err(e) if e.kind() == ErrorKind::WouldBlock => {
                 buf.truncate(count);
                 return Ok(buf);
             }
-            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                buf.clear();
-                return Ok(buf);
+            Err(e) if e.kind() == ErrorKind::BrokenPipe => {
+                if count > 0 {
+                    buf.truncate(count);
+                    return Ok(buf);
+                }
+                return Err(DisconnectedError.into());
             }
             Err(e) => {
                 return Err(e.into());
@@ -48,7 +56,7 @@ pub async fn tcp_send_all(stream: &TcpStream, data: &[u8]) -> ah::Result<()> {
                     return Ok(());
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
+            Err(e) if e.kind() == ErrorKind::WouldBlock => (),
             Err(e) => {
                 return Err(e.into());
             }
