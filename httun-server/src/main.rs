@@ -44,6 +44,8 @@ use crate::unix_sock::{AcceptResult, UnixSock};
 use crate::win_pipe::{AcceptResult, WinPipe};
 #[cfg(target_family = "windows")]
 use httun_unix_protocol::WINDOWS_PIPE;
+#[cfg(all(target_family = "unix", not(target_os = "macos")))]
+use nix::unistd::setgroups;
 #[cfg(target_family = "unix")]
 use nix::unistd::{Group, User, setgid, setuid};
 #[cfg(target_family = "unix")]
@@ -77,6 +79,11 @@ fn drop_privileges() -> ah::Result<()> {
     let group = Group::from_name(group_name)
         .context("Get httun gid from /etc/group")?
         .ok_or_else(|| err!("Group '{group_name}' not found in /etc/group"))?;
+
+    #[cfg(all(target_family = "unix", not(target_os = "macos")))]
+    setgroups(&[group.gid]).context("Drop privileges: Set supplementary groups")?;
+    #[cfg(not(all(target_family = "unix", not(target_os = "macos"))))]
+    log::warn!("Drop privileges: Supplementary groups not dropped on MacOS.");
 
     setgid(group.gid).context("Drop privileges: Set httun group id")?;
     setuid(user.uid).context("Drop privileges: Set httun user id")?;

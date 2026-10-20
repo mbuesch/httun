@@ -35,6 +35,8 @@ use tokio::{
 
 #[cfg(target_os = "linux")]
 use crate::systemd::systemd_notify_ready;
+#[cfg(all(target_family = "unix", not(target_os = "macos")))]
+use nix::unistd::setgroups;
 #[cfg(target_family = "unix")]
 use nix::unistd::{Group, User, setgid, setuid};
 #[cfg(target_family = "unix")]
@@ -51,6 +53,12 @@ const WORKER_THREADS: usize = 4;
 /// Drop root privileges.
 #[cfg(target_family = "unix")]
 fn drop_privileges(user_name: Option<&str>, group_name: Option<&str>) -> ah::Result<()> {
+    if (user_name.is_some() || group_name.is_some())
+        && (user_name.is_some() != group_name.is_some())
+    {
+        return Err(err!("Both --user and --group must be specified together"));
+    }
+
     let user = if let Some(user_name) = user_name {
         Some(
             User::from_name(user_name)
@@ -76,6 +84,12 @@ fn drop_privileges(user_name: Option<&str>, group_name: Option<&str>) -> ah::Res
             group.name,
             group.gid
         );
+
+        #[cfg(all(target_family = "unix", not(target_os = "macos")))]
+        setgroups(&[group.gid]).context("Drop privileges: Set supplementary groups")?;
+        #[cfg(not(all(target_family = "unix", not(target_os = "macos"))))]
+        log::warn!("Drop privileges: Supplementary groups not dropped on MacOS.");
+
         setgid(group.gid).context("Drop privileges: Set group id")?;
     }
     if let Some(user) = user {
