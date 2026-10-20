@@ -10,7 +10,7 @@ use httun_util::{
     net::{tcp_recv_until_blocking, tcp_send_all},
 };
 use std::{
-    net::{IpAddr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
 };
 use tokio::{
@@ -150,17 +150,36 @@ impl LocalConn {
 }
 
 pub struct LocalListener {
-    listener: TcpListener,
+    listener6: Option<TcpListener>,
+    listener4: Option<TcpListener>,
 }
 
 impl LocalListener {
     pub async fn bind(port: u16) -> ah::Result<Self> {
-        let listener = TcpListener::bind((Ipv6Addr::UNSPECIFIED, port)).await?;
-        Ok(Self { listener })
+        let listener6 = TcpListener::bind((Ipv6Addr::LOCALHOST, port)).await;
+        let listener4 = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await;
+        if let (Err(e6), Err(e4)) = (&listener6, &listener4) {
+            return Err(err!("Failed to bind localhost port {port}: {e6}; {e4}"));
+        }
+        Ok(Self {
+            listener6: listener6.ok(),
+            listener4: listener4.ok(),
+        })
+    }
+
+    async fn accept_one(listener: Option<&TcpListener>) -> std::io::Result<TcpStream> {
+        match listener {
+            Some(l) => l.accept().await.map(|(stream, _addr)| stream),
+            None => std::future::pending().await,
+        }
     }
 
     pub async fn accept(&self) -> ah::Result<LocalConn> {
-        let (stream, _addr) = self.listener.accept().await?;
+        let stream = tokio::select! {
+            biased;
+            r = Self::accept_one(self.listener6.as_ref()) => r?,
+            r = Self::accept_one(self.listener4.as_ref()) => r?,
+        };
         LocalConn::new(stream)
     }
 }
