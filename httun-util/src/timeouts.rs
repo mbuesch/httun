@@ -33,6 +33,8 @@ pub const HTTP_CHANNEL_PIN_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOU
 /// L7 tunnel timeout, in seconds.
 /// The socket to the target is closed after this timeout of inactivity.
 pub const L7_TIMEOUT_S: i64 = 30;
+/// L7 socket to target connect timeout.
+pub const L7_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// L7 socket to target transmit timeout.
 pub const L7_TX_TIMEOUT: Duration = Duration::from_secs(10);
 /// L7 socket to target receive timeout.

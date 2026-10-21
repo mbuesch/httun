@@ -13,7 +13,7 @@ use httun_protocol::L7Container;
 use httun_util::{
     errors::DisconnectedError,
     net::{tcp_recv_until_blocking, tcp_send_all},
-    timeouts::{L7_RX_TIMEOUT, L7_TIMEOUT_S, L7_TX_TIMEOUT},
+    timeouts::{L7_CONNECT_TIMEOUT, L7_RX_TIMEOUT, L7_TIMEOUT_S, L7_TX_TIMEOUT},
 };
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
@@ -23,7 +23,11 @@ use std::{
         atomic::{self, AtomicU64},
     },
 };
-use tokio::{net::TcpStream, sync::Notify, time::timeout};
+use tokio::{
+    net::{TcpSocket, TcpStream},
+    sync::Notify,
+    time::timeout,
+};
 
 /// Size of the receive buffer.
 const RX_BUF_SIZE: usize = L7Container::MAX_PAYLOAD_LEN;
@@ -33,15 +37,15 @@ const RX_BUF_SIZE: usize = L7Container::MAX_PAYLOAD_LEN;
 /// Used to connect to a remote TCP address with optional binding to a specific
 /// network interface.
 ///
-/// Converts into a non-blocking tokio [`TcpStream`].
+/// Connects asynchronously into a tokio [`TcpStream`].
 #[derive(Debug)]
 struct L7Socket {
     socket: Socket,
 }
 
 impl L7Socket {
-    /// Connect to the remote address, optionally binding to a specific network interface.
-    pub fn connect(bind_device: Option<&str>, remote_addr: &SocketAddr) -> ah::Result<Self> {
+    /// Create a new L7 socket to the remote address, optionally binding to a specific network interface.
+    pub fn new(bind_device: Option<&str>, remote_addr: &SocketAddr) -> ah::Result<Self> {
         let domain = if remote_addr.is_ipv4() {
             Domain::IPV4
         } else {
@@ -69,26 +73,22 @@ impl L7Socket {
             }
         }
 
-        log::trace!("Connecting socket to remote: {remote_addr}");
         socket
-            .connect(&(*remote_addr).into())
-            .context("Connect TUN socket to remote")?;
+            .set_nonblocking(true)
+            .context("Set socket non-blocking")?;
 
         Ok(Self { socket })
     }
-}
 
-impl TryFrom<L7Socket> for TcpStream {
-    type Error = ah::Error;
-
-    /// Convert `L7Socket` into a non-blocking tokio `TcpStream`.
-    fn try_from(socket: L7Socket) -> ah::Result<Self> {
-        let stream: StdTcpStream = socket.socket.into();
-        stream
-            .set_nonblocking(true)
-            .context("Set socket non-blocking")?;
-        let stream = TcpStream::from_std(stream).context("Create TcpStream")?;
-        Ok(stream)
+    /// Asynchronously connect to the remote address.
+    pub async fn connect(self, remote_addr: &SocketAddr) -> ah::Result<TcpStream> {
+        log::trace!("Connecting socket to remote: {remote_addr}");
+        let stream: StdTcpStream = self.socket.into();
+        let socket = TcpSocket::from_std_stream(stream);
+        timeout(L7_CONNECT_TIMEOUT, socket.connect(*remote_addr))
+            .await
+            .map_err(|_| err!("Connect TUN socket to remote: timeout"))?
+            .context("Connect TUN socket to remote")
     }
 }
 
@@ -106,9 +106,9 @@ struct L7Stream {
 
 impl L7Stream {
     /// Connect to the remote address.
-    pub fn connect(conf: &ConfigL7Tunnel, remote: SocketAddr) -> ah::Result<Self> {
-        let socket = L7Socket::connect(conf.bind_to_interface(), &remote)?;
-        let stream = socket.try_into()?;
+    pub async fn connect(conf: &ConfigL7Tunnel, remote: SocketAddr) -> ah::Result<Self> {
+        let socket = L7Socket::new(conf.bind_to_interface(), &remote)?;
+        let stream = socket.connect(&remote).await?;
         Ok(Self { remote, stream })
     }
 
@@ -250,7 +250,7 @@ impl L7State {
                 self.disconnect(false);
                 log::trace!("Connecting to {addr}");
                 self.stream
-                    .store(Some(Arc::new(L7Stream::connect(&self.conf, *addr)?)));
+                    .store(Some(Arc::new(L7Stream::connect(&self.conf, *addr).await?)));
                 log::trace!("Connected to {addr}");
                 stream = self.stream.load();
             }
