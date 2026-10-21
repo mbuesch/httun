@@ -22,6 +22,7 @@ use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
 };
 use std::{
+    net::{IpAddr, SocketAddr},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering::Relaxed},
@@ -43,8 +44,16 @@ fn make_client(
     extra_headers: &[HttpHeader],
     timeout: Duration,
     chan_conf: &ConfigChannel,
+    pinned_ip: Option<&(String, IpAddr)>,
 ) -> ah::Result<Client> {
     let mut c = Client::builder();
+
+    // Pin the resolved address, but keep the host name for Host header, SNI and certificates.
+    // Port=0 means: Use the port from the URL,
+    // or (if not present) use the conventional port (80 for HTTP, 443 for HTTPS)
+    if let Some((domain, ip)) = pinned_ip {
+        c = c.resolve(domain, SocketAddr::new(*ip, 0));
+    }
 
     if !user_agent.trim().is_empty() {
         c = c.user_agent(user_agent);
@@ -114,6 +123,7 @@ macro_rules! define_direction {
             user_agent: Arc<String>,
             extra_headers: Arc<[HttpHeader]>,
             serial: AtomicU64,
+            pinned_ip: Option<(String, IpAddr)>,
         }
 
         impl $struct {
@@ -124,6 +134,7 @@ macro_rules! define_direction {
                 mode: HttunClientMode,
                 user_agent: Arc<String>,
                 extra_headers: Arc<[HttpHeader]>,
+                pinned_ip: Option<(String, IpAddr)>,
             ) -> Self {
                 let url = format_url(base_url, chan_conf.id(), $urlpath);
                 Self {
@@ -134,6 +145,7 @@ macro_rules! define_direction {
                     user_agent,
                     extra_headers,
                     serial: AtomicU64::new(0),
+                    pinned_ip,
                 }
             }
         }
@@ -163,6 +175,7 @@ impl DirectionR {
             &self.extra_headers,
             HTTP_R_TIMEOUT,
             &self.chan_conf,
+            self.pinned_ip.as_ref(),
         )
         .context("httun HTTP-r build HTTP client")?;
 
@@ -263,6 +276,7 @@ impl DirectionW {
             &self.extra_headers,
             HTTP_W_TIMEOUT,
             &self.chan_conf,
+            self.pinned_ip.as_ref(),
         )
         .context("httun HTTP-w build HTTP client")?;
 
@@ -329,9 +343,16 @@ async fn get_session(
     user_agent: &str,
     extra_headers: &[HttpHeader],
     user_shared_secret: &UserSharedSecret,
+    pinned_ip: Option<&(String, IpAddr)>,
 ) -> ah::Result<SessionKey> {
-    let client = make_client(user_agent, extra_headers, Duration::from_secs(5), chan_conf)
-        .context("httun session build HTTP client")?;
+    let client = make_client(
+        user_agent,
+        extra_headers,
+        Duration::from_secs(5),
+        chan_conf,
+        pinned_ip,
+    )
+    .context("httun session build HTTP client")?;
 
     let http_auth = chan_conf.http().basic_auth();
 
@@ -420,6 +441,7 @@ pub struct HttunClient {
     user_agent: Arc<String>,
     extra_headers: Arc<[HttpHeader]>,
     user_shared_secret: Arc<UserSharedSecret>,
+    pinned_ip: Option<(String, IpAddr)>,
 }
 
 impl HttunClient {
@@ -468,19 +490,16 @@ impl HttunClient {
         };
 
         // Try to resolve the server-url domain name (if any) into an IP address.
-        let mut base_url = Url::parse(base_url).context("Parse server URL")?;
+        let base_url = Url::parse(base_url).context("Parse server URL")?;
+        let mut pinned_ip = None;
         if let Some(Host::Domain(domain)) = base_url.host() {
             // Resolve the domain with the given settings.
             let server_ip = resolve(domain, res_mode)
                 .await
                 .context("Resolve server URL domain")?;
 
-            // Replace the host part of the URL.
-            if let Err(e) = base_url.set_ip_host(server_ip) {
-                return Err(err!(
-                    "Replace server-url domain with IP address failed: {e:?}"
-                ));
-            }
+            pinned_ip = Some((domain.to_string(), server_ip));
+            log::debug!("Pinned server IP for domain '{}': {}", domain, server_ip);
         }
 
         let user_agent = Arc::new(user_agent.to_string());
@@ -497,6 +516,7 @@ impl HttunClient {
                 mode,
                 Arc::clone(&user_agent),
                 Arc::clone(&extra_headers),
+                pinned_ip.clone(),
             )),
             w: Arc::new(DirectionW::new(
                 Arc::clone(&conf),
@@ -505,10 +525,12 @@ impl HttunClient {
                 mode,
                 Arc::clone(&user_agent),
                 Arc::clone(&extra_headers),
+                pinned_ip.clone(),
             )),
             user_agent: Arc::clone(&user_agent),
             extra_headers: Arc::clone(&extra_headers),
             user_shared_secret: Arc::clone(&user_shared_secret),
+            pinned_ip,
         })
     }
 
@@ -528,6 +550,7 @@ impl HttunClient {
                     &self.user_agent,
                     &self.extra_headers,
                     &self.user_shared_secret,
+                    self.pinned_ip.as_ref(),
                 )
                 .await?,
             );
