@@ -54,7 +54,7 @@ impl Connection {
 
     /// Check if the connection is timed out.
     fn is_timed_out(&self, now: Instant) -> bool {
-        self.last_activity.duration_since(now) >= UNIX_TIMEOUT
+        now.duration_since(self.last_activity) >= UNIX_TIMEOUT
     }
 }
 
