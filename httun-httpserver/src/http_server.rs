@@ -182,8 +182,8 @@ async fn send_http_reply(
         buf.extend_from_slice(hdr.value());
         write!(&mut buf, "\r\n")?;
     }
+    write!(&mut buf, "content-length: {}\r\n", payload.len())?;
     if !payload.is_empty() {
-        write!(&mut buf, "content-length: {}\r\n", payload.len())?;
         write!(&mut buf, "content-type: {mime}\r\n")?;
     }
     write!(&mut buf, "\r\n")?;
