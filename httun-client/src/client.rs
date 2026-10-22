@@ -499,7 +499,7 @@ impl HttunClient {
                 .context("Resolve server URL domain")?;
 
             pinned_ip = Some((domain.to_string(), server_ip));
-            log::debug!("Pinned server IP for domain '{}': {}", domain, server_ip);
+            log::debug!("Pinned server IP for domain '{domain}': {server_ip}");
         }
 
         let user_agent = Arc::new(user_agent.to_string());
