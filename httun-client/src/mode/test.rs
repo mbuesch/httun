@@ -101,11 +101,12 @@ pub async fn run_mode_test(
 
                 num_bytes_rx += reply_payload.len();
 
-                let secs = 1.0;
                 let now = Instant::now();
-                if now >= meas_start + Duration::from_secs_f32(secs) {
-                    let rate_tx = avgrate_tx.feed(num_bytes_tx as f32 / secs);
-                    let rate_rx = avgrate_rx.feed(num_bytes_rx as f32 / secs);
+                let elapsed = now.duration_since(meas_start);
+                if elapsed >= Duration::from_secs_f32(1.0) {
+                    let elapsed_secs = elapsed.as_secs_f32();
+                    let rate_tx = avgrate_tx.feed(num_bytes_tx as f32 / elapsed_secs);
+                    let rate_rx = avgrate_rx.feed(num_bytes_rx as f32 / elapsed_secs);
                     meas_start = now;
                     num_bytes_tx = 0;
                     num_bytes_rx = 0;
