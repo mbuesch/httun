@@ -148,7 +148,7 @@ enum Mode {
     /// the communication between httun-client and httun-server
     /// (via HTTP httun-fcgi).
     ///
-    /// The transferred test data is not encrypted.
+    /// Test messages are encrypted in a normal httun session.
     Test {
         /// Delay time between test messages.
         ///

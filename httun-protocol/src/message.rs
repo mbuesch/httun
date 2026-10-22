@@ -124,11 +124,11 @@ impl From<Operation> for u8 {
 /// | Byte offset | Name                 | Byte size | Area  |
 /// | ----------- | -------------------- | --------- | ----- |
 /// | 0           | Type                 | 1         | assoc |
-/// | 1           | Nonce                | 16        | nonce |
-/// | 17          | Operation            | 1         | crypt |
-/// | 18          | Sequence counter     | 8 (be)    | crypt |
-/// | 26          | Payload length       | 2 (be)    | crypt |
-/// | 28          | Payload              | var       | crypt |
+/// | 1           | Nonce                | 20        | nonce |
+/// | 21          | Operation            | 1         | crypt |
+/// | 22          | Sequence counter     | 8 (be)    | crypt |
+/// | 30          | Payload length       | 2 (be)    | crypt |
+/// | 32          | Payload              | var       | crypt |
 /// | var         | Authentication tag   | 16        | tag   |
 ///
 /// ## Payload

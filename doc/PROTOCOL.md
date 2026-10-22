@@ -52,7 +52,7 @@ The httun frame is put into the body of the POST request as `content-type: appli
 ## httun frame
 
 The httun frame is encrypted and authenticated using AES-256-GCM.
-The encryption key is a pre-shared 32-byte key.
+The pre-shared user secret is 32 bytes; the frame encryption key is derived from it.
 
 The frame is composed of four areas:
 - `assoc`: Authenticated, but not encrypted associated data.
@@ -134,7 +134,10 @@ The associated data for AES-gcm AEAD encryption and decryption consists of the f
 
 ## Encryption keys
 
-TODO
+The 32-byte frame key is derived as
+`SHA3-256(user_secret | X25519_shared_secret)`.
+For the initialization protocol, the X25519 shared-secret input is 32 zero bytes.
+For normal session communication, it is the shared secret produced by the X25519 key exchange.
 
 ## L7 container frame
 

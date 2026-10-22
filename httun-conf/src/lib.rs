@@ -135,7 +135,7 @@ impl TryFrom<&toml::Value> for ConfigParametersReceive {
                 .and_then(|i| {
                     if i <= 0 || i > i64::from(i16::MAX) {
                         Err(err!(
-                            "parameters.receive: 'window-length' must between 1 and 0xFFFF"
+                            "parameters.receive: 'window-length' must be between 1 and 32767"
                         ))
                     } else {
                         Ok(NonZeroUsize::new(i.try_into().unwrap()).unwrap())

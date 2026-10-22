@@ -92,7 +92,7 @@ pub enum SystemdSocket {
 impl SystemdSocket {
     /// Get all sockets from systemd.
     ///
-    /// All environment variables related to this operation will be cleared.
+    /// Reads the systemd socket activation environment without clearing it.
     #[allow(unused_mut)]
     pub fn get_all() -> ah::Result<Vec<SystemdSocket>> {
         let mut sockets = vec![];

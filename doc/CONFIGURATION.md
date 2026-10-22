@@ -16,16 +16,15 @@ Each channel represents a tunnel connection.
 - `urls`:
    A list of URLs for the httun server endpoint.
    All of these server endpoints will match this `[[channels]]` entry.
-- `name`:
-   The name of the channel.
-   This should match a channel name on the server.
-   The default is "a".
+- `id`:
+   The integer ID of the channel.
+   This must match the ID configured on the server and can be between 0 and 32767.
 - `shared-secret`:
    The pre-shared key for encryption and authentication.
    This must be the same on both the client and the server for a given channel.
-- `http-basic-auth`:
+- `http.basic-auth`:
    If the server requires HTTP Basic Authentication, you can configure the username and password here.
-- `https-ignore-tls-errors`:
+- `http.ignore-tls-errors`:
    If you are using HTTPS with a self-signed certificate, you can set this to `true` to ignore TLS errors.
    This does not affect the security of the httun tunnel itself, as it uses its own end-to-end encryption.
 
@@ -37,10 +36,9 @@ The server configuration also uses `[[channels]]` sections to define the availab
 
 ### Main server `[[channels]]` fields
 
-- `name`:
-   The name of the channel.
-   This should match the name configured on the client.
-   The default is "a".
+- `id`:
+   The integer ID of the channel.
+   This must match the ID configured on the client and can be between 0 and 32767.
 - `shared-secret`:
    The pre-shared key for encryption and authentication.
    This must be the same on both the client and the server for a given channel.
