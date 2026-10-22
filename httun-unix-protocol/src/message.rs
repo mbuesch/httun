@@ -90,6 +90,8 @@ pub struct IpcMessage {
     op: IpcOperation,
     /// Channel ID.
     chan_id: ChannelId,
+    /// Request ID.
+    req_id: u64,
     /// Extra HTTP headers returned in the handshake reply.
     extra_headers: Vec<HttpHeader>,
     /// Payload data.
@@ -111,12 +113,14 @@ impl IpcMessage {
     fn new(
         op: IpcOperation,
         chan_id: ChannelId,
+        req_id: u64,
         extra_headers: Vec<HttpHeader>,
         payload: Vec<u8>,
     ) -> Self {
         Self {
             op,
             chan_id,
+            req_id,
             extra_headers,
             payload,
         }
@@ -124,47 +128,52 @@ impl IpcMessage {
 
     /// Creates a new `InitDirToSrv` message.
     pub fn new_init_dir_to_srv(chan_id: ChannelId) -> Self {
-        Self::new(IpcOperation::InitDirToSrv, chan_id, vec![], vec![])
+        Self::new(IpcOperation::InitDirToSrv, chan_id, 0, vec![], vec![])
     }
 
     /// Creates a new `InitDirFromSrv` message.
     pub fn new_init_dir_from_srv(chan_id: ChannelId) -> Self {
-        Self::new(IpcOperation::InitDirFromSrv, chan_id, vec![], vec![])
+        Self::new(IpcOperation::InitDirFromSrv, chan_id, 0, vec![], vec![])
     }
 
     /// Creates a new `InitReply` message.
     pub fn new_init_reply(chan_id: ChannelId, extra_headers: Vec<HttpHeader>) -> Self {
-        Self::new(IpcOperation::InitReply, chan_id, extra_headers, vec![])
+        Self::new(IpcOperation::InitReply, chan_id, 0, extra_headers, vec![])
     }
 
     /// Creates a new `Keepalive` message.
     pub fn new_keepalive(chan_id: ChannelId) -> Self {
-        Self::new(IpcOperation::Keepalive, chan_id, vec![], vec![])
+        Self::new(IpcOperation::Keepalive, chan_id, 0, vec![], vec![])
     }
 
     /// Creates a new `ToSrv` message.
-    pub fn new_to_srv(chan_id: ChannelId, payload: Vec<u8>) -> Self {
-        Self::new(IpcOperation::ToSrv, chan_id, vec![], payload)
+    pub fn new_to_srv(chan_id: ChannelId, req_id: u64, payload: Vec<u8>) -> Self {
+        Self::new(IpcOperation::ToSrv, chan_id, req_id, vec![], payload)
     }
 
     /// Creates a new `ReqFromSrv` message.
-    pub fn new_req_from_srv(chan_id: ChannelId, payload: Vec<u8>) -> Self {
-        Self::new(IpcOperation::ReqFromSrv, chan_id, vec![], payload)
+    pub fn new_req_from_srv(chan_id: ChannelId, req_id: u64, payload: Vec<u8>) -> Self {
+        Self::new(IpcOperation::ReqFromSrv, chan_id, req_id, vec![], payload)
     }
 
     /// Creates a new `FromSrv` message.
-    pub fn new_from_srv(chan_id: ChannelId, payload: Vec<u8>) -> Self {
-        Self::new(IpcOperation::FromSrv, chan_id, vec![], payload)
+    pub fn new_from_srv(chan_id: ChannelId, req_id: u64, payload: Vec<u8>) -> Self {
+        Self::new(IpcOperation::FromSrv, chan_id, req_id, vec![], payload)
     }
 
     /// Creates a new `Close` message.
     pub fn new_close(chan_id: ChannelId) -> Self {
-        Self::new(IpcOperation::Close, chan_id, vec![], vec![])
+        Self::new(IpcOperation::Close, chan_id, 0, vec![], vec![])
     }
 
     /// Returns the operation code.
     pub fn op(&self) -> IpcOperation {
         self.op
+    }
+
+    /// Returns the request ID.
+    pub fn req_id(&self) -> u64 {
+        self.req_id
     }
 
     /// Returns the channel ID.

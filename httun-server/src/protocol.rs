@@ -9,7 +9,7 @@ use httun_protocol::{
     InitPayload, KexPublic, Message, MsgType, Operation, SequenceType, SessionKey,
 };
 use httun_unix_protocol::IpcRxMessage;
-use httun_util::{ChannelId, errors::DisconnectedError};
+use httun_util::{ChannelId, errors::DisconnectedError, timeouts::CHAN_R_TIMEOUT};
 use std::{
     collections::{HashMap, LinkedList},
     future::Future,
@@ -17,8 +17,13 @@ use std::{
         Arc, Mutex as StdMutex, RwLock as StdRwLock,
         atomic::{self, AtomicBool},
     },
+    time::Duration,
 };
-use tokio::{sync::OwnedSemaphorePermit, task};
+use tokio::{
+    sync::OwnedSemaphorePermit,
+    task,
+    time::{Instant, sleep_until},
+};
 
 #[cfg(target_family = "unix")]
 use crate::unix_sock::IpcServerConn;
@@ -130,12 +135,17 @@ impl ProtocolHandler {
     /// `chan`: Channel to send the message on.
     /// `msg`: Message to send.
     /// `session`: Session to use for sending.
-    async fn send_reply_msg(&self, msg: Message, session_key: &SessionKey) -> ah::Result<()> {
+    async fn send_reply_msg(
+        &self,
+        ipc_req_id: u64,
+        msg: Message,
+        session_key: &SessionKey,
+    ) -> ah::Result<()> {
         let payload = msg
             .serialize(session_key)
             .context("Serialize httun message")?;
 
-        self.ipc.send_reply(payload).await
+        self.ipc.send_reply(ipc_req_id, payload).await
     }
 
     /// Handle data communication from client to server.
@@ -189,7 +199,7 @@ impl ProtocolHandler {
     }
 
     /// Handle session initialization from server to client.
-    async fn handle_fromsrv_init(&self, payload: Vec<u8>) -> ah::Result<()> {
+    async fn handle_fromsrv_init(&self, ipc_req_id: u64, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
         let _session = chan.get_session_and_update_tx_sequence();
         let session_key = SessionKey::make_init(chan.user_shared_secret());
@@ -223,21 +233,26 @@ impl ProtocolHandler {
         let reply = Message::new(MsgType::Init, Operation::Init, reply_payload)
             .context("Make httun packet")?;
 
-        self.send_reply_msg(reply, &session_key).await?;
+        self.send_reply_msg(ipc_req_id, reply, &session_key).await?;
 
         Ok(())
     }
 
     /// Wait for data from the channel while watching the IPC connection.
-    /// Returns `None`, if the request was superseded by a newer IPC message.
+    /// Returns `None`, if the request was superseded by a newer IPC message
+    /// or if the R wait timed out. The front end has already given up
+    /// by then, so no reply must be sent (it would be stale).
     async fn recv_and_watch_ipc(
         &self,
         chan: &Channel,
         recv: impl Future<Output = ah::Result<Vec<u8>>>,
     ) -> ah::Result<Option<Vec<u8>>> {
         tokio::pin!(recv);
+        // Expire slightly before the front end does.
+        let deadline = Instant::now() + CHAN_R_TIMEOUT.saturating_sub(Duration::from_millis(100));
         loop {
             tokio::select! {
+                () = sleep_until(deadline) => return Ok(None),
                 res = &mut recv => return res.map(Some),
                 msg = self.ipc.recv() => match msg? {
                     IpcRxMessage::Keepalive => chan.log_activity(),
@@ -251,7 +266,7 @@ impl ProtocolHandler {
     }
 
     /// Handle data communication from server to client.
-    async fn handle_fromsrv_data(&self, payload: Vec<u8>) -> ah::Result<()> {
+    async fn handle_fromsrv_data(&self, ipc_req_id: u64, payload: Vec<u8>) -> ah::Result<()> {
         let chan = self.chan()?;
         let session = chan.get_session_and_update_tx_sequence();
         let Some(session_key) = &session.key else {
@@ -310,16 +325,16 @@ impl ProtocolHandler {
             Message::new(MsgType::Data, reply_oper, payload).context("Make httun packet")?;
         msg.set_sequence(session.sequence);
 
-        self.send_reply_msg(msg, session_key).await?;
+        self.send_reply_msg(ipc_req_id, msg, session_key).await?;
 
         Ok(())
     }
 
     /// Handle communication from server to client.
-    async fn handle_fromsrv(&self, payload: Vec<u8>) -> ah::Result<()> {
+    async fn handle_fromsrv(&self, ipc_req_id: u64, payload: Vec<u8>) -> ah::Result<()> {
         match Message::peek_type(&payload)? {
-            MsgType::Init => self.handle_fromsrv_init(payload).await,
-            MsgType::Data => self.handle_fromsrv_data(payload).await,
+            MsgType::Init => self.handle_fromsrv_init(ipc_req_id, payload).await,
+            MsgType::Data => self.handle_fromsrv_data(ipc_req_id, payload).await,
         }
     }
 
@@ -335,7 +350,9 @@ impl ProtocolHandler {
             };
             match msg {
                 IpcRxMessage::ToSrv(payload) => self.handle_tosrv(payload).await,
-                IpcRxMessage::ReqFromSrv(payload) => self.handle_fromsrv(payload).await,
+                IpcRxMessage::ReqFromSrv(ipc_req_id, payload) => {
+                    self.handle_fromsrv(ipc_req_id, payload).await
+                }
                 IpcRxMessage::Keepalive => {
                     let chan = self.chan()?;
                     chan.log_activity();

@@ -6,7 +6,10 @@ use crate::{IpcMessage, IpcMessageHeader, IpcOperation};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::{Config, ConfigChannel};
 use httun_util::{ChannelId, errors::DisconnectedError, header::HttpHeader, strings::Direction};
-use std::time::Duration;
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _},
     sync::Mutex,
@@ -22,7 +25,8 @@ pub enum IpcRxMessage {
     /// Data to the server.
     ToSrv(Vec<u8>),
     /// Request for data from the server.
-    ReqFromSrv(Vec<u8>),
+    /// Contains the request ID and the payload.
+    ReqFromSrv(u64, Vec<u8>),
     /// Keepalive message.
     Keepalive,
 }
@@ -35,6 +39,10 @@ pub struct IpcClientConn<R, W> {
     /// Reader and the buffer of partially received data.
     reader: Mutex<(R, Vec<u8>)>,
     writer: Mutex<W>,
+    /// Last used request ID (from server).
+    next_from_srv_req_id: AtomicU64,
+    /// Last used request ID (to server).
+    next_to_srv_req_id: AtomicU64,
 }
 
 impl<R, W> IpcClientConn<R, W>
@@ -49,6 +57,8 @@ where
             extra_headers: vec![],
             reader: Mutex::new((reader, vec![])),
             writer: Mutex::new(writer),
+            next_to_srv_req_id: AtomicU64::new(128),
+            next_from_srv_req_id: AtomicU64::new(128),
         };
 
         let msg = match dir {
@@ -84,7 +94,8 @@ where
 
     /// Send a payload to the server.
     pub async fn send(&self, payload: Vec<u8>) -> ah::Result<()> {
-        self.send_message(&IpcMessage::new_to_srv(self.chan_id, payload))
+        let req_id = self.next_to_srv_req_id.fetch_add(1, Ordering::Relaxed);
+        self.send_message(&IpcMessage::new_to_srv(self.chan_id, req_id, payload))
             .await
     }
 
@@ -96,14 +107,25 @@ where
 
     /// Request a response from the server.
     pub async fn recv(&self, payload: Vec<u8>) -> ah::Result<Vec<u8>> {
-        self.send_message(&IpcMessage::new_req_from_srv(self.chan_id, payload))
+        let req_id = self.next_from_srv_req_id.fetch_add(1, Ordering::Relaxed);
+        self.send_message(&IpcMessage::new_req_from_srv(self.chan_id, req_id, payload))
             .await?;
-        let msg = self.recv_message().await?;
-        match msg.op() {
-            IpcOperation::Close => return Err(err!("IPC client: Closed by server")),
-            IpcOperation::FromSrv => (),
-            op => return Err(err!("IPC client: Got unexpected operation: {op:?}")),
-        }
+        let msg = loop {
+            let msg = self.recv_message().await?;
+            match msg.op() {
+                IpcOperation::Close => return Err(err!("IPC client: Closed by server")),
+                IpcOperation::FromSrv => (),
+                op => return Err(err!("IPC client: Got unexpected operation: {op:?}")),
+            }
+            if msg.req_id() == req_id {
+                break msg;
+            }
+            // Late reply to an abandoned (timed out) request.
+            log::debug!(
+                "IPC client: Discarding stale reply (req_id {} != {req_id})",
+                msg.req_id()
+            );
+        };
         if msg.chan_id() != self.chan_id {
             return Err(err!(
                 "IPC client: Reply channel was '{}' instead of '{}'",
@@ -202,7 +224,9 @@ where
         let msg = self.recv_message().await?;
         match msg.op() {
             IpcOperation::ToSrv => Ok(IpcRxMessage::ToSrv(msg.into_payload())),
-            IpcOperation::ReqFromSrv => Ok(IpcRxMessage::ReqFromSrv(msg.into_payload())),
+            IpcOperation::ReqFromSrv => {
+                Ok(IpcRxMessage::ReqFromSrv(msg.req_id(), msg.into_payload()))
+            }
             IpcOperation::Keepalive => Ok(IpcRxMessage::Keepalive),
             IpcOperation::InitDirToSrv
             | IpcOperation::InitDirFromSrv
@@ -213,8 +237,8 @@ where
     }
 
     /// Send a reply to the client.
-    pub async fn send_reply(&self, payload: Vec<u8>) -> ah::Result<()> {
-        self.send(&IpcMessage::new_from_srv(self.chan_id(), payload))
+    pub async fn send_reply(&self, req_id: u64, payload: Vec<u8>) -> ah::Result<()> {
+        self.send(&IpcMessage::new_from_srv(self.chan_id(), req_id, payload))
             .await
     }
 
