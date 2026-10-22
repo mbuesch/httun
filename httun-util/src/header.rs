@@ -19,11 +19,7 @@ impl FromStr for HttpHeader {
 
     /// Creates a new `HttpHeader` from a string slice.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut s = s.split(':');
-        let Some(name) = s.next() else {
-            return Err(err!("Http header: Header name (before colon) missing."));
-        };
-        let Some(value) = s.next() else {
+        let Some((name, value)) = s.split_once(':') else {
             return Err(err!("Http header: Header value (after colon) missing."));
         };
         Ok(Self {
