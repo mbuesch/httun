@@ -54,7 +54,7 @@ impl<L: Log> Log for RateLimitedLogger<L> {
                 stamps.push_back(now).unwrap();
                 if stamps.len() > FILL_THRES.max(2) {
                     let durn = now - *stamps.front().unwrap();
-                    let rate = QLEN as f32 / durn.as_secs_f32();
+                    let rate = (stamps.len() - 1) as f32 / durn.as_secs_f32();
                     limited = rate > self.max_msg_per_second_rate;
                     let was_limited = self.limited.swap(limited, atomic::Ordering::Relaxed);
                     if !was_limited && limited {
