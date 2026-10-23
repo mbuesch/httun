@@ -6,8 +6,9 @@ use anyhow::{self as ah, Context as _, format_err as err};
 
 use std::os::unix::net::UnixListener;
 use std::{
-    mem::size_of_val,
+    mem::{offset_of, size_of_val},
     os::fd::{FromRawFd as _, RawFd},
+    sync::atomic::{AtomicBool, Ordering::SeqCst},
 };
 
 /// Check if the passed raw `fd` is a socket.
@@ -46,7 +47,7 @@ unsafe fn get_socket_type(fd: RawFd) -> Option<libc::c_int> {
         )
     };
 
-    if ret == 0 && len == sizeof_sotype as libc::socklen_t {
+    if ret == 0 && len >= sizeof_sotype as libc::socklen_t {
         Some(sotype)
     } else {
         None
@@ -57,19 +58,42 @@ unsafe fn get_socket_type(fd: RawFd) -> Option<libc::c_int> {
 ///
 /// SAFETY: The passed `fd` must be a socket `fd`.
 unsafe fn get_socket_family(fd: RawFd) -> Option<libc::c_int> {
-    // SAFETY: Initializing `libc::sockaddr` structure with zero is an allowed pattern.
-    let mut saddr: libc::sockaddr = unsafe { std::mem::zeroed() };
-    let sizeof_saddr: u32 = size_of_val(&saddr).try_into().expect("libc::sockaddr size");
+    // SAFETY: Initializing `libc::sockaddr_un` structure with zero is an allowed pattern.
+    // Use `libc::sockaddr_un` because its size is sufficient to hold all socket types.
+    let mut saddr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    let sizeof_saddr: u32 = size_of_val(&saddr).try_into().expect("libc::sockaddr_un");
     let mut len: libc::socklen_t = sizeof_saddr as _;
 
     // SAFETY: The `fd` is valid, `saddr` and `len` are initialized and valid.
-    let ret = unsafe { libc::getsockname(fd, &raw mut saddr, &raw mut len) };
+    let ret =
+        unsafe { libc::getsockname(fd, (&raw mut saddr).cast::<libc::sockaddr>(), &raw mut len) };
 
-    if ret == 0 && len >= sizeof_saddr as _ {
-        Some(saddr.sa_family.into())
+    let min_len = offset_of!(libc::sockaddr_un, sun_family) + size_of::<libc::sa_family_t>();
+    if ret == 0 && len as usize >= min_len {
+        Some(saddr.sun_family.into())
     } else {
         None
     }
+}
+
+/// Check if the stream socket `fd` is in the listening state.
+fn is_listening(fd: RawFd) -> bool {
+    let mut val: libc::c_int = 0;
+    let sizeof_val: u32 = size_of_val(&val).try_into().expect("libc::c_int size");
+    let mut len: libc::socklen_t = sizeof_val as _;
+
+    // SAFETY: The `fd` is valid, `val` and `len` are initialized and valid.
+    let ret = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_ACCEPTCONN,
+            (&raw mut val).cast(),
+            &raw mut len,
+        )
+    };
+
+    (ret == 0) && (len >= sizeof_val as libc::socklen_t) && (val != 0)
 }
 
 fn is_unix_socket(fd: RawFd) -> bool {
@@ -77,6 +101,7 @@ fn is_unix_socket(fd: RawFd) -> bool {
     unsafe {
         is_socket(fd)
             && get_socket_type(fd) == Some(libc::SOCK_STREAM)
+            && is_listening(fd)
             && get_socket_family(fd) == Some(libc::AF_UNIX)
     }
 }
@@ -91,10 +116,14 @@ pub enum SystemdSocket {
 
 impl SystemdSocket {
     /// Get all sockets from systemd.
-    ///
-    /// Reads the systemd socket activation environment without clearing it.
     #[allow(unused_mut)]
     pub fn get_all() -> ah::Result<Vec<SystemdSocket>> {
+        // This function can only be called once.
+        static ONCE: AtomicBool = AtomicBool::new(false);
+        if ONCE.fetch_or(true, SeqCst) {
+            return Err(err!("SystemdSocket::get_all() called twice"));
+        }
+
         let mut sockets = vec![];
         if sd_notify::booted().unwrap_or(false) {
             for fd in sd_notify::listen_fds().context("Systemd listen_fds")? {
@@ -116,7 +145,14 @@ impl SystemdSocket {
 
 /// Notify ready-status to systemd.
 pub fn systemd_notify_ready() -> ah::Result<()> {
+    // This function can only be called once.
+    static ONCE: AtomicBool = AtomicBool::new(false);
+    if ONCE.fetch_or(true, SeqCst) {
+        return Err(err!("systemd_notify_ready() called twice"));
+    }
+
     sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
+
     Ok(())
 }
 
