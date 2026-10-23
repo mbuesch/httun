@@ -61,7 +61,7 @@ unsafe fn get_socket_type(fd: RawFd) -> Option<libc::c_int> {
         )
     };
 
-    if ret == 0 && len >= sizeof_sotype {
+    if ret == 0 && len >= sizeof_sotype as libc::socklen_t {
         Some(sotype)
     } else {
         None
@@ -90,6 +90,26 @@ unsafe fn get_socket_family(fd: RawFd) -> Option<libc::c_int> {
     }
 }
 
+/// Check if the stream socket `fd` is in the listening state.
+fn is_listening(fd: RawFd) -> bool {
+    let mut val: libc::c_int = 0;
+    let sizeof_val: u32 = size_of_val(&val).try_into().expect("libc::c_int size");
+    let mut len: libc::socklen_t = sizeof_val as _;
+
+    // SAFETY: The `fd` is valid, `val` and `len` are initialized and valid.
+    let ret = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_ACCEPTCONN,
+            (&raw mut val).cast(),
+            &raw mut len,
+        )
+    };
+
+    (ret == 0) && (len >= sizeof_val as libc::socklen_t) && (val != 0)
+}
+
 fn is_tcp_socket(fd: RawFd) -> bool {
     // SAFETY: Check if `fd` is a socket before using the socket functions.
     unsafe {
@@ -104,6 +124,7 @@ fn is_unix_socket(fd: RawFd) -> bool {
     unsafe {
         is_socket(fd)
             && get_socket_type(fd) == Some(libc::SOCK_STREAM)
+            && is_listening(fd)
             && get_socket_family(fd) == Some(libc::AF_UNIX)
     }
 }
