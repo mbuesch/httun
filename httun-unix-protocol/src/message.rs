@@ -5,6 +5,9 @@
 use anyhow::{self as ah, format_err as err};
 use httun_util::{ChannelId, header::HttpHeader};
 
+/// IPC wire protocol version.
+const IPC_PROTOCOL_VERSION: u32 = 1;
+
 /// Header for a local IPC protocol message.
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
 pub struct IpcMessageHeader {
@@ -89,6 +92,7 @@ pub enum IpcOperation {
 /// This protocol is used for local IPC with `httun-server`.
 #[derive(Clone, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
 pub struct IpcMessage {
+    version: u32,
     /// Operation code.
     op: IpcOperation,
     /// Channel ID.
@@ -121,6 +125,7 @@ impl IpcMessage {
         payload: Vec<u8>,
     ) -> Self {
         Self {
+            version: IPC_PROTOCOL_VERSION,
             op,
             chan_id,
             req_id,
