@@ -239,6 +239,13 @@ install_httun_client()
             -o root -g root -m 0644 \
             "$basedir/httun-client/client.conf" \
             /opt/httun/etc/httun/client.conf
+
+        info "Re-generate the UUID"
+        local new_uuid="$("$target/httun-client" gen-uuid)"
+        [ -n "$new_uuid" ] || die "httun-client gen-uuid failed"
+        sed -i "s|^uuid = .*|$new_uuid|" \
+            /opt/httun/etc/httun/client.conf \
+            || die "Failed to replace uuid in client.conf"
     fi
 
     # httun-client binary
