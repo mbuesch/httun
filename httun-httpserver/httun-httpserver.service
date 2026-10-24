@@ -7,7 +7,7 @@ StartLimitIntervalSec=0
 Type=notify
 NotifyAccess=main
 ExecStartPre=/opt/httun/etc/httun/http-server-start-pre.sh
-ExecStart=/opt/httun/bin/httun-httpserver --user www-data --group www-data
+ExecStart=/opt/httun/bin/httun-httpserver --user=www-data --group=www-data
 ExecStartPost=/opt/httun/etc/httun/http-server-start-post.sh
 RuntimeDirectory=httun-httpserver
 RuntimeDirectoryMode=0755
