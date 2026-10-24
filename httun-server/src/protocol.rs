@@ -9,7 +9,11 @@ use httun_protocol::{
     InitPayload, KexPublic, Message, MsgType, Operation, SequenceType, SessionKey,
 };
 use httun_unix_protocol::IpcRxMessage;
-use httun_util::{ChannelId, errors::DisconnectedError, timeouts::CHAN_R_TIMEOUT};
+use httun_util::{
+    ChannelId,
+    errors::{DisconnectedError, InvalidMessageError},
+    timeouts::CHAN_R_TIMEOUT,
+};
 use std::{
     collections::{HashMap, LinkedList},
     future::Future,
@@ -47,6 +51,15 @@ pub struct ProtocolHandler {
     dead: AtomicBool,
     /// IPC message received while waiting for data, to be processed next.
     pending_rx: StdMutex<Option<IpcRxMessage>>,
+}
+
+/// Mark an error as caused by an invalid received message.
+fn invalid(e: ah::Error) -> ah::Error {
+    e.context(InvalidMessageError)
+}
+
+fn is_invalid(e: &ah::Error) -> bool {
+    e.downcast_ref::<InvalidMessageError>().is_some()
 }
 
 impl ProtocolHandler {
@@ -153,17 +166,18 @@ impl ProtocolHandler {
         let chan = self.chan()?;
         let session = chan.get_session_and_update_tx_sequence();
         let Some(session_key) = &session.key else {
-            return Err(err!("No session key in IPC ToSrv context"));
+            return Err(invalid(err!("No session key in IPC ToSrv context")));
         };
 
         log::debug!("{}: W direction packet received", chan.id());
 
-        let msg = Message::deserialize(payload, session_key)?;
+        let msg = Message::deserialize(payload, session_key).map_err(invalid)?;
         let oper = msg.oper();
 
         self.check_rx_sequence(&chan, &msg, SequenceType::B)
             .await
-            .context("rx sequence validation SequenceType::B")?;
+            .context("rx sequence validation SequenceType::B")
+            .map_err(invalid)?;
 
         match oper {
             Operation::L3ToSrv => {
@@ -183,7 +197,7 @@ impl ProtocolHandler {
                 chan.put_ping(msg.into_payload()).await;
             }
             _ => {
-                return Err(err!("Received {oper:?} in IPC ToSrv context"));
+                return Err(invalid(err!("Received {oper:?} in IPC ToSrv context")));
             }
         }
 
@@ -192,8 +206,8 @@ impl ProtocolHandler {
 
     /// Handle communication from client to server.
     async fn handle_tosrv(&self, payload: Vec<u8>) -> ah::Result<()> {
-        match Message::peek_type(&payload)? {
-            MsgType::Init => Err(err!("Received invalid ToSrv + MsgType::Init")),
+        match Message::peek_type(&payload).map_err(invalid)? {
+            MsgType::Init => Err(invalid(err!("Received invalid ToSrv + MsgType::Init"))),
             MsgType::Data => self.handle_tosrv_data(payload).await,
         }
     }
@@ -206,15 +220,16 @@ impl ProtocolHandler {
 
         log::trace!("{}: Session init packet received", chan.id());
 
-        let msg = Message::deserialize(payload, &session_key)?;
+        let msg = Message::deserialize(payload, &session_key).map_err(invalid)?;
         let oper = msg.oper();
 
         if oper != Operation::Init {
-            return Err(err!("Received {oper:?} in init context"));
+            return Err(invalid(err!("Received {oper:?} in init context")));
         }
 
-        let msg_payload =
-            InitPayload::deserialize(msg.payload()).context("Deserialize init payload")?;
+        let msg_payload = InitPayload::deserialize(msg.payload())
+            .context("Deserialize init payload")
+            .map_err(invalid)?;
 
         log::debug!(
             "{}: Session init from client {}",
@@ -270,17 +285,18 @@ impl ProtocolHandler {
         let chan = self.chan()?;
         let session = chan.get_session_and_update_tx_sequence();
         let Some(session_key) = &session.key else {
-            return Err(err!("No session key in IPC ReqFromSrv context"));
+            return Err(invalid(err!("No session key in IPC ReqFromSrv context")));
         };
 
         log::debug!("{}: R direction packet received", chan.id());
 
-        let msg = Message::deserialize(payload, session_key)?;
+        let msg = Message::deserialize(payload, session_key).map_err(invalid)?;
         let oper = msg.oper();
 
         self.check_rx_sequence(&chan, &msg, SequenceType::C)
             .await
-            .context("rx sequence validation SequenceType::C")?;
+            .context("rx sequence validation SequenceType::C")
+            .map_err(invalid)?;
 
         let (reply_oper, payload) = match oper {
             Operation::L3FromSrv => {
@@ -317,7 +333,7 @@ impl ProtocolHandler {
                 (Operation::TestFromSrv, data)
             }
             _ => {
-                return Err(err!("Received {oper:?} in IPC ReqFromSrv context"));
+                return Err(invalid(err!("Received {oper:?} in IPC ReqFromSrv context")));
             }
         };
 
@@ -332,7 +348,7 @@ impl ProtocolHandler {
 
     /// Handle communication from server to client.
     async fn handle_fromsrv(&self, ipc_req_id: u64, payload: Vec<u8>) -> ah::Result<()> {
-        match Message::peek_type(&payload)? {
+        match Message::peek_type(&payload).map_err(invalid)? {
             MsgType::Init => self.handle_fromsrv_init(ipc_req_id, payload).await,
             MsgType::Data => self.handle_fromsrv_data(ipc_req_id, payload).await,
         }
@@ -349,9 +365,24 @@ impl ProtocolHandler {
                 None => self.ipc.recv().await?,
             };
             match msg {
-                IpcRxMessage::ToSrv(payload) => self.handle_tosrv(payload).await,
+                IpcRxMessage::ToSrv(payload) => {
+                    match self.handle_tosrv(payload).await {
+                        Err(e) if is_invalid(&e) => {
+                            // The connection is shared with other requests. Don't close it.
+                            log::debug!("Dropping invalid W message: {e:?}");
+                            Ok(())
+                        }
+                        res => res,
+                    }
+                }
                 IpcRxMessage::ReqFromSrv(ipc_req_id, payload) => {
-                    self.handle_fromsrv(ipc_req_id, payload).await
+                    match self.handle_fromsrv(ipc_req_id, payload).await {
+                        Err(e) if is_invalid(&e) => {
+                            log::debug!("Rejecting invalid R message: {e:?}");
+                            self.ipc.send_reply_error(ipc_req_id).await
+                        }
+                        res => res,
+                    }
                 }
                 IpcRxMessage::Keepalive => {
                     let chan = self.chan()?;

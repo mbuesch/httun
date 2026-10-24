@@ -11,6 +11,7 @@ use httun_protocol::Message;
 use httun_unix_protocol::UNIX_SOCK;
 use httun_util::{
     ChannelId,
+    errors::RequestRejectedError,
     header::HttpHeader,
     query::Query,
     strings::{Direction, parse_path},
@@ -123,7 +124,10 @@ async fn recv_from_httun_server(
             extra_headers: conn.extra_headers().to_vec(),
         }),
         Err(e) => {
-            remove_connection(chan_id).await;
+            // A rejected request does not affect the shared connection.
+            if e.downcast_ref::<RequestRejectedError>().is_none() {
+                remove_connection(chan_id).await;
+            }
             Err(e)
         }
     }
@@ -314,6 +318,15 @@ pub async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
                         eprintln!("FCGI: HTTP-r: keepalive to server failed: {e:?}");
                     }
                     fcgi_response(&req, "408 Request Timeout", &[], None).await
+                }
+                Ok(Err(e)) if e.downcast_ref::<RequestRejectedError>().is_some() => {
+                    fcgi_response_error(
+                        &req,
+                        "400 Bad Request",
+                        &[],
+                        "FCGI: HTTP-r: Request rejected by server.",
+                    )
+                    .await
                 }
                 Ok(Err(e)) => {
                     eprintln!("FCGI: HTTP-r: recv from server failed: {e:?}");

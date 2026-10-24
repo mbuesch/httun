@@ -20,4 +20,12 @@ macro_rules! define_simple_error {
 // Client disconnected.
 define_simple_error!(DisconnectedError);
 
+// A received message was invalid or failed validation.
+// The connection is still usable.
+define_simple_error!(InvalidMessageError);
+
+// The server rejected a request as invalid.
+// The connection is still usable.
+define_simple_error!(RequestRejectedError);
+
 // vim: ts=4 sw=4 expandtab

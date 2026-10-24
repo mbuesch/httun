@@ -77,6 +77,9 @@ pub enum IpcOperation {
     /// From httun-server.
     FromSrv,
 
+    /// Request was rejected as invalid.
+    FromSrvError,
+
     /// Close the connection.
     Close,
 }
@@ -159,6 +162,11 @@ impl IpcMessage {
     /// Creates a new `FromSrv` message.
     pub fn new_from_srv(chan_id: ChannelId, req_id: u64, payload: Vec<u8>) -> Self {
         Self::new(IpcOperation::FromSrv, chan_id, req_id, vec![], payload)
+    }
+
+    /// Creates a new `FromSrvError` message.
+    pub fn new_from_srv_error(chan_id: ChannelId, req_id: u64) -> Self {
+        Self::new(IpcOperation::FromSrvError, chan_id, req_id, vec![], vec![])
     }
 
     /// Creates a new `Close` message.

@@ -5,7 +5,12 @@
 use crate::{IpcMessage, IpcMessageHeader, IpcOperation};
 use anyhow::{self as ah, Context as _, format_err as err};
 use httun_conf::{Config, ConfigChannel};
-use httun_util::{ChannelId, errors::DisconnectedError, header::HttpHeader, strings::Direction};
+use httun_util::{
+    ChannelId,
+    errors::{DisconnectedError, RequestRejectedError},
+    header::HttpHeader,
+    strings::Direction,
+};
 use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
@@ -114,7 +119,7 @@ where
             let msg = self.recv_message().await?;
             match msg.op() {
                 IpcOperation::Close => return Err(err!("IPC client: Closed by server")),
-                IpcOperation::FromSrv => (),
+                IpcOperation::FromSrv | IpcOperation::FromSrvError => (),
                 op => return Err(err!("IPC client: Got unexpected operation: {op:?}")),
             }
             if msg.req_id() == req_id {
@@ -126,6 +131,9 @@ where
                 msg.req_id()
             );
         };
+        if msg.op() == IpcOperation::FromSrvError {
+            return Err(RequestRejectedError.into());
+        }
         if msg.chan_id() != self.chan_id {
             return Err(err!(
                 "IPC client: Reply channel was '{}' instead of '{}'",
@@ -232,6 +240,7 @@ where
             | IpcOperation::InitDirFromSrv
             | IpcOperation::InitReply
             | IpcOperation::FromSrv
+            | IpcOperation::FromSrvError
             | IpcOperation::Close => Err(err!("Received invalid IPC operation: {:?}", msg.op())),
         }
     }
@@ -239,6 +248,12 @@ where
     /// Send a reply to the client.
     pub async fn send_reply(&self, req_id: u64, payload: Vec<u8>) -> ah::Result<()> {
         self.send(&IpcMessage::new_from_srv(self.chan_id(), req_id, payload))
+            .await
+    }
+
+    /// Reject a request.
+    pub async fn send_reply_error(&self, req_id: u64) -> ah::Result<()> {
+        self.send(&IpcMessage::new_from_srv_error(self.chan_id(), req_id))
             .await
     }
 
@@ -291,7 +306,10 @@ where
             }
             Some(Direction::R) => matches!(
                 msg.op(),
-                IpcOperation::InitReply | IpcOperation::FromSrv | IpcOperation::Close
+                IpcOperation::InitReply
+                    | IpcOperation::FromSrv
+                    | IpcOperation::FromSrvError
+                    | IpcOperation::Close
             ),
         };
         if !allowed {
