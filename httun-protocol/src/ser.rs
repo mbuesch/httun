@@ -42,6 +42,11 @@ impl Ser {
     }
 
     #[inline]
+    pub fn push_u32(&mut self, data: u32) -> ah::Result<()> {
+        self.push(&data.to_be_bytes())
+    }
+
+    #[inline]
     pub fn push_u64(&mut self, data: u64) -> ah::Result<()> {
         self.push(&data.to_be_bytes())
     }
@@ -122,6 +127,12 @@ impl<'a> De<'a> {
     pub fn pop_u16(&mut self) -> ah::Result<u16> {
         self.pop(u16::BITS as usize / 8)
             .and_then(|v| Ok(u16::from_be_bytes(v.try_into()?)))
+    }
+
+    #[inline]
+    pub fn pop_u32(&mut self) -> ah::Result<u32> {
+        self.pop(u32::BITS as usize / 8)
+            .and_then(|v| Ok(u32::from_be_bytes(v.try_into()?)))
     }
 
     #[inline]

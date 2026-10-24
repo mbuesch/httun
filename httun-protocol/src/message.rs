@@ -10,6 +10,7 @@ use aes_gcm::aead::{AeadInOut as _, Generate as _, KeyInit as _};
 use anyhow::{self as ah, Context as _, format_err as err};
 use base64::prelude::*;
 use rand::prelude::*;
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 //TODO: Currently we only have a symmetric common secret.
@@ -358,28 +359,50 @@ impl Message {
 
 /// Payload for the `Operation::Init` message.
 pub struct InitPayload {
+    /// Protocol version.
+    version: u32,
     /// The sender's UUID.
     sender_uuid: Uuid,
     /// Public session key for DH key exchange.
     session_public_key: KexPublic,
+    /// Current time.
+    timestamp: u64,
 }
 
 impl InitPayload {
+    /// Current init payload protocol version.
+    const VERSION: u32 = 0;
+
+    /// Size of the version field.
+    const VERSION_LEN: usize = u32::BITS as usize / 8;
+
     /// Size of the UUID.
     const UUID_LEN: usize = Uuid::nil().as_bytes().len();
 
     /// Size of the session public key.
     const SESS_PUB_LEN: usize = KexPublic::byte_len();
 
+    /// Size of the timestamp field.
+    const TIMESTAMP_LEN: usize = u64::BITS as usize / 8;
+
     /// Whole payload length.
-    const LEN: usize = Self::UUID_LEN + Self::SESS_PUB_LEN;
+    const LEN: usize =
+        Self::VERSION_LEN + Self::UUID_LEN + Self::SESS_PUB_LEN + Self::TIMESTAMP_LEN;
 
     /// Create a new `InitPayload` from a session public key.
-    pub fn new(sender_uuid: Uuid, session_public_key: KexPublic) -> Self {
-        Self {
+    pub fn new(sender_uuid: Uuid, session_public_key: KexPublic) -> ah::Result<Self> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("System time UNIX_EPOCH")?
+            .as_millis()
+            .try_into()
+            .context("Timestamp conversion")?;
+        Ok(Self {
+            version: Self::VERSION,
             sender_uuid,
             session_public_key,
-        }
+            timestamp,
+        })
     }
 
     /// Get the sender UUID from this payload.
@@ -392,12 +415,32 @@ impl InitPayload {
         &self.session_public_key
     }
 
+    /// Get the timestamp from this payload.
+    pub fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    /// Check if the timestamp is within the allowed time window.
+    pub fn is_in_time_window(&self, window_millis: u64) -> bool {
+        let Ok(now) = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+        else {
+            return false;
+        };
+        let a = now > self.timestamp().saturating_add(window_millis.div_ceil(2));
+        let b = now < self.timestamp().saturating_sub(window_millis.div_ceil(2));
+        !(a || b)
+    }
+
     /// Serialize the payload to raw bytes.
     pub fn serialize(&self) -> ah::Result<Vec<u8>> {
         let mut ser = Ser::new_fixed_size(Self::LEN);
 
+        ser.push_u32(self.version)?;
         ser.push(self.sender_uuid.as_bytes())?;
         ser.push(self.session_public_key.as_raw_bytes())?;
+        ser.push_u64(self.timestamp)?;
 
         ser.into_vec()
     }
@@ -406,12 +449,19 @@ impl InitPayload {
     pub fn deserialize(buf: &[u8]) -> ah::Result<Self> {
         let mut de = De::new_fixed_size(buf, Self::LEN)?;
 
+        let version = de.pop_u32()?;
+        if version != Self::VERSION {
+            return Err(err!("Unsupported init payload version: {version}"));
+        }
         let sender_uuid = de.pop(Self::UUID_LEN)?;
         let session_public_key = de.pop(Self::SESS_PUB_LEN)?;
+        let timestamp = de.pop_u64()?;
 
         Ok(InitPayload {
+            version,
             sender_uuid: Uuid::from_bytes(sender_uuid.try_into()?),
             session_public_key: session_public_key.try_into()?,
+            timestamp,
         })
     }
 }

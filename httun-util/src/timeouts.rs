@@ -8,6 +8,9 @@ use std::time::Duration;
 /// The connection is closed after this timeout.
 pub const UNIX_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Initialization message allowed time window, in milliseconds.
+pub const INIT_WINDOW_MS: u64 = 60 * 10 * 1000;
+
 /// Channel read timeout, in seconds.
 /// This is the internal channel timeout, excluding HTTP timings (see `HTTP_R_TIMEOUT`).
 pub const CHAN_R_TIMEOUT_S: u64 = 5;

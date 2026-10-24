@@ -15,7 +15,7 @@ use httun_protocol::{
 use httun_util::{
     ChannelId,
     header::HttpHeader,
-    timeouts::{HTTP_R_TIMEOUT, HTTP_W_TIMEOUT},
+    timeouts::{HTTP_R_TIMEOUT, HTTP_W_TIMEOUT, INIT_WINDOW_MS},
 };
 use reqwest::{
     Client, StatusCode,
@@ -362,7 +362,8 @@ async fn get_session(
         let init_session_key = SessionKey::make_init(user_shared_secret);
         let kex = KeyExchange::new();
 
-        let msg_payload = InitPayload::new(*client_uuid, kex.public_key());
+        let msg_payload =
+            InitPayload::new(*client_uuid, kex.public_key()).context("Create init payload")?;
         let msg_payload = msg_payload.serialize().context("Make httun init payload")?;
         let msg = Message::new(MsgType::Init, Operation::Init, msg_payload)
             .context("Make httun packet")?;
@@ -410,6 +411,9 @@ async fn get_session(
         }
         let reply_payload =
             InitPayload::deserialize(reply.payload()).context("Deserialize Init payload")?;
+        if !reply_payload.is_in_time_window(INIT_WINDOW_MS) {
+            return Err(err!("Init payload timestamp out of allowed time window"));
+        }
 
         let session_shared_secret = kex.key_exchange(reply_payload.session_public_key());
         let session_key = SessionKey::make_session(user_shared_secret, &session_shared_secret);

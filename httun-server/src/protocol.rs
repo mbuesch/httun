@@ -12,7 +12,7 @@ use httun_unix_protocol::IpcRxMessage;
 use httun_util::{
     ChannelId,
     errors::{DisconnectedError, InvalidMessageError},
-    timeouts::CHAN_R_TIMEOUT,
+    timeouts::{CHAN_R_TIMEOUT, INIT_WINDOW_MS},
 };
 use std::{
     collections::{HashMap, LinkedList},
@@ -231,6 +231,12 @@ impl ProtocolHandler {
             .context("Deserialize init payload")
             .map_err(invalid)?;
 
+        if !msg_payload.is_in_time_window(INIT_WINDOW_MS) {
+            return Err(invalid(err!(
+                "Init payload timestamp out of allowed time window"
+            )));
+        }
+
         log::debug!(
             "{}: Session init from client {}",
             chan.id(),
@@ -241,7 +247,8 @@ impl ProtocolHandler {
             .create_new_session(&chan, msg_payload.session_public_key())
             .await;
 
-        let reply_payload = InitPayload::new(*self.conf.uuid(), local_public_key);
+        let reply_payload =
+            InitPayload::new(*self.conf.uuid(), local_public_key).context("Create init payload")?;
         let reply_payload = reply_payload
             .serialize()
             .context("Make httun init payload")?;
