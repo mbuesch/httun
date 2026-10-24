@@ -26,6 +26,7 @@ install_entry_checks server
 stop_services
 disable_services
 install_dirs
+install_httun_client
 install_httun_server
 do_systemctl daemon-reload
 enable_services_standalone
