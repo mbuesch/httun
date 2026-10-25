@@ -422,9 +422,9 @@ impl InitPayload {
 
     /// Check if the timestamp is within the allowed time window.
     pub fn is_in_time_window(&self, window_millis: u64) -> bool {
-        let Ok(now) = SystemTime::now()
+        let Ok(Ok(now)) = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
+            .map(|d| u64::try_from(d.as_millis()))
         else {
             return false;
         };
