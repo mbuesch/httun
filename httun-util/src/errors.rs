@@ -2,6 +2,7 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+#[macro_export]
 macro_rules! define_simple_error {
     ($name:ident) => {
         #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -16,6 +17,7 @@ macro_rules! define_simple_error {
         impl std::error::Error for $name {}
     };
 }
+pub use define_simple_error;
 
 // Client disconnected.
 define_simple_error!(DisconnectedError);

@@ -13,7 +13,7 @@ use httun_conf::{Config, HttpAuth};
 use httun_protocol::Message;
 use httun_util::{
     ChannelId,
-    errors::DisconnectedError,
+    errors::{DisconnectedError, define_simple_error},
     header::HttpHeader,
     net::tcp_send_all,
     query::Query,
@@ -40,6 +40,8 @@ use tokio::{
 const BUF_SIZE: usize = 1024 * (64 + 8);
 /// Next connection ID.
 static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(0);
+
+define_simple_error!(PacketTooLargeError);
 
 /// Receive buffer for HTTP packets.
 #[derive(Debug)]
@@ -106,10 +108,7 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
                 }
 
                 if buf.count >= buf.buf.len() {
-                    return Err(err!(
-                        "Received HTTP packet is too large. (>={})",
-                        buf.buf.len()
-                    ));
+                    return Err(PacketTooLargeError.into());
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
@@ -124,10 +123,7 @@ async fn recv_headers(stream: &TcpStream) -> ah::Result<RecvBuf> {
 async fn recv_rest(stream: &TcpStream, mut buf: RecvBuf) -> ah::Result<RecvBuf> {
     let full_len = buf.full_len()?;
     if full_len > buf.buf.len() {
-        return Err(err!(
-            "Received HTTP packet is too large. (>{})",
-            buf.buf.len()
-        ));
+        return Err(PacketTooLargeError.into());
     }
     if buf.count < full_len {
         loop {
@@ -232,6 +228,21 @@ async fn send_http_reply_badrequest(
     extra_headers: &[HttpHeader],
 ) -> ah::Result<()> {
     let status = "400 Bad Request";
+    let mime = "text/plain";
+    let mut extra_headers = extra_headers.to_vec();
+    extra_headers.push(HttpHeader::new(b"connection", b"close"));
+    send_http_reply(stream, status.as_bytes(), &extra_headers, status, mime).await
+}
+
+/// Send an HTTP 413 Content Too Large reply.
+///
+/// `stream` is the TCP stream to send the reply on.
+/// `extra_headers` are additional headers to include in the reply.
+async fn send_http_reply_too_large(
+    stream: &TcpStream,
+    extra_headers: &[HttpHeader],
+) -> ah::Result<()> {
+    let status = "413 Content Too Large";
     let mime = "text/plain";
     let mut extra_headers = extra_headers.to_vec();
     extra_headers.push(HttpHeader::new(b"connection", b"close"));
@@ -447,7 +458,21 @@ async fn rx_task(
                 conn.set_error(HttpError::PeerDisconnected);
                 return Ok(());
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                conn.set_error(HttpError::ProtocolError);
+                if e.downcast_ref::<PacketTooLargeError>().is_some() {
+                    log::debug!(
+                        "Connection {}: Received HTTP packet is too large. Sending http-413.",
+                        conn.id
+                    );
+                    if let Err(e) =
+                        send_http_reply_too_large(&conn.stream, &conn.extra_headers).await
+                    {
+                        log::warn!("Connection {} sending 413 failed: {e:?}", conn.id);
+                    }
+                }
+                return Err(e);
+            }
             Ok(b) => b,
         };
 
