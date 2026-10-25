@@ -67,7 +67,18 @@ impl RecvBuf {
     /// Interpret the content-length header and set `cont_len`.
     pub fn extract_content_length(&mut self) -> ah::Result<()> {
         debug_assert!(self.hdr_len > 0);
-        match find_hdr(&self.buf[..self.hdr_len], b"content-length") {
+
+        let buf = &self.buf[..self.hdr_len];
+
+        if let Some(enc) = find_hdr(buf, b"transfer-encoding")
+            && enc
+                .split(|&c| c == b',')
+                .any(|e| e.trim_ascii().eq_ignore_ascii_case(b"chunked"))
+        {
+            return Err(err!("'transfer-encoding: chunked' is not supported."));
+        }
+
+        match find_hdr(buf, b"content-length") {
             Some(len) => {
                 let Some(len) = atoi::<u64>(len.trim_ascii()) else {
                     return Err(err!("content-length header number decode error."));
