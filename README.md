@@ -81,11 +81,13 @@ This gives you the full flexibility to either
 
 See the [installation instructions](doc/INSTALL.md) for more information about how to build and install httun.
 
-# Examples
+# Example configurations
 
-If you want to set up an IP TUN tunnel, see the [TUN example](doc/EXAMPLE_TUN.md).
+Before attempting to configure httun, please take a look at the example configurations below.
 
-If you want to use a layer 7 socket based tunnel, see the [L7 example](doc/EXAMPLE_L7.md).
+- [IPv4/IPv6 tunnel](doc/examples/TUN.md).
+- [IPv4/IPv6 tunnel with Letmein protection](doc/examples/LETMEIN.md).
+- [Layer 7 socket tunnel](doc/examples/L7.md).
 
 # Configuring
 

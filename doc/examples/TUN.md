@@ -1,7 +1,13 @@
-# Example: Linux TUN based tunnel
+# Example: IPv4/IPv6 tunnel
 
-This example demonstrates how to configure a Layer 3 (IP) tunnel.
+This example demonstrates how to configure a Layer 3 (IPv4/IPv6) tunnel.
 This allows you to route IP traffic between the client and the server.
+
+## Overview
+
+This is an overview picture of the IPv4/IPv6 tunnel setup:
+
+![TUN](TUN.svg)
 
 ## Generate a common secret
 
