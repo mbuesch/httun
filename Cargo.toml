@@ -56,7 +56,7 @@ socket2 = { version = "0.6" }
 tokio = "1"
 tokio-fastcgi = "1"
 tokio-tun = "0.15"
-toml = "1.1"
+toml = "1"
 url = "2"
 uuid = "1"
 x25519-dalek = "3"
