@@ -13,7 +13,7 @@ pub const INIT_WINDOW_MS: u64 = 60 * 10 * 1000;
 
 /// Channel read timeout, in seconds.
 /// This is the internal channel timeout, excluding HTTP timings (see `HTTP_R_TIMEOUT`).
-pub const CHAN_R_TIMEOUT_S: u64 = 5;
+pub const CHAN_R_TIMEOUT_S: u64 = 6;
 /// Channel read timeout.
 /// This is the internal channel timeout, excluding HTTP timings (see `HTTP_R_TIMEOUT`).
 pub const CHAN_R_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S);
@@ -25,10 +25,10 @@ pub const CHAN_ACTIVITY_TIMEOUT_S: i64 = 30;
 /// This is the external HTTP timeout, including internal channel timings.
 pub const HTTP_R_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S + 3);
 /// HTTP write timeout.
-pub const HTTP_W_TIMEOUT: Duration = Duration::from_secs(3);
+pub const HTTP_W_TIMEOUT: Duration = Duration::from_secs(6);
 /// HTTP TCP user timeout.
 /// See tcp (7) man page.
-pub const HTTP_TCP_USER_TIMEOUT: Duration = Duration::from_secs(2);
+pub const HTTP_TCP_USER_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// Standalone HTTP server pinning timeout.
 pub const HTTP_CHANNEL_PIN_TIMEOUT: Duration = Duration::from_secs(CHAN_R_TIMEOUT_S);
@@ -44,6 +44,6 @@ pub const L7_TX_TIMEOUT: Duration = Duration::from_secs(10);
 pub const L7_RX_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Timeout for receiving ping response.
-pub const PONG_RX_TIMEOUT: Duration = Duration::from_millis(1500);
+pub const PONG_RX_TIMEOUT: Duration = Duration::from_millis(2500);
 
 // vim: ts=4 sw=4 expandtab
