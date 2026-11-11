@@ -55,7 +55,7 @@ sha3 = "0.12"
 socket2 = { version = "0.6" }
 tokio = "1"
 tokio-fastcgi = "1"
-tokio-tun = "0.15"
+tokio-tun = "1"
 toml = "1"
 url = "2"
 uuid = "1"

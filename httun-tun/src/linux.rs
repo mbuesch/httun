@@ -25,6 +25,7 @@ impl TunHandler {
             .mtu(MTU)
             .owner(0)
             .group(0)
+            .close_on_exec()
             .up()
             .build()
             .context("Create tun interface (build)")?
@@ -37,14 +38,14 @@ impl TunHandler {
 
     /// Send a packet to the TUN interface.
     pub async fn send(&self, buf: &[u8]) -> ah::Result<()> {
-        self.tun.send_all(buf).await?;
+        self.tun.send(buf).await?;
         Ok(())
     }
 
     /// Receive a packet from the TUN interface.
     pub async fn recv(&self) -> ah::Result<Vec<u8>> {
         let mut data = vec![0; RX_BUF_SIZE];
-        let count = self.tun.recv(&mut data).await?;
+        let count = self.tun.recv(&mut data).await?.len();
         data.truncate(count);
         Ok(data)
     }
