@@ -38,6 +38,12 @@ const HTTP_RW_TRIES: usize = 3;
 /// Number of retries for session initialization.
 const SESSION_INIT_TRIES: usize = 5;
 
+fn retry_transport_error(mode: HttunClientMode, error: &reqwest::Error, tries: usize) -> bool {
+    mode == HttunClientMode::L3
+        && tries < HTTP_RW_TRIES
+        && (error.is_timeout() || error.is_connect())
+}
+
 /// Creates a new `reqwest::Client` instance for HTTP communication with common settings.
 fn make_client(
     user_agent: &str,
@@ -188,10 +194,8 @@ impl DirectionR {
                 HttunClientMode::L7 => Operation::L7FromSrv,
                 HttunClientMode::Test => Operation::TestFromSrv,
             };
-            let mut resp;
-
             let mut tries = 0;
-            'http: loop {
+            let data: Vec<u8> = 'http: loop {
                 if tries >= HTTP_RW_TRIES {
                     return Err(err!("httun HTTP-r: Maximum number of retries exceeded."));
                 }
@@ -210,12 +214,27 @@ impl DirectionR {
                 if let Some(http_auth) = &http_auth {
                     req = req.basic_auth(http_auth.user(), http_auth.password());
                 }
-                resp = req.send().await.context("httun HTTP-r send")?;
+                let resp = match req.send().await {
+                    Ok(resp) => resp,
+                    Err(e) if retry_transport_error(self.mode, &e, tries) => {
+                        log::warn!("HTTP-r request failed; retrying: {}", e.without_url());
+                        sleep(Duration::from_millis(100)).await;
+                        continue;
+                    }
+                    Err(e) => return Err(e.without_url()).context("httun HTTP-r send"),
+                };
 
                 match resp.status() {
-                    StatusCode::OK => {
-                        break 'http;
-                    }
+                    StatusCode::OK => match resp.bytes().await {
+                        Ok(data) => break 'http data.into(),
+                        Err(e) if retry_transport_error(self.mode, &e, tries) => {
+                            log::warn!("HTTP-r body failed; retrying: {}", e.without_url());
+                            sleep(Duration::from_millis(100)).await;
+                        }
+                        Err(e) => {
+                            return Err(e.without_url()).context("httun HTTP-r get body");
+                        }
+                    },
                     StatusCode::REQUEST_TIMEOUT => {
                         // This is normal behavior, if the inferface is idle.
                         tries = 0;
@@ -225,6 +244,9 @@ impl DirectionR {
                     | StatusCode::GATEWAY_TIMEOUT
                     | StatusCode::SERVICE_UNAVAILABLE
                     | StatusCode::TOO_MANY_REQUESTS => {
+                        if self.mode == HttunClientMode::L7 {
+                            return Err(err!("httun HTTP-r response: {}", resp.status()));
+                        }
                         // Slow retry.
                         sleep(Duration::from_millis(100)).await;
                     }
@@ -234,9 +256,8 @@ impl DirectionR {
                         return Err(err!("httun HTTP-r response: {status}"));
                     }
                 }
-            }
+            };
 
-            let data: Vec<u8> = resp.bytes().await.context("httun HTTP-r get body")?.into();
             if !data.is_empty() {
                 log::trace!("Received from HTTP-r");
 
@@ -308,19 +329,33 @@ impl DirectionW {
                 if let Some(http_auth) = &http_auth {
                     req = req.basic_auth(http_auth.user(), http_auth.password());
                 }
-                let resp = req.send().await.context("httun HTTP-w send")?;
+                let resp = match req.send().await {
+                    Ok(resp) => resp,
+                    Err(e) if retry_transport_error(self.mode, &e, tries) => {
+                        log::warn!("HTTP-w request failed; retrying: {}", e.without_url());
+                        sleep(Duration::from_millis(100)).await;
+                        continue;
+                    }
+                    Err(e) => return Err(e.without_url()).context("httun HTTP-w send"),
+                };
 
                 match resp.status() {
                     StatusCode::OK => {
                         break 'http;
                     }
                     StatusCode::REQUEST_TIMEOUT => {
+                        if self.mode == HttunClientMode::L7 {
+                            return Err(err!("httun HTTP-w response: {}", resp.status()));
+                        }
                         // Fast retry.
                     }
                     StatusCode::BAD_GATEWAY
                     | StatusCode::GATEWAY_TIMEOUT
                     | StatusCode::SERVICE_UNAVAILABLE
                     | StatusCode::TOO_MANY_REQUESTS => {
+                        if self.mode == HttunClientMode::L7 {
+                            return Err(err!("httun HTTP-w response: {}", resp.status()));
+                        }
                         // Slow retry.
                         sleep(Duration::from_millis(100)).await;
                     }

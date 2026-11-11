@@ -80,13 +80,13 @@ async fn local_tx(
 
         if payload.is_empty() {
             log::trace!("Local socket: Httun disconnected.");
-        } else {
-            log::trace!(
-                "Sending {} bytes from httun-server to local socket.",
-                payload.len()
-            );
-            tcp_send_all(&stream, &payload).await?;
+            return Err(DisconnectedError.into());
         }
+        log::trace!(
+            "Sending {} bytes from httun-server to local socket.",
+            payload.len()
+        );
+        tcp_send_all(&stream, &payload).await?;
     }
 }
 
@@ -109,6 +109,11 @@ impl LocalConn {
         target_addr: IpAddr,
         target_port: u16,
     ) -> ah::Result<()> {
+        let mut restart = comm.subscribe_restart();
+        let initial = *restart.borrow();
+        if initial.requested {
+            return Err(DisconnectedError.into());
+        }
         let mut rx_task = task::spawn({
             let stream = Arc::clone(&self.stream);
             let comm = Arc::clone(&comm);
@@ -123,6 +128,17 @@ impl LocalConn {
 
         let res = tokio::select! {
             biased;
+            () = async {
+                let _ = restart.wait_for(|state| {
+                    state.requested || state.generation != initial.generation
+                }).await;
+            } => {
+                rx_task.abort();
+                tx_task.abort();
+                let _ = rx_task.await;
+                let _ = tx_task.await;
+                return Err(DisconnectedError.into());
+            }
             ret = &mut rx_task => {
                 tx_task.abort();
                 let _ = tx_task.await;

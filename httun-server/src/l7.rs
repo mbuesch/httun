@@ -19,7 +19,7 @@ use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     net::{SocketAddr, TcpStream as StdTcpStream},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{self, AtomicU64},
     },
 };
@@ -144,6 +144,8 @@ pub struct L7State {
     connect_notify: Notify,
     /// Notify for disconnections.
     disconnect_notify: Notify,
+    /// Disconnect notification retained across cancelled long polls.
+    pending_timeout: Mutex<Option<SocketAddr>>,
     /// Address allowlist.
     allowlist: NetList,
     /// Address denylist.
@@ -181,6 +183,7 @@ impl L7State {
             last_activity: AtomicU64::new(NO_ACTIVITY),
             connect_notify: Notify::new(),
             disconnect_notify: Notify::new(),
+            pending_timeout: Mutex::new(None),
             allowlist,
             denylist,
         })
@@ -188,6 +191,7 @@ impl L7State {
 
     /// Do the actions required to create a new httun session.
     pub fn create_new_session(&self) {
+        *self.pending_timeout.lock().expect("Mutex poisoned") = None;
         self.disconnect(false);
     }
 
@@ -287,12 +291,21 @@ impl L7State {
     /// Receive data from the remote target.
     pub async fn recv(&self) -> ah::Result<Vec<u8>> {
         'a: loop {
+            let timed_out = self.pending_timeout.lock().expect("Mutex poisoned").take();
+            if let Some(remote_addr) = timed_out {
+                return L7Container::new(remote_addr, vec![])
+                    .serialize()
+                    .context("L7 packing");
+            }
             let stream = self.stream.load();
 
             // There is no connection yet. Wait for a connection.
             if stream.is_none() {
                 drop(stream);
-                self.connect_notify.notified().await;
+                tokio::select! {
+                    () = self.connect_notify.notified() => (),
+                    () = self.disconnect_notify.notified() => (),
+                }
                 continue 'a;
             }
 
@@ -366,6 +379,9 @@ impl L7State {
             self.last_activity
                 .store(NO_ACTIVITY, atomic::Ordering::Relaxed);
             log::debug!("Socket timeout.");
+            if let Some(stream) = self.stream.load().as_ref() {
+                *self.pending_timeout.lock().expect("Mutex poisoned") = Some(*stream.remote());
+            }
             self.disconnect(false);
         }
     }

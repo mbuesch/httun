@@ -72,15 +72,24 @@ impl<T, const SIZE: usize> CommDeque<T, SIZE> {
 }
 
 /// Communication between httun-client's async tasks.
+#[derive(Clone, Copy)]
+pub struct RestartState {
+    pub requested: bool,
+    pub generation: u64,
+}
+
 pub struct AsyncTaskComm {
     from_httun: CommDeque<Message, COMM_DEQUE_SIZE_FROM_HTTUN>,
     to_httun: CommDeque<Message, COMM_DEQUE_SIZE_TO_HTTUN>,
-    restart_watch: watch::Sender<bool>,
+    restart_watch: watch::Sender<RestartState>,
 }
 
 impl AsyncTaskComm {
     pub fn new() -> Self {
-        let (restart_watch, _) = watch::channel(true);
+        let (restart_watch, _) = watch::channel(RestartState {
+            requested: true,
+            generation: 0,
+        });
         Self {
             from_httun: CommDeque::new(),
             to_httun: CommDeque::new(),
@@ -110,20 +119,38 @@ impl AsyncTaskComm {
     }
 
     pub fn set_restart_request(&self) {
-        self.restart_watch.send_replace(true);
+        self.restart_watch.send_modify(|state| {
+            if !state.requested {
+                state.generation = state.generation.wrapping_add(1);
+                state.requested = true;
+            }
+        });
     }
 
     pub async fn request_restart(&self) {
         self.set_restart_request();
-        let _ = self.restart_watch.subscribe().wait_for(|r| !*r).await;
+        let _ = self
+            .restart_watch
+            .subscribe()
+            .wait_for(|state| !state.requested)
+            .await;
     }
 
     pub async fn wait_for_restart_request(&self) {
-        let _ = self.restart_watch.subscribe().wait_for(|r| *r).await;
+        let _ = self
+            .restart_watch
+            .subscribe()
+            .wait_for(|state| state.requested)
+            .await;
+    }
+
+    pub fn subscribe_restart(&self) -> watch::Receiver<RestartState> {
+        self.restart_watch.subscribe()
     }
 
     pub fn notify_restart_done(&self) {
-        self.restart_watch.send_replace(false);
+        self.restart_watch
+            .send_modify(|state| state.requested = false);
     }
 }
 
