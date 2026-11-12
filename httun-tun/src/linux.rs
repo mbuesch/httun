@@ -6,7 +6,11 @@ use anyhow::{self as ah, Context as _};
 use tokio_tun::Tun;
 
 /// Maximum transmission unit (MTU) size for the TUN interface.
-const MTU: i32 = 1024 * 62;
+pub const MAX_MTU: i32 = 1024 * 62;
+/// Minimum transmission unit (MTU) size for the TUN interface.
+pub const MIN_MTU: i32 = 64;
+/// Default transmission unit (MTU) size for the TUN interface.
+pub const DEFAULT_MTU: i32 = MAX_MTU;
 /// Receive buffer size for the TUN interface.
 const RX_BUF_SIZE: usize = 1024 * 64;
 
@@ -19,10 +23,13 @@ impl TunHandler {
     /// Create a new TUN interface.
     ///
     /// The `name` parameter specifies the name of the TUN interface (e.g., "tun0").
-    pub async fn new(name: &str) -> ah::Result<Self> {
+    ///
+    /// The `mtu` parameter specifies the maximum transmission unit (MTU) size for the TUN interface.
+    /// If `None`, the default MTU is used.
+    pub async fn new(name: &str, mtu: Option<i32>) -> ah::Result<Self> {
         let tun: Tun = Tun::builder()
             .name(name)
-            .mtu(MTU)
+            .mtu(mtu.unwrap_or(DEFAULT_MTU).clamp(MIN_MTU, MAX_MTU))
             .owner(0)
             .group(0)
             .close_on_exec()

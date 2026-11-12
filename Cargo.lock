@@ -952,6 +952,7 @@ dependencies = [
  "anyhow",
  "ctutils",
  "httun-protocol",
+ "httun-tun",
  "httun-util",
  "toml",
  "uuid",

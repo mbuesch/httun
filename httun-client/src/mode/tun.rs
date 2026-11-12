@@ -12,7 +12,7 @@ pub async fn run_mode_tun(
     httun_comm: Arc<AsyncTaskComm>,
     tun_name: &str,
     _conf: Arc<Config>,
-    _chan_conf: Arc<ConfigChannel>,
+    chan_conf: Arc<ConfigChannel>,
 ) -> ah::Result<()> {
     use crate::error_delay;
     use anyhow::Context as _;
@@ -20,7 +20,7 @@ pub async fn run_mode_tun(
     use tokio::task;
 
     let tun = Arc::new(
-        httun_tun::TunHandler::new(tun_name)
+        httun_tun::TunHandler::new(tun_name, chan_conf.mtu())
             .await
             .context("Create TUN interface")?,
     );

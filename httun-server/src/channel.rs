@@ -290,7 +290,7 @@ impl Channels {
             #[cfg(all(feature = "tun", target_os = "linux"))]
             let tun = if let Some(tun_name) = chan_conf.tun() {
                 Some(
-                    TunHandler::new(tun_name)
+                    TunHandler::new(tun_name, chan_conf.mtu())
                         .await
                         .context("Tun interface init")?,
                 )

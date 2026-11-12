@@ -8,6 +8,6 @@
 mod linux;
 
 #[cfg(target_os = "linux")]
-pub use crate::linux::TunHandler;
+pub use crate::linux::{DEFAULT_MTU, MAX_MTU, MIN_MTU, TunHandler};
 
 // vim: ts=4 sw=4 expandtab

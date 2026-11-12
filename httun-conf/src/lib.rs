@@ -5,6 +5,7 @@
 use anyhow::{self as ah, Context as _, format_err as err};
 use ctutils::CtEq as _;
 use httun_protocol::UserSharedSecret;
+use httun_tun::{MAX_MTU, MIN_MTU};
 use httun_util::{ChannelId, header::HttpHeader, strings::hex};
 use std::{
     collections::HashSet,
@@ -366,6 +367,7 @@ pub struct ConfigChannel {
     shared_secret: UserSharedSecret,
     tun: Option<String>,
     l7_tunnel: Option<ConfigL7Tunnel>,
+    mtu: Option<i32>,
     http: ConfigChannelHttp,
 }
 
@@ -380,6 +382,7 @@ impl Default for ConfigChannel {
             shared_secret: UserSharedSecret::random(),
             tun: Default::default(),
             l7_tunnel: Default::default(),
+            mtu: Default::default(),
             http: Default::default(),
         }
     }
@@ -465,6 +468,20 @@ impl TryFrom<&toml::Value> for ConfigChannel {
             this.l7_tunnel = Some(ConfigL7Tunnel::try_from(v)?);
         }
 
+        if let Some(v) = table.get("mtu") {
+            let mtu = v
+                .as_integer()
+                .ok_or_else(|| err!("channel: 'mtu' must be an integer"))?
+                .try_into()
+                .map_err(|_| err!("channel: 'mtu' must be between {MIN_MTU} and {MAX_MTU}"))?;
+            if !(MIN_MTU..=MAX_MTU).contains(&mtu) {
+                return Err(err!(
+                    "channel: 'mtu' must be between {MIN_MTU} and {MAX_MTU}"
+                ));
+            }
+            this.mtu = Some(mtu);
+        }
+
         if let Some(v) = table.get("http") {
             this.http = ConfigChannelHttp::try_from(v)?;
         }
@@ -521,6 +538,10 @@ impl ConfigChannel {
 
     pub fn l7_tunnel(&self) -> Option<&ConfigL7Tunnel> {
         self.l7_tunnel.as_ref().filter(|&l| !l.disabled())
+    }
+
+    pub fn mtu(&self) -> Option<i32> {
+        self.mtu
     }
 
     pub fn http(&self) -> &ConfigChannelHttp {
