@@ -4,10 +4,16 @@
 
 use crate::async_task_comm::AsyncTaskComm;
 use anyhow as ah;
+use httun_conf::{Config, ConfigChannel};
 use std::sync::Arc;
 
 #[cfg(all(feature = "tun", target_os = "linux"))]
-pub async fn run_mode_tun(httun_comm: Arc<AsyncTaskComm>, tun_name: &str) -> ah::Result<()> {
+pub async fn run_mode_tun(
+    httun_comm: Arc<AsyncTaskComm>,
+    tun_name: &str,
+    _conf: Arc<Config>,
+    _chan_conf: Arc<ConfigChannel>,
+) -> ah::Result<()> {
     use crate::error_delay;
     use anyhow::Context as _;
     use httun_protocol::{Message, MsgType, Operation};
@@ -73,8 +79,13 @@ pub async fn run_mode_tun(httun_comm: Arc<AsyncTaskComm>, tun_name: &str) -> ah:
 }
 
 #[cfg(not(all(feature = "tun", target_os = "linux")))]
-pub async fn run_mode_tun(_httun_comm: Arc<AsyncTaskComm>, _tun_name: &str) -> ah::Result<()> {
-    Err(ah::format_err!("TUN is support is disabled"))
+pub async fn run_mode_tun(
+    _httun_comm: Arc<AsyncTaskComm>,
+    _tun_name: &str,
+    _conf: Arc<Config>,
+    _chan_conf: Arc<ConfigChannel>,
+) -> ah::Result<()> {
+    Err(ah::format_err!("TUN support is disabled"))
 }
 
 // vim: ts=4 sw=4 expandtab

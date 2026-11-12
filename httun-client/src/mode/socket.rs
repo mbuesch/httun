@@ -8,6 +8,7 @@ use crate::{
     resolver::{ResMode, resolve},
 };
 use anyhow::{self as ah, Context as _, format_err as err};
+use httun_conf::{Config, ConfigChannel};
 use httun_util::errors::DisconnectedError;
 use std::sync::Arc;
 use tokio::{
@@ -42,6 +43,8 @@ pub async fn run_mode_socket(
     target: &str,
     res_mode: ResMode,
     local_port: u16,
+    _conf: Arc<Config>,
+    _chan_conf: Arc<ConfigChannel>,
 ) -> ah::Result<()> {
     let (target_host, target_port) =
         split_host_port_string(target).context("Parse target address")?;

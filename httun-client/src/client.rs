@@ -122,7 +122,7 @@ macro_rules! define_direction {
         struct $struct {
             #[allow(dead_code)]
             conf: Arc<Config>,
-            chan_conf: ConfigChannel,
+            chan_conf: Arc<ConfigChannel>,
             url: String,
             #[allow(dead_code)]
             mode: HttunClientMode,
@@ -135,7 +135,7 @@ macro_rules! define_direction {
         impl $struct {
             fn new(
                 conf: Arc<Config>,
-                chan_conf: ConfigChannel,
+                chan_conf: Arc<ConfigChannel>,
                 base_url: &str,
                 mode: HttunClientMode,
                 user_agent: Arc<String>,
@@ -467,6 +467,46 @@ pub enum HttunClientMode {
     Test,
 }
 
+/// Get a channel configuration.
+pub fn get_channel_conf<'a>(
+    conf: &'a Config,
+    base_url: &str,
+    channel_alias: Option<&str>,
+    chan_id: Option<ChannelId>,
+) -> ah::Result<&'a ConfigChannel> {
+    let chan_conf = if let Some(alias) = channel_alias {
+        // Get channel configuration by alias.
+        let Some(chan_conf) = conf.channel_by_alias(alias) else {
+            return Err(err!(
+                "Did not find a channel configuration with alias '{alias}'."
+            ));
+        };
+
+        let chan_id_conf = chan_conf.id();
+        if let Some(chan_id) = chan_id
+            && chan_id_conf != chan_id
+        {
+            return Err(err!(
+                "Given channel ID '{chan_id}' does not match \
+                     configured ID '{chan_id_conf}' for alias '{alias}'."
+            ));
+        }
+        chan_conf
+    } else {
+        let chan_id = chan_id.unwrap_or_default(); // Default to channel 0.
+
+        // Get channel configuration by URL.
+        let Some(chan_conf) = conf.channel_by_url(chan_id, base_url) else {
+            return Err(err!(
+                "Did not find a configuration for URL '{base_url}' \
+                     with channel id='{chan_id}'.",
+            ));
+        };
+        chan_conf
+    };
+    Ok(chan_conf)
+}
+
 /// The httun client.
 ///
 /// This struct manages the client-side of an httun tunnel. It handles session
@@ -474,7 +514,7 @@ pub enum HttunClientMode {
 pub struct HttunClient {
     base_url: String,
     conf: Arc<Config>,
-    chan_conf: ConfigChannel,
+    chan_conf: Arc<ConfigChannel>,
     r: Arc<DirectionR>,
     w: Arc<DirectionW>,
     user_agent: Arc<String>,
@@ -489,45 +529,12 @@ impl HttunClient {
     pub async fn connect(
         base_url: &str,
         res_mode: ResMode,
-        alias: Option<&str>,
-        chan_id: Option<ChannelId>,
         mode: HttunClientMode,
         user_agent: &str,
         extra_headers: Arc<[HttpHeader]>,
         conf: Arc<Config>,
+        chan_conf: Arc<ConfigChannel>,
     ) -> ah::Result<Self> {
-        // Get the channel configuration.
-        let chan_conf = if let Some(alias) = alias {
-            // Get channel configuration by alias.
-            let Some(chan_conf) = conf.channel_by_alias(alias) else {
-                return Err(err!(
-                    "Did not find a channel configuration with alias '{alias}'."
-                ));
-            };
-
-            let chan_id_conf = chan_conf.id();
-            if let Some(chan_id) = chan_id
-                && chan_id_conf != chan_id
-            {
-                return Err(err!(
-                    "Given channel ID '{chan_id}' does not match \
-                     configured ID '{chan_id_conf}' for alias '{alias}'."
-                ));
-            }
-            chan_conf
-        } else {
-            let chan_id = chan_id.unwrap_or_default(); // Default to channel 0.
-
-            // Get channel configuration by URL.
-            let Some(chan_conf) = conf.channel_by_url(chan_id, base_url) else {
-                return Err(err!(
-                    "Did not find a configuration for URL '{base_url}' \
-                     with channel id='{chan_id}'.",
-                ));
-            };
-            chan_conf
-        };
-
         // Try to resolve the server-url domain name (if any) into an IP address.
         let base_url = Url::parse(base_url).context("Parse server URL")?;
         let mut pinned_ip = None;
@@ -547,10 +554,10 @@ impl HttunClient {
         Ok(Self {
             base_url: base_url.to_string(),
             conf: Arc::clone(&conf),
-            chan_conf: chan_conf.clone(),
+            chan_conf: Arc::clone(&chan_conf),
             r: Arc::new(DirectionR::new(
                 Arc::clone(&conf),
-                chan_conf.clone(),
+                Arc::clone(&chan_conf),
                 base_url.as_str(),
                 mode,
                 Arc::clone(&user_agent),
@@ -559,7 +566,7 @@ impl HttunClient {
             )),
             w: Arc::new(DirectionW::new(
                 Arc::clone(&conf),
-                chan_conf.clone(),
+                Arc::clone(&chan_conf),
                 base_url.as_str(),
                 mode,
                 Arc::clone(&user_agent),

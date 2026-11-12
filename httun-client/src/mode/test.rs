@@ -4,6 +4,7 @@
 
 use crate::{async_task_comm::AsyncTaskComm, error_delay};
 use anyhow::{self as ah, format_err as err};
+use httun_conf::{Config, ConfigChannel};
 use httun_protocol::{Message, MsgType, Operation};
 use httun_util::{strings::hex, timeouts::PONG_RX_TIMEOUT};
 use movavg::MovAvg;
@@ -29,6 +30,8 @@ pub async fn run_mode_test(
     httun_comm: Arc<AsyncTaskComm>,
     period_secs: f32,
     duration_secs: Option<f32>,
+    _conf: Arc<Config>,
+    _chan_conf: Arc<ConfigChannel>,
 ) -> ah::Result<()> {
     // Spawn task: Test handler.
     task::spawn({

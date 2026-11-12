@@ -13,7 +13,7 @@ mod resolver;
 
 use crate::{
     async_task_comm::AsyncTaskComm,
-    client::{HttunClient, HttunClientMode},
+    client::{HttunClient, HttunClientMode, get_channel_conf},
     error_throttle::ErrorThrottle,
     mode::{
         generate::{run_mode_genkey, run_mode_genuuid},
@@ -227,9 +227,22 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     // Initialize communication between the async tasks.
     let task_comm = Arc::new(AsyncTaskComm::new());
 
+    // Get the channel configuration.
+    let chan_conf = Arc::new(
+        get_channel_conf(
+            &conf,
+            opts.server_url.as_ref().expect("opts.server_url is None"),
+            opts.alias.as_deref(),
+            opts.channel,
+        )?
+        .clone(),
+    );
+
     // Spawn task: httun client handler.
     task::spawn({
         let opts = Arc::clone(&opts);
+        let conf = Arc::clone(&conf);
+        let chan_conf = Arc::clone(&chan_conf);
         let exit_tx = Arc::clone(&exit_tx);
         let task_comm = Arc::clone(&task_comm);
 
@@ -247,12 +260,11 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
             let mut client = match HttunClient::connect(
                 opts.server_url.as_ref().expect("opts.server_url is None"),
                 res_mode,
-                opts.alias.as_deref(),
-                opts.channel,
                 client_mode,
                 &opts.user_agent,
                 (&*opts.extra_headers).into(),
                 Arc::clone(&conf),
+                Arc::clone(&chan_conf),
             )
             .await
             .context("Connect to httun server (FCGI)")
@@ -281,13 +293,22 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     // Spawn task: Mode handler.
     task::spawn({
         let opts = Arc::clone(&opts);
+        let conf = Arc::clone(&conf);
+        let chan_conf = Arc::clone(&chan_conf);
         let exit_tx = Arc::clone(&exit_tx);
         let task_comm = Arc::clone(&task_comm);
 
         async move {
             match &opts.mode {
                 Some(Mode::Tun { tun }) => {
-                    if let Err(e) = run_mode_tun(Arc::clone(&task_comm), tun).await {
+                    if let Err(e) = run_mode_tun(
+                        Arc::clone(&task_comm),
+                        tun,
+                        Arc::clone(&conf),
+                        Arc::clone(&chan_conf),
+                    )
+                    .await
+                    {
                         let _ = exit_tx.send(Err(e)).await;
                     }
                 }
@@ -298,6 +319,8 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                         target,
                         res_mode,
                         *local_port,
+                        Arc::clone(&conf),
+                        Arc::clone(&chan_conf),
                     )
                     .await
                     {
@@ -310,6 +333,8 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
                         Arc::clone(&task_comm),
                         *period,
                         *duration,
+                        Arc::clone(&conf),
+                        Arc::clone(&chan_conf),
                     )
                     .await
                     {
