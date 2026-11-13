@@ -38,6 +38,7 @@ if [ "$release" = "release" -o "$release" = "both" ]; then
         cargo audit --deny warnings bin \
             target/release/httun-client \
             target/release/httun-fcgi \
+            target/release/httun-httpserver \
             target/release/httun-server \
             || die "Cargo audit failed."
     else
