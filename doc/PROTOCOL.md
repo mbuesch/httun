@@ -105,7 +105,7 @@ A 1-byte field that defines the type of the payload.
 #### httun Frame Element: Seq counter
 
 The sequence counter is a counter that is incremented once for every frame that is transmitted.
-It is guaranteed that no two frames contain the same sequence number during one a session.
+It is guaranteed that no two frames contain the same sequence number during one session.
 
 #### httun Frame Element: Payload len
 
@@ -117,7 +117,17 @@ If no payload is present, then this field is 0.
 The actual payload data.
 Whether a payload is present depends on the `Operation`.
 
-TODO describe payloads
+##### L3 Payload
+
+In the case of an L3 payload, the payload contains an IP packet that is to be forwarded through the tunnel.
+
+##### L7 Payload
+
+In the case of an L7 payload, the payload contains an L7 container frame that contains:
+
+- the destination address
+- the destination port
+- the user data
 
 #### httun Frame Element: Auth tag
 
