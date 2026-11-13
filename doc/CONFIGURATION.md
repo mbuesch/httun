@@ -22,6 +22,10 @@ Each channel represents a tunnel connection.
 - `shared-secret`:
    The pre-shared key for encryption and authentication.
    This must be the same on both the client and the server for a given channel.
+- `mtu`:
+   Maximum Transmission Unit (MTU) for the channel.
+   The MTU has a maximum of 63488 bytes, which is also the default value.
+   On high-latency or unreliable networks, you may want to reduce the MTU accordingly.
 - `http.basic-auth`:
    If the server requires HTTP Basic Authentication, you can configure the username and password here.
 - `http.ignore-tls-errors`:
@@ -45,6 +49,10 @@ The server configuration also uses `[[channels]]` sections to define the availab
 - `tun`:
    The name of the Linux TUN device to create for this channel (e.g., "httun-s-a").
    If this option is omitted, Layer 3 (IP) tunneling is disabled for this channel.
+- `mtu`:
+   Maximum Transmission Unit (MTU) for the channel.
+   The MTU has a maximum of 63488 bytes, which is also the default value.
+   On high-latency or unreliable networks, you may want to reduce the MTU accordingly.
 - `enable-test`:
    Allows the client to run a connection test using `httun-client test`.
 - `l7-tunnel`: This section configures Layer 7 (socket) tunneling.
