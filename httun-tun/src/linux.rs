@@ -2,15 +2,10 @@
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+use crate::{DEFAULT_MTU, MAX_MTU, MIN_MTU};
 use anyhow::{self as ah, Context as _};
 use tokio_tun::Tun;
 
-/// Maximum transmission unit (MTU) size for the TUN interface.
-pub const MAX_MTU: i32 = 1024 * 62;
-/// Minimum transmission unit (MTU) size for the TUN interface.
-pub const MIN_MTU: i32 = 64;
-/// Default transmission unit (MTU) size for the TUN interface.
-pub const DEFAULT_MTU: i32 = MAX_MTU;
 /// Receive buffer size for the TUN interface.
 const RX_BUF_SIZE: usize = 1024 * 64;
 
