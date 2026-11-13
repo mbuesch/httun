@@ -50,6 +50,75 @@ name = "mytun"
 shared-secret = "YOUR_GENERATED_SECRET_KEY_HERE"
 ```
 
+## Firewall configuration (nftables)
+
+The following `/etc/nftables.conf` defines chains for the Httun tunnel:
+
+```nft
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet nat {
+    chain POSTROUTING {
+        type nat hook postrouting priority srcnat; policy accept;
+
+        # NAT from httun tunnel to external internet.
+        # Please adjust this rule to match your tunnel IP/mask
+        # and output interface name.
+        ip saddr 10.10.10.0/24 oifname eth0 counter masquerade
+    }
+}
+
+table inet filter {
+    chain INPUT {
+        type filter hook input priority filter; policy drop;
+        iifname lo accept
+        ct state invalid counter drop
+        ct state related,established accept
+
+        # Insert your other input rules here ...
+
+        # Allow from httun tunnel to this machine.
+        # Please adjust this rule to match your tunnel interface name
+        # and your specific requirements (e.g. allow only certain ports)
+        iifname httun-s-mytun counter accept
+
+        # Insert your other input rules here ...
+
+        counter reject
+    }
+
+    chain FORWARD {
+        type filter hook forward priority filter; policy drop;
+        ct state invalid counter drop
+
+        # Insert your other forward rules here ...
+
+        # Allow to/from httun tunnel.
+        # Please adjust these rules to match your tunnel IP address/mask
+        # and your specific requirements (e.g. allow only certain ports)
+        ip daddr 10.10.10.0/24 ct state related,established counter accept
+        ip saddr 10.10.10.0/24 counter accept
+
+        # Insert your other forward rules here ...
+
+        counter reject
+    }
+
+    chain OUTPUT {
+        type filter hook output priority filter; policy drop;
+        oifname lo accept
+        ct state invalid counter drop
+        ct state related,established accept
+
+        # Insert your other output rules here ...
+
+        counter reject
+    }
+}
+```
+
 ## Running the server
 
 After (re-)starting the server's systemd unit, it will create a `httun-s-mytun` network interface.

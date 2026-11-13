@@ -34,7 +34,8 @@ table inet nat {
         type nat hook postrouting priority srcnat; policy accept;
 
         # NAT from httun tunnel to external internet.
-        # Please adjust this rule to match your tunnel IP/mask.
+        # Please adjust this rule to match your tunnel IP/mask
+        # and output interface name.
         ip saddr 10.10.10.0/24 oifname eth0 counter masquerade
     }
 }
