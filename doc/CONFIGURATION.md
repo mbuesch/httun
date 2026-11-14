@@ -28,6 +28,9 @@ Each channel represents a tunnel connection.
    On high-latency or unreliable networks, you may want to reduce the MTU accordingly.
 - `http.basic-auth`:
    If the server requires HTTP Basic Authentication, you can configure the username and password here.
+- `http.post`:
+   Set to `true` to use POST for all requests.
+   The default `false` uses GET for read-requests and POST for write-requests.
 - `http.ignore-tls-errors`:
    If you are using HTTPS with a self-signed certificate, you can set this to `true` to ignore TLS errors.
    This does not affect the security of the httun tunnel itself, as it uses its own end-to-end encryption.

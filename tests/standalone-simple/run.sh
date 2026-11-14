@@ -36,6 +36,15 @@ info "Running the test..."
     test \
     --duration 3.0
 
+info "Running the POST receive-channel test..."
+
+"$target_dir/httun-client" \
+    --config "$basedir/post-client.conf" \
+    --alias local \
+    http://localhost:8090 \
+    test \
+    --duration 3.0
+
 info "Exiting..."
 cleanup
 wait

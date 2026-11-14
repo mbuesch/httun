@@ -7,7 +7,7 @@ use crate::{
     resolver::{ResMode, resolve},
 };
 use anyhow::{self as ah, Context as _, format_err as err};
-use httun_conf::{Config, ConfigChannel};
+use httun_conf::{Config, ConfigChannel, HttpAuth};
 use httun_protocol::{
     InitPayload, KeyExchange, Message, MsgType, Operation, SequenceGenerator, SequenceType,
     SequenceValidator, SessionKey, UserSharedSecret, secure_random,
@@ -18,7 +18,7 @@ use httun_util::{
     timeouts::{HTTP_R_TIMEOUT, HTTP_W_TIMEOUT, INIT_WINDOW_MS},
 };
 use reqwest::{
-    Client, StatusCode,
+    Client, RequestBuilder, StatusCode,
     header::{HeaderMap, HeaderName, HeaderValue},
 };
 use std::{
@@ -117,6 +117,27 @@ fn format_url(base_url: &str, chan_id: ChannelId, direction: &str) -> String {
     format!("{base_url}/{chan_id}/{direction}")
 }
 
+fn rw_request(
+    client: &Client,
+    url: &str,
+    msg: Vec<u8>,
+    post: bool,
+    http_auth: Option<&HttpAuth>,
+) -> RequestBuilder {
+    let mut req = if post {
+        client
+            .post(url)
+            .header("content-type", "application/octet-stream")
+            .body(msg)
+    } else {
+        client.get(url).query(&[("m", Message::encode_b64u(&msg))])
+    };
+    if let Some(http_auth) = &http_auth {
+        req = req.basic_auth(http_auth.user(), http_auth.password());
+    }
+    req
+}
+
 macro_rules! define_direction {
     ($struct:ident, $urlpath:literal) => {
         struct $struct {
@@ -204,16 +225,13 @@ impl DirectionR {
                 let mut msg = Message::new(MsgType::Data, oper, vec![])?;
                 msg.set_sequence(tx_sequence_c.next());
                 let msg = msg
-                    .serialize_b64u(session_key)
+                    .serialize(session_key)
                     .context("httun HTTP-r message serialize")?;
 
                 log::trace!("Requesting from HTTP-r");
 
                 let url = format_url_serial(&self.url, self.serial.fetch_add(1, Relaxed));
-                let mut req = client.get(&url).query(&[("m", &msg)]);
-                if let Some(http_auth) = &http_auth {
-                    req = req.basic_auth(http_auth.user(), http_auth.password());
-                }
+                let req = rw_request(&client, &url, msg, self.chan_conf.http().post(), http_auth);
                 let resp = match req.send().await {
                     Ok(resp) => resp,
                     Err(e) if retry_transport_error(self.mode, &e, tries) => {
@@ -322,13 +340,7 @@ impl DirectionW {
                 tries += 1;
 
                 let url = format_url_serial(&self.url, self.serial.fetch_add(1, Relaxed));
-                let mut req = client
-                    .post(&url)
-                    .header("content-type", "application/octet-stream")
-                    .body(msg.clone());
-                if let Some(http_auth) = &http_auth {
-                    req = req.basic_auth(http_auth.user(), http_auth.password());
-                }
+                let req = rw_request(&client, &url, msg.clone(), true, http_auth);
                 let resp = match req.send().await {
                     Ok(resp) => resp,
                     Err(e) if retry_transport_error(self.mode, &e, tries) => {
@@ -403,17 +415,14 @@ async fn get_session(
         let msg = Message::new(MsgType::Init, Operation::Init, msg_payload)
             .context("Make httun packet")?;
         let msg = msg
-            .serialize_b64u(&init_session_key)
+            .serialize(&init_session_key)
             .context("httun session message serialize")?;
 
         let url = format_url_serial(
             &format_url(base_url, chan_conf.id(), "r"),
             u64::from_ne_bytes(secure_random()),
         );
-        let mut req = client.get(&url).query(&[("m", &msg)]);
-        if let Some(http_auth) = &http_auth {
-            req = req.basic_auth(http_auth.user(), http_auth.password());
-        }
+        let req = rw_request(&client, &url, msg, chan_conf.http().post(), http_auth);
         let resp = req.send().await.context("httun session send")?;
 
         match resp.status() {

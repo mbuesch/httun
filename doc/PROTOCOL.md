@@ -36,7 +36,7 @@ Only HTTP GET and POST requests are used.
 
 ### GET requests
 
-When requesting data from the server (data direction server -> client), then HTTP GET requests are used.
+By default, requests for data from the server (data direction server -> client, R channel) use HTTP GET.
 
 These GET requests still carry a small httun frame, though.
 As HTTP GET requests typically don't have a body part, this httun frame is encoded in the URL as a query parameter.
@@ -46,8 +46,10 @@ The encrypted httun frame is base64 encoded in the `m` query parameter's value.
 
 ### POST requests
 
-When sending data to the server (data direction client -> server), then HTTP POST requests are used.
+Requests sending data to the server (data direction client -> server, W channel) use HTTP POST.
+The R channel may also use POST, when configured on the client.
 The httun frame is put into the body of the POST request as `content-type: application/octet-stream`.
+For an R-channel POST with an empty body, the frame may instead be supplied in the `m` query parameter.
 
 ## httun frame
 

@@ -383,9 +383,9 @@ pub struct HttunHttpReq {
 impl HttunHttpReq {
     /// Extract the body from the query parameters if necessary.
     pub fn extract_body(&mut self) {
-        // In case of a GET request, the httun client puts
-        // the body into a b64 encoded query named 'm'.
-        if self.request == HttpRequest::Get
+        // A POST body takes precedence over an encoded query message.
+        if (self.request == HttpRequest::Get
+            || (self.direction == Direction::R && self.body.is_empty()))
             && let Some(qmsg) = self.query.get(b"m")
             && let Ok(qmsg) = Message::decode_b64u(qmsg)
         {

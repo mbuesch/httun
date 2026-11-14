@@ -279,6 +279,7 @@ pub struct ConfigChannelHttp {
     basic_auth: Option<HttpAuth>,
     allow_compression: bool,
     ignore_tls_errors: bool,
+    post: bool,
     extra_headers: Vec<HttpHeader>,
 }
 
@@ -288,6 +289,7 @@ impl Default for ConfigChannelHttp {
             basic_auth: None,
             allow_compression: false,
             ignore_tls_errors: true,
+            post: false,
             extra_headers: vec![],
         }
     }
@@ -317,6 +319,12 @@ impl TryFrom<&toml::Value> for ConfigChannelHttp {
             this.ignore_tls_errors = v
                 .as_bool()
                 .ok_or_else(|| err!("channel.http: 'ignore-tls-errors' must be a boolean"))?;
+        }
+
+        if let Some(v) = table.get("post") {
+            this.post = v
+                .as_bool()
+                .ok_or_else(|| err!("channel.http: 'post' must be a boolean"))?;
         }
 
         if let Some(v) = table.get("extra-headers") {
@@ -349,6 +357,10 @@ impl ConfigChannelHttp {
 
     pub fn ignore_tls_errors(&self) -> bool {
         self.ignore_tls_errors
+    }
+
+    pub fn post(&self) -> bool {
+        self.post
     }
 
     pub fn extra_headers(&self) -> &[HttpHeader] {

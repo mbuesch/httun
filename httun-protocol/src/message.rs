@@ -259,11 +259,6 @@ impl Message {
         ser.into_vec()
     }
 
-    /// Serialize message into base64url encoded string.
-    pub fn serialize_b64u(&self, key: &SessionKey) -> ah::Result<String> {
-        Ok(Self::encode_b64u(&self.serialize(key)?))
-    }
-
     /// Encode bytes into base64url string.
     pub fn encode_b64u(buf: &[u8]) -> String {
         BASE64_URL_SAFE_NO_PAD.encode(buf)
@@ -325,12 +320,6 @@ impl Message {
             sequence,
             payload,
         })
-    }
-
-    /// Deserialize message from base64url encoded string.
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn deserialize_b64u(buf: Vec<u8>, key: &SessionKey) -> ah::Result<Self> {
-        Self::deserialize(Self::decode_b64u(&buf)?, key)
     }
 
     /// Decode base64url string into bytes.

@@ -6,7 +6,7 @@ use crate::{
     fcgi::{FcgiRequest, FcgiRequestResult, FcgiRole},
     server_conn::{IpcClientConn, connect},
 };
-use anyhow::{self as ah, format_err as err};
+use anyhow::{self as ah, Context as _, format_err as err};
 use httun_protocol::Message;
 use httun_unix_protocol::UNIX_SOCK;
 use httun_util::{
@@ -227,6 +227,20 @@ async fn fcgi_response_error(
     .await
 }
 
+fn request_payload(
+    method: &[u8],
+    direction: Direction,
+    query: &Query,
+    body: Vec<u8>,
+) -> ah::Result<Vec<u8>> {
+    if (method == b"GET" || (direction == Direction::R && body.is_empty()))
+        && let Some(msg) = query.get(b"m")
+    {
+        return Message::decode_b64u(msg).context("Invalid query m= value");
+    }
+    Ok(body)
+}
+
 /// Handle `FastCGI` requests.
 ///
 /// This is the main entry point for the FCGI application.
@@ -239,8 +253,13 @@ pub async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
     let Some(method) = req.get_param("request_method") else {
         return fcgi_response_error(&req, "400 Bad Request", &[], "FCGI: No request_method.").await;
     };
-    let Some(query) = req.get_param("query_string") else {
-        return fcgi_response_error(&req, "400 Bad Request", &[], "FCGI: No query_string.").await;
+    let query = match req.get_param("query_string") {
+        Some(query) => query.as_slice(),
+        None if method.as_slice() == b"POST" => &[],
+        None => {
+            return fcgi_response_error(&req, "400 Bad Request", &[], "FCGI: No query_string.")
+                .await;
+        }
     };
     let Some(path_info) = req.get_param("path_info") else {
         return fcgi_response_error(&req, "400 Bad Request", &[], "FCGI: No path_info.").await;
@@ -259,29 +278,14 @@ pub async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
         Ok(p) => p,
     };
 
-    let query: Result<Query, _> = query.as_slice().try_into();
+    let query: Result<Query, _> = query.try_into();
     let Ok(query) = query else {
         return fcgi_response_error(&req, "400 Bad Request", &[], "FCGI: Invalid query string.")
             .await;
     };
 
-    let req_payload = match &method[..] {
-        b"GET" => {
-            if let Some(msg) = query.get(b"m") {
-                let Ok(msg) = Message::decode_b64u(msg) else {
-                    return fcgi_response_error(
-                        &req,
-                        "400 Bad Request",
-                        &[],
-                        "FCGI: Invalid query m= value.",
-                    )
-                    .await;
-                };
-                msg
-            } else {
-                vec![]
-            }
-        }
+    let body = match &method[..] {
+        b"GET" => vec![],
         b"POST" => {
             let mut buf = vec![];
             let Ok(count) = req.get_stdin().read_to_end(&mut buf) else {
@@ -305,6 +309,16 @@ pub async fn fcgi_handler(req: FcgiRequest<'_>) -> FcgiRequestResult {
             )
             .await;
         }
+    };
+
+    let Ok(req_payload) = request_payload(method, direction, &query, body) else {
+        return fcgi_response_error(
+            &req,
+            "400 Bad Request",
+            &[],
+            "FCGI: Invalid query m= value.",
+        )
+        .await;
     };
 
     match direction {
