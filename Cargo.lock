@@ -954,6 +954,7 @@ dependencies = [
  "httun-protocol",
  "httun-tun",
  "httun-util",
+ "log",
  "toml",
  "uuid",
 ]

@@ -14,6 +14,12 @@ use std::{
 };
 use uuid::Uuid;
 
+fn warn_unknown_options(table: &toml::Table, context: &str, known: &[&str]) {
+    for key in table.keys().filter(|key| !known.contains(&key.as_str())) {
+        log::warn!("Unrecognized configuration option '{context}.{key}'");
+    }
+}
+
 /// The default server configuration path, relative to the install prefix.
 #[cfg(not(target_os = "windows"))]
 const SERVER_CONF_PATH: &str = "etc/httun/server.conf";
@@ -66,6 +72,8 @@ impl TryFrom<&toml::Value> for HttpAuth {
         let table = value
             .as_table()
             .ok_or_else(|| err!("http-basic-auth: Expected a table"))?;
+
+        warn_unknown_options(table, "http.basic-auth", &["user", "password"]);
 
         this.user = table
             .get("user")
@@ -129,6 +137,8 @@ impl TryFrom<&toml::Value> for ConfigParametersReceive {
             .as_table()
             .ok_or_else(|| err!("parameters.receive: Expected a table"))?;
 
+        warn_unknown_options(table, "parameters.receive", &["window-length"]);
+
         if let Some(v) = table.get("window-length") {
             this.window_length = v
                 .as_integer()
@@ -170,6 +180,8 @@ impl TryFrom<&toml::Value> for ConfigParameters {
             .as_table()
             .ok_or_else(|| err!("parameters: Expected a table"))?;
 
+        warn_unknown_options(table, "parameters", &["receive"]);
+
         if let Some(v) = table.get("receive") {
             this.receive = ConfigParametersReceive::try_from(v)?;
         }
@@ -202,6 +214,17 @@ impl TryFrom<&toml::Value> for ConfigL7Tunnel {
         let table = value
             .as_table()
             .ok_or_else(|| err!("l7-tunnel: Expected a table"))?;
+
+        warn_unknown_options(
+            table,
+            "channel.l7-tunnel",
+            &[
+                "disabled",
+                "bind-to-interface",
+                "address-allowlist",
+                "address-denylist",
+            ],
+        );
 
         if let Some(v) = table.get("disabled") {
             this.disabled = v
@@ -304,6 +327,18 @@ impl TryFrom<&toml::Value> for ConfigChannelHttp {
         let table = value
             .as_table()
             .ok_or_else(|| err!("channel.http: Expected a table"))?;
+
+        warn_unknown_options(
+            table,
+            "channel.http",
+            &[
+                "basic-auth",
+                "allow-compression",
+                "ignore-tls-errors",
+                "post",
+                "extra-headers",
+            ],
+        );
 
         if let Some(v) = table.get("basic-auth") {
             this.basic_auth = Some(HttpAuth::try_from(v)?);
@@ -409,6 +444,23 @@ impl TryFrom<&toml::Value> for ConfigChannel {
         let table = value
             .as_table()
             .ok_or_else(|| err!("channel: Expected a table"))?;
+
+        warn_unknown_options(
+            table,
+            "channel",
+            &[
+                "disabled",
+                "enable-test",
+                "urls",
+                "alias",
+                "id",
+                "shared-secret",
+                "tun",
+                "l7-tunnel",
+                "mtu",
+                "http",
+            ],
+        );
 
         if let Some(v) = table.get("disabled") {
             this.disabled = v
@@ -576,6 +628,8 @@ impl TryFrom<&toml::Value> for Config {
         let mut this: Self = Default::default();
 
         let table = value.as_table().ok_or_else(|| err!("Expected a table"))?;
+
+        warn_unknown_options(table, "config", &["uuid", "parameters", "channels"]);
 
         if let Some(v) = table.get("uuid") {
             this.uuid = v
