@@ -81,7 +81,9 @@ pub struct RestartState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TunnelEvent {
+    #[allow(dead_code)]
     Connected,
+    #[allow(dead_code)]
     ReConnected,
 }
 
