@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use crate::async_task_comm::{AsyncTaskComm, TunnelEvent};
+use crate::async_task_comm::AsyncTaskComm;
 use anyhow as ah;
 use httun_conf::{Config, ConfigChannel};
 use std::sync::Arc;
@@ -14,6 +14,7 @@ pub async fn run_mode_tun(
     _conf: Arc<Config>,
     chan_conf: Arc<ConfigChannel>,
 ) -> ah::Result<()> {
+    use crate::async_task_comm::TunnelEvent;
     use crate::error_delay;
     use anyhow::Context as _;
     use httun_protocol::{Message, MsgType, Operation};
