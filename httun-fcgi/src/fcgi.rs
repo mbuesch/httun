@@ -1,5 +1,5 @@
 // -*- coding: utf-8 -*-
-// Copyright (C) 2025 Michael Büsch <m@bues.ch>
+// Copyright (c) 2025 - 2026 Michael Büsch <m@bues.ch>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::async_main::MAX_NUM_CONNECTIONS;

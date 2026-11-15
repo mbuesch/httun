@@ -1,6 +1,6 @@
 // -*- coding: utf-8 -*-
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-// Copyright (C) 2025 Michael Büsch <m@bues.ch>
+// Copyright (c) 2025 - 2026 Michael Büsch <m@bues.ch>
 
 use crate::{
     async_task_comm::AsyncTaskComm,
