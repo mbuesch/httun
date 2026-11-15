@@ -44,6 +44,7 @@ impl SequenceValidator {
     ///
     /// Returns an error if the message is invalid.
     pub fn check_recv_seq(&mut self, msg: &Message) -> ah::Result<()> {
+        let win_len: u64 = self.win_len.get().try_into()?;
         let sequence = msg.sequence();
 
         // Check the sequence flags.
@@ -53,31 +54,32 @@ impl SequenceValidator {
         }
         let sequence = sequence & SequenceGenerator::SEQ_MASK;
 
-        // Get the oldest sequence number in the window.
-        let oldest_seq = self.rx_seq.first().copied();
-
-        // Check if the message is older than the oldest sequence in the window.
-        if let Some(oldest_seq) = oldest_seq
-            && sequence <= oldest_seq
-        {
-            return Err(err!("Message is too old: {sequence} <= {oldest_seq}."));
-        }
-
         // Check for duplicate/replayed messages.
         if self.rx_seq.contains(&sequence) {
             return Err(err!("Message has already been received."));
         }
 
+        // Check for old messages that fall outside the sliding window.
+        // The sequence window is anchored at the newest received sequence,
+        // so that packets that arrive out of order remain valid.
+        if let Some(newest_seq) = self.rx_seq.last().copied() {
+            let window_start = newest_seq.saturating_sub(win_len.saturating_sub(1));
+            if sequence < window_start {
+                return Err(err!("Message is too old: {sequence} < {window_start}."));
+            }
+        }
+
         // Insert the sequence number into the sliding window.
         self.rx_seq.insert(sequence);
 
-        // Remove the oldest sequence number if the window is full.
-        if let Some(oldest_seq) = oldest_seq
-            && self.rx_seq.len() > self.win_len.into()
-        {
-            self.rx_seq.remove(&oldest_seq);
+        // Discard sequence numbers that have fallen outside the window.
+        if let Some(newest_seq) = self.rx_seq.last().copied() {
+            let window_start = newest_seq.saturating_sub(win_len.saturating_sub(1));
+            self.rx_seq.retain(|&seq| seq >= window_start);
         }
-        assert!(self.rx_seq.len() <= self.win_len.into());
+        while self.rx_seq.len() > self.win_len.into() {
+            self.rx_seq.pop_first();
+        }
 
         Ok(())
     }
@@ -142,6 +144,42 @@ impl SequenceGenerator {
         assert_ne!(seq & Self::SEQ_MASK, Self::SEQ_MASK);
 
         seq
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SequenceGenerator, SequenceType, SequenceValidator};
+    use crate::{Message, MsgType, Operation};
+    use std::num::NonZeroUsize;
+
+    fn message(sequence: u64) -> Message {
+        let mut msg = Message::new(MsgType::Data, Operation::TestToSrv, vec![]).unwrap();
+        msg.set_sequence(sequence);
+        msg
+    }
+
+    #[test]
+    fn accepts_packets_that_arrive_out_of_order_within_the_window() {
+        let mut validator = SequenceValidator::new(SequenceType::B, NonZeroUsize::new(4).unwrap());
+        let generator = SequenceGenerator::new(SequenceType::B);
+        let first = generator.next();
+        let second = generator.next();
+
+        validator.check_recv_seq(&message(second)).unwrap();
+        validator.check_recv_seq(&message(first)).unwrap();
+    }
+
+    #[test]
+    fn rejects_packets_older_than_the_window() {
+        let mut validator = SequenceValidator::new(SequenceType::B, NonZeroUsize::new(2).unwrap());
+        let generator = SequenceGenerator::new(SequenceType::B);
+        let first = generator.next();
+        let _second = generator.next();
+        let third = generator.next();
+
+        validator.check_recv_seq(&message(third)).unwrap();
+        assert!(validator.check_recv_seq(&message(first)).is_err());
     }
 }
 
