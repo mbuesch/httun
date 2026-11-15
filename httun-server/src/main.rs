@@ -53,7 +53,7 @@ use std::sync::atomic::{self, AtomicBool, AtomicU32};
 #[cfg(target_family = "unix")]
 use tokio::signal::unix::{SignalKind, signal};
 
-const WORKER_THREADS: usize = 6;
+const WORKER_THREADS: usize = 3;
 
 /// The web server's UID (for `FastCGI` socket ownership).
 #[cfg(target_family = "unix")]

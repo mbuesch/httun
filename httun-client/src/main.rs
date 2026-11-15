@@ -37,7 +37,7 @@ use tokio::{runtime, signal::ctrl_c, sync::mpsc, task, time};
 #[cfg(target_family = "unix")]
 use tokio::signal::unix::{SignalKind, signal};
 
-const WORKER_THREADS: usize = 6;
+const WORKER_THREADS: usize = 4;
 
 /// Connect to a httun tunnel server.
 #[derive(Parser, Debug, Clone)]

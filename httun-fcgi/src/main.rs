@@ -21,7 +21,7 @@ fn main() -> ah::Result<()> {
     {
         use anyhow::Context as _;
 
-        const WORKER_THREADS: usize = 6;
+        const WORKER_THREADS: usize = 3;
 
         tokio::runtime::Builder::new_multi_thread()
             .thread_keep_alive(std::time::Duration::from_secs(5))

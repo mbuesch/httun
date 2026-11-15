@@ -48,7 +48,7 @@ mod server_conn;
 #[cfg(target_os = "linux")]
 mod systemd;
 
-const WORKER_THREADS: usize = 4;
+const WORKER_THREADS: usize = 3;
 
 /// Drop root privileges.
 #[cfg(target_family = "unix")]
