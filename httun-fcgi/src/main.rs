@@ -20,11 +20,12 @@ fn main() -> ah::Result<()> {
     #[cfg(target_family = "unix")]
     {
         use anyhow::Context as _;
+        use std::time::Duration;
 
-        const WORKER_THREADS: usize = 3;
+        const WORKER_THREADS: usize = 2;
 
         tokio::runtime::Builder::new_multi_thread()
-            .thread_keep_alive(std::time::Duration::from_secs(5))
+            .thread_keep_alive(Duration::from_secs(5))
             .max_blocking_threads(WORKER_THREADS * 8)
             .worker_threads(WORKER_THREADS)
             .enable_all()

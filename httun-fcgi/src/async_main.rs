@@ -11,7 +11,7 @@ use std::{os::fd::AsRawFd as _, sync::Arc, time::Duration};
 use tokio::{
     signal::unix::{SignalKind, signal},
     sync::{self, Semaphore},
-    task,
+    task, time,
 };
 
 /// Maximum number of connections from the `FastCGI` server.
@@ -37,7 +37,7 @@ pub async fn async_main() -> ah::Result<()> {
     // Spawn task: Periodic task.
     task::spawn({
         async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(3));
+            let mut interval = time::interval(Duration::from_secs(1));
             loop {
                 interval.tick().await;
                 check_connection_timeouts().await;
