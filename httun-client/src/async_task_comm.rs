@@ -42,6 +42,7 @@ impl<T, const SIZE: usize> CommDeque<T, SIZE> {
     pub async fn clear(&self) {
         self.deque.lock().await.clear();
         self.clear_notification();
+        self.notify();
     }
 
     pub async fn put(&self, mut value: T) {
