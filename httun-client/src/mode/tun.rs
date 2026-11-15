@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (C) 2025 Michael Büsch <m@bues.ch>
 
-use crate::async_task_comm::AsyncTaskComm;
+use crate::async_task_comm::{AsyncTaskComm, TunnelEvent};
 use anyhow as ah;
 use httun_conf::{Config, ConfigChannel};
 use std::sync::Arc;
@@ -27,6 +27,7 @@ pub async fn run_mode_tun(
 
     // Start the tunnel.
     httun_comm.request_restart().await;
+    httun_comm.notify_tunnel_event(TunnelEvent::Connected);
 
     // Spawn task: TUN to HTTP.
     task::spawn({
@@ -43,6 +44,7 @@ pub async fn run_mode_tun(
                                 log::error!("Make httun packet failed: {e:?}");
                                 error_delay().await;
                                 httun_comm.request_restart().await;
+                                httun_comm.notify_tunnel_event(TunnelEvent::ReConnected);
                                 continue;
                             }
                         };
@@ -52,6 +54,7 @@ pub async fn run_mode_tun(
                         log::error!("Recv from TUN error: {e:?}");
                         error_delay().await;
                         httun_comm.request_restart().await;
+                        httun_comm.notify_tunnel_event(TunnelEvent::ReConnected);
                     }
                 }
             }
@@ -70,6 +73,7 @@ pub async fn run_mode_tun(
                     log::error!("Send to TUN error: {e:?}");
                     error_delay().await;
                     httun_comm.request_restart().await;
+                    httun_comm.notify_tunnel_event(TunnelEvent::ReConnected);
                 }
             }
         }

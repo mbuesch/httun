@@ -5,7 +5,7 @@
 use httun_protocol::Message;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use tokio::pin;
-use tokio::sync::{Mutex, Notify, watch};
+use tokio::sync::{Mutex, Notify, broadcast, watch};
 
 const COMM_DEQUE_SIZE_TO_HTTUN: usize = 1;
 const COMM_DEQUE_SIZE_FROM_HTTUN: usize = 16;
@@ -79,10 +79,17 @@ pub struct RestartState {
     pub generation: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TunnelEvent {
+    Connected,
+    ReConnected,
+}
+
 pub struct AsyncTaskComm {
     from_httun: CommDeque<Message, COMM_DEQUE_SIZE_FROM_HTTUN>,
     to_httun: CommDeque<Message, COMM_DEQUE_SIZE_TO_HTTUN>,
     restart_watch: watch::Sender<RestartState>,
+    tunnel_event: broadcast::Sender<TunnelEvent>,
 }
 
 impl AsyncTaskComm {
@@ -91,10 +98,12 @@ impl AsyncTaskComm {
             requested: true,
             generation: 0,
         });
+        let (tunnel_event, _) = broadcast::channel(1);
         Self {
             from_httun: CommDeque::new(),
             to_httun: CommDeque::new(),
             restart_watch,
+            tunnel_event,
         }
     }
 
@@ -152,6 +161,14 @@ impl AsyncTaskComm {
     pub fn notify_restart_done(&self) {
         self.restart_watch
             .send_modify(|state| state.requested = false);
+    }
+
+    pub fn notify_tunnel_event(&self, event: TunnelEvent) {
+        let _ = self.tunnel_event.send(event);
+    }
+
+    pub async fn recv_tunnel_event(&self) -> Option<TunnelEvent> {
+        self.tunnel_event.subscribe().recv().await.ok()
     }
 }
 

@@ -12,7 +12,7 @@ mod mode;
 mod resolver;
 
 use crate::{
-    async_task_comm::AsyncTaskComm,
+    async_task_comm::{AsyncTaskComm, TunnelEvent},
     client::{HttunClient, HttunClientMode, get_channel_conf},
     error_throttle::ErrorThrottle,
     mode::{
@@ -31,7 +31,7 @@ use httun_util::{
     header::HttpHeader,
     signal::{recv_signal, register_signal},
 };
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, process::Command, sync::Arc, time::Duration};
 use tokio::{runtime, signal::ctrl_c, sync::mpsc, task, time};
 
 #[cfg(target_family = "unix")]
@@ -93,6 +93,31 @@ struct Opts {
     /// See <https://crates.io/crates/tokio-console>
     #[arg(long, hide = true)]
     tokio_console: bool,
+
+    /// Run this command once after tunnel TUN interface is created
+    /// and has successfully been connected.
+    #[arg(long, value_name = "COMMAND")]
+    on_connected: Option<String>,
+
+    /// Argument to pass to the `--on-connected` command.
+    ///
+    /// This option can be specified multiple times to add multiple arguments.
+    #[arg(long = "on-connected-arg", value_name = "ARGS")]
+    on_connected_args: Vec<String>,
+
+    /// Run this command after each successful tunnel re-connection (e.g. after connection errors)
+    #[arg(long, value_name = "COMMAND")]
+    on_reconnected: Option<String>,
+
+    /// Argument to pass to the `--on-reconnected` command.
+    ///
+    /// This option can be specified multiple times to add multiple arguments.
+    #[arg(long = "on-reconnected-arg", value_name = "ARGS")]
+    on_reconnected_args: Vec<String>,
+
+    /// Run `--on-connected` and `--on-reconnected` in a shell.
+    #[arg(long)]
+    shell: bool,
 
     /// Show version information and exit.
     #[arg(long, short = 'v')]
@@ -177,6 +202,33 @@ pub async fn error_delay() {
     time::sleep(Duration::from_millis(100)).await;
 }
 
+async fn run_command(command: &str, args: &[String], shell: bool) -> ah::Result<()> {
+    let command = command.to_string();
+    let args = args.to_vec();
+    task::spawn_blocking(move || {
+        let status = if shell {
+            Command::new("/bin/sh")
+                .arg("-c")
+                .arg(&command)
+                .arg("sh")
+                .args(args)
+                .status()
+                .with_context(|| format!("Run command: {command:?}"))?
+        } else {
+            Command::new(&command)
+                .args(args)
+                .status()
+                .with_context(|| format!("Run command: {command:?}"))?
+        };
+        if status.success() {
+            Ok(())
+        } else {
+            Err(err!("'{command:?}' exited with status {status}"))
+        }
+    })
+    .await?
+}
+
 async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
     match opts.mode {
         Some(Mode::GenKey {}) => {
@@ -237,6 +289,40 @@ async fn async_main(opts: Arc<Opts>) -> ah::Result<()> {
         )?
         .clone(),
     );
+
+    // Spawn task: Tunnel event command handler.
+    task::spawn({
+        let on_connected = opts.on_connected.clone();
+        let on_connected_args = opts.on_connected_args.clone();
+        let on_reconnected = opts.on_reconnected.clone();
+        let on_reconnected_args = opts.on_reconnected_args.clone();
+        let shell = opts.shell;
+        let task_comm = Arc::clone(&task_comm);
+
+        async move {
+            loop {
+                match task_comm.recv_tunnel_event().await {
+                    None => error_delay().await,
+                    Some(TunnelEvent::Connected) => {
+                        if let Some(on_connected) = &on_connected
+                            && let Err(e) =
+                                run_command(on_connected, &on_connected_args, shell).await
+                        {
+                            log::error!("Run --on-connected command failed: {e:?}");
+                        }
+                    }
+                    Some(TunnelEvent::ReConnected) => {
+                        if let Some(on_reconnected) = &on_reconnected
+                            && let Err(e) =
+                                run_command(on_reconnected, &on_reconnected_args, shell).await
+                        {
+                            log::error!("Run --on-reconnected command failed: {e:?}");
+                        }
+                    }
+                }
+            }
+        }
+    });
 
     // Spawn task: httun client handler.
     task::spawn({
