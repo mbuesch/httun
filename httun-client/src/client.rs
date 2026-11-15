@@ -29,7 +29,11 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{sync::Notify, task, time::sleep};
+use tokio::{
+    sync::Notify,
+    task::{self, JoinSet},
+    time::sleep,
+};
 use url::{Host, Url};
 use uuid::Uuid;
 
@@ -37,6 +41,10 @@ use uuid::Uuid;
 const HTTP_RW_TRIES: usize = 3;
 /// Number of retries for session initialization.
 const SESSION_INIT_TRIES: usize = 5;
+/// Maximum number of concurrent HTTP write requests.
+/// Keeping several requests in flight prevents one long HTTP round trip
+/// from serializing all outgoing tunnel packets.
+const HTTP_W_MAX_IN_FLIGHT: usize = 16;
 
 fn retry_transport_error(mode: HttunClientMode, error: &reqwest::Error, tries: usize) -> bool {
     mode == HttunClientMode::L3
@@ -136,6 +144,55 @@ fn rw_request(
         req = req.basic_auth(http_auth.user(), http_auth.password());
     }
     req
+}
+
+async fn send_w_request(
+    client: Client,
+    url: String,
+    msg: Vec<u8>,
+    mode: HttunClientMode,
+    http_auth: Option<HttpAuth>,
+) -> ah::Result<()> {
+    let mut tries = 0;
+    loop {
+        if tries >= HTTP_RW_TRIES {
+            return Err(err!("httun HTTP-w: Maximum number of retries exceeded."));
+        }
+        tries += 1;
+
+        let req = rw_request(&client, &url, msg.clone(), true, http_auth.as_ref());
+        let resp = match req.send().await {
+            Ok(resp) => resp,
+            Err(e) if retry_transport_error(mode, &e, tries) => {
+                log::warn!("HTTP-w request failed; retrying: {}", e.without_url());
+                sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+            Err(e) => return Err(e.without_url()).context("httun HTTP-w send"),
+        };
+
+        match resp.status() {
+            StatusCode::OK => return Ok(()),
+            StatusCode::REQUEST_TIMEOUT => {
+                if mode == HttunClientMode::L7 {
+                    return Err(err!("httun HTTP-w response: {}", resp.status()));
+                }
+            }
+            StatusCode::BAD_GATEWAY
+            | StatusCode::GATEWAY_TIMEOUT
+            | StatusCode::SERVICE_UNAVAILABLE
+            | StatusCode::TOO_MANY_REQUESTS => {
+                if mode == HttunClientMode::L7 {
+                    return Err(err!("httun HTTP-w response: {}", resp.status()));
+                }
+                sleep(Duration::from_millis(100)).await;
+            }
+            status => {
+                sleep(Duration::from_millis(100)).await;
+                return Err(err!("httun HTTP-w response: {status}"));
+            }
+        }
+    }
 }
 
 macro_rules! define_direction {
@@ -319,62 +376,40 @@ impl DirectionW {
         )
         .context("httun HTTP-w build HTTP client")?;
 
-        let http_auth = self.chan_conf.http().basic_auth();
+        let http_auth = self.chan_conf.http().basic_auth().cloned();
+        let win_len = self.conf.parameters().receive().window_length().get();
+        let max_in_flight = HTTP_W_MAX_IN_FLIGHT.min(win_len);
+        let mut requests = JoinSet::new();
 
         ready.notify_one();
         loop {
-            let mut msg = comm.recv_to_httun().await;
-            msg.set_sequence(tx_sequence_b.next());
-
-            let msg = msg
-                .serialize(session_key)
-                .context("httun HTTP-w message serialize")?;
-
-            log::trace!("Send to HTTP-w");
-
-            let mut tries = 0;
-            'http: loop {
-                if tries >= HTTP_RW_TRIES {
-                    return Err(err!("httun HTTP-w: Maximum number of retries exceeded."));
-                }
-                tries += 1;
-
-                let url = format_url_serial(&self.url, self.serial.fetch_add(1, Relaxed));
-                let req = rw_request(&client, &url, msg.clone(), true, http_auth);
-                let resp = match req.send().await {
-                    Ok(resp) => resp,
-                    Err(e) if retry_transport_error(self.mode, &e, tries) => {
-                        log::warn!("HTTP-w request failed; retrying: {}", e.without_url());
-                        sleep(Duration::from_millis(100)).await;
-                        continue;
+            if requests.len() >= max_in_flight {
+                requests
+                    .join_next()
+                    .await
+                    .expect("HTTP-w request set is not empty")
+                    .context("httun HTTP-w task")??;
+            } else {
+                tokio::select! {
+                    result = requests.join_next(), if !requests.is_empty() => {
+                        result
+                            .expect("HTTP-w request set is not empty")
+                            .context("httun HTTP-w task")??;
                     }
-                    Err(e) => return Err(e.without_url()).context("httun HTTP-w send"),
-                };
+                    mut msg = comm.recv_to_httun() => {
+                        msg.set_sequence(tx_sequence_b.next());
+                        let msg = msg
+                            .serialize(session_key)
+                            .context("httun HTTP-w message serialize")?;
+                        let url = format_url_serial(&self.url, self.serial.fetch_add(1, Relaxed));
+                        let client = client.clone();
+                        let http_auth = http_auth.clone();
+                        let mode = self.mode;
 
-                match resp.status() {
-                    StatusCode::OK => {
-                        break 'http;
-                    }
-                    StatusCode::REQUEST_TIMEOUT => {
-                        if self.mode == HttunClientMode::L7 {
-                            return Err(err!("httun HTTP-w response: {}", resp.status()));
-                        }
-                        // Fast retry.
-                    }
-                    StatusCode::BAD_GATEWAY
-                    | StatusCode::GATEWAY_TIMEOUT
-                    | StatusCode::SERVICE_UNAVAILABLE
-                    | StatusCode::TOO_MANY_REQUESTS => {
-                        if self.mode == HttunClientMode::L7 {
-                            return Err(err!("httun HTTP-w response: {}", resp.status()));
-                        }
-                        // Slow retry.
-                        sleep(Duration::from_millis(100)).await;
-                    }
-                    status => {
-                        // Hard error.
-                        sleep(Duration::from_millis(100)).await;
-                        return Err(err!("httun HTTP-w response: {status}"));
+                        log::trace!("Send to HTTP-w");
+                        requests.spawn(async move {
+                            send_w_request(client, url, msg, mode, http_auth).await
+                        });
                     }
                 }
             }
