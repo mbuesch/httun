@@ -165,6 +165,7 @@ impl AsyncTaskComm {
             .send_modify(|state| state.requested = false);
     }
 
+    #[allow(dead_code)]
     pub fn notify_tunnel_event(&self, event: TunnelEvent) {
         let _ = self.tunnel_event.send(event);
     }
