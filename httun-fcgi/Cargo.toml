@@ -14,6 +14,8 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+
+[target.'cfg(target_family="unix")'.dependencies]
 httun-protocol = { workspace = true }
 httun-unix-protocol = { workspace = true }
 httun-util = { workspace = true }
