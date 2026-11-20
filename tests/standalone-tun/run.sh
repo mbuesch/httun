@@ -3,7 +3,7 @@
 set -e
 
 is_inner=0
-if [ "${1:-}" = "--inside-userns" ]; then
+if [ "${1:-}" = "--inside-netns" ]; then
     is_inner=1
     shift
 fi
@@ -14,7 +14,6 @@ basedir="$(dirname "$(realpath "$0")")"
 . "$basedir/../testlib.sh"
 
 if [ "$is_inner" -eq 0 ]; then
-    skip_if_root
     skip_if_minimal
 
     for command in unshare nsenter ip ping; do
@@ -23,12 +22,18 @@ if [ "$is_inner" -eq 0 ]; then
     done
     [ -c /dev/net/tun ] || die "/dev/net/tun is not available"
 
-    if ! unshare --user --map-root-user --net true; then
-        die "Rootless user and network namespaces are not available"
+    if [ "$is_root" -ne 0 ]; then
+        exec unshare --net \
+            "$basedir/run.sh" --inside-netns "--$opt_release"
+    fi
+
+    if ! unshare --user --map-root-user --net true 2>/dev/null; then
+        info "Skipping the test because rootless user and network namespaces are not available."
+        exit 0
     fi
 
     exec unshare --user --map-root-user --net \
-        "$basedir/run.sh" --inside-userns "--$opt_release"
+        "$basedir/run.sh" --inside-netns "--$opt_release"
 fi
 
 server_ns_pid=
