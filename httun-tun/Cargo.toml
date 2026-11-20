@@ -12,12 +12,10 @@ categories.workspace = true
 keywords.workspace = true
 publish = false
 
-[dependencies]
-anyhow = { workspace = true }
-log = { workspace = true }
-
 [target.'cfg(target_os="linux")'.dependencies]
+anyhow = { workspace = true }
 tokio-tun = { workspace = true }
+log = { workspace = true }
 
 [lints]
 workspace = true
