@@ -6,7 +6,10 @@ basedir="$(dirname "$(realpath "$0")")"
 for d in "$basedir"/*; do
     if [ -d "$d" ] && [ -x "$d/run.sh" ]; then
         echo "Testcase: $(basename "$d")"
-        "$d/run.sh" "$@" || exit 1
+        if ! "$d/run.sh" "$@" ; then
+            echo "Testcase FAILED: $(basename "$d")" >&2
+            exit 1
+        fi
         echo ""
     fi
 done

@@ -1,7 +1,10 @@
 #!/bin/sh
 # -*- coding: utf-8 -*-
 set -e
+
 basedir="$(dirname "$(realpath "$0")")"
+
+# shellcheck source=tests/testlib.sh
 . "$basedir/../testlib.sh"
 
 skip_if_root
