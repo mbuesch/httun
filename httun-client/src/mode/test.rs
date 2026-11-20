@@ -116,6 +116,7 @@ pub async fn run_mode_test(
 
                     let mut fmt = humansize::BINARY;
                     fmt.decimal_places = 1;
+                    fmt.decimal_zeroes = 1;
                     let rate_tx = humansize::format_size(rate_tx as u64, fmt);
                     let rate_rx = humansize::format_size(rate_rx as u64, fmt);
                     log::info!("Test Ok. Payload data rate tx: {rate_tx}/s, rx: {rate_rx}/s.");
