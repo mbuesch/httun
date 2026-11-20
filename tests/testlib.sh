@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 set -e
+
 basedir="$(dirname "$(realpath "$0")")"
 
-#export HTTUN_LOG=debug
+export HTTUN_LOG=debug
 
 info()
 {
