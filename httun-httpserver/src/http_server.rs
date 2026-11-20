@@ -80,7 +80,7 @@ impl RecvBuf {
 
         match find_hdr(buf, b"content-length") {
             Some(len) => {
-                let Some(len) = atoi::<u64>(len.trim_ascii()) else {
+                let Some(len) = atoi::<u32>(len.trim_ascii()) else {
                     return Err(err!("content-length header number decode error."));
                 };
                 self.cont_len = len.try_into().context("content-length overflow")?;
