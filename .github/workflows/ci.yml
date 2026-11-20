@@ -8,6 +8,7 @@ on:
 env: 
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  MIRIFLAGS: -Zmiri-disable-isolation
 
 jobs:
   full:
@@ -50,6 +51,8 @@ jobs:
         run: rustup component add clippy rustfmt
       - if: matrix.toolchain.name == 'nightly'
         run: rustup component add rustc-codegen-cranelift-preview
+      - if: matrix.os.name == 'linux' && matrix.toolchain.name == 'nightly'
+        run: rustup component add rust-src miri
 
       # Install system-test dependencies.
       - if: matrix.os.name == 'linux'
@@ -92,5 +95,9 @@ jobs:
         run: sh ./scripts/build-dev-cranelift.sh test
       - if: matrix.toolchain.name == 'nightly' && matrix.os.name == 'linux'
         run: sh ./tests/run.sh --debug
+
+      # Run tests with miri
+      - if: matrix.os.name == 'linux' && matrix.toolchain.name == 'nightly'
+        run: cargo miri test
 
 # vim: ts=2 sw=2 expandtab
