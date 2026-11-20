@@ -12,6 +12,7 @@ use httun_util::{
     strings::Direction,
 };
 use std::{
+    io::ErrorKind,
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
@@ -118,7 +119,7 @@ where
         let msg = loop {
             let msg = self.recv_message().await?;
             match msg.op() {
-                IpcOperation::Close => return Err(err!("IPC client: Closed by server")),
+                IpcOperation::Close => return Err(DisconnectedError.into()),
                 IpcOperation::FromSrv | IpcOperation::FromSrvError => (),
                 op => return Err(err!("IPC client: Got unexpected operation: {op:?}")),
             }
@@ -352,6 +353,16 @@ async fn write_message<W: AsyncWrite + Unpin>(writer: &mut W, msg: &IpcMessage) 
     let mut body = msg.serialize()?;
     let mut data = IpcMessageHeader::new(body.len())?.serialize()?;
     data.append(&mut body);
-    writer.write_all(&data).await?;
-    Ok(())
+    match writer.write_all(&data).await {
+        Ok(()) => Ok(()),
+        Err(e)
+            if matches!(
+                e.kind(),
+                ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::NotConnected
+            ) =>
+        {
+            Err(DisconnectedError.into())
+        }
+        Err(e) => Err(e.into()),
+    }
 }

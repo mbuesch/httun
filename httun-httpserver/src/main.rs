@@ -344,7 +344,11 @@ async fn handle_connection(conn: Arc<HttpConn>, unix_sock_path: Arc<Path>) {
                         }
                     }
                     Ok(Err(e)) => {
-                        log::error!("Unix recv (chan {chan_id}): {e:?}");
+                        if e.downcast_ref::<DisconnectedError>().is_some() {
+                            log::debug!("Unix receive connection closed (chan {chan_id})");
+                        } else {
+                            log::error!("Unix recv (chan {chan_id}): {e:?}");
+                        }
                         let _ = conn.send_reply_badrequest(&extra_headers).await;
                         break;
                     }
@@ -386,7 +390,11 @@ async fn handle_connection(conn: Arc<HttpConn>, unix_sock_path: Arc<Path>) {
                         }
                     }
                     Err(e) => {
-                        log::error!("Unix send (chan {chan_id}): {e:?}");
+                        if e.downcast_ref::<DisconnectedError>().is_some() {
+                            log::debug!("Unix send connection closed (chan {chan_id})");
+                        } else {
+                            log::error!("Unix send (chan {chan_id}): {e:?}");
+                        }
                         let _ = conn.send_reply_badrequest(&extra_headers).await;
                         break;
                     }
